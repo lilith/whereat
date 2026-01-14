@@ -76,14 +76,47 @@ pub struct Traced<E> {
     trace: Option<Box<Trace>>,
 }
 
+// ============================================================================
+// DebugAny Trait - combines Any + Debug in a single trait object
+// ============================================================================
+
+/// Trait combining `Any` and `Debug` for type-erased context data.
+///
+/// This allows storing arbitrary typed data while still being able to:
+/// - Debug-print it
+/// - Downcast it back to the original type
+pub trait DebugAny: core::any::Any + fmt::Debug + Send + Sync {
+    /// Get a reference to self as `&dyn Any` for downcasting.
+    fn as_any(&self) -> &dyn core::any::Any;
+
+    /// Get the type name for diagnostics.
+    fn type_name(&self) -> &'static str;
+}
+
+impl<T: core::any::Any + fmt::Debug + Send + Sync> DebugAny for T {
+    fn as_any(&self) -> &dyn core::any::Any {
+        self
+    }
+
+    fn type_name(&self) -> &'static str {
+        core::any::type_name::<T>()
+    }
+}
+
+// ============================================================================
+// Context Enum
+// ============================================================================
+
 /// Context data attached to a trace segment.
 ///
 /// Can be either a simple string message or arbitrary typed data.
+/// Typed data must implement `Debug` (enforced at compile time).
 pub enum Context {
     /// A text message describing what operation was being performed.
     Text(String),
-    /// Arbitrary typed context data (boxed to allow any type).
-    Any(Box<dyn core::any::Any + Send + Sync>),
+    /// Arbitrary typed context data (must implement Debug).
+    /// Box<dyn DebugAny> is 16 bytes (same as Box<dyn Any>).
+    Typed(Box<dyn DebugAny>),
 }
 
 impl Context {
@@ -91,15 +124,26 @@ impl Context {
     pub fn as_text(&self) -> Option<&str> {
         match self {
             Context::Text(s) => Some(s),
-            Context::Any(_) => None,
+            Context::Typed(_) => None,
         }
     }
 
-    /// Try to downcast to a specific type, if this is an Any variant.
+    /// Try to downcast to a specific type, if this is a Typed variant.
     pub fn downcast_ref<T: 'static>(&self) -> Option<&T> {
         match self {
             Context::Text(_) => None,
-            Context::Any(b) => b.downcast_ref(),
+            // Must use (**b) to call as_any on the trait object, not the Box
+            // (Box<dyn DebugAny> itself implements DebugAny through the blanket impl)
+            Context::Typed(b) => (**b).as_any().downcast_ref(),
+        }
+    }
+
+    /// Get the type name if this is a Typed variant.
+    pub fn type_name(&self) -> Option<&'static str> {
+        match self {
+            Context::Text(_) => None,
+            // Must use (**b) to call on the trait object, not the Box
+            Context::Typed(b) => Some((**b).type_name()),
         }
     }
 }
@@ -107,8 +151,18 @@ impl Context {
 impl fmt::Debug for Context {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            Context::Text(s) => write!(f, "Text({:?})", s),
-            Context::Any(_) => write!(f, "Any(...)"),
+            Context::Text(s) => write!(f, "{:?}", s),
+            Context::Typed(t) => write!(f, "{:?}", t),
+        }
+    }
+}
+
+impl fmt::Display for Context {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Context::Text(s) => write!(f, "{}", s),
+            // For Typed, use Debug format since we can't require Display
+            Context::Typed(t) => write!(f, "{:?}", t),
         }
     }
 }
@@ -422,15 +476,15 @@ impl<E> Traced<E> {
     /// ```
     #[track_caller]
     #[inline]
-    pub fn at_context<T: Send + Sync + 'static>(mut self, ctx: T) -> Self {
+    pub fn at_context<T: fmt::Debug + Send + Sync + 'static>(mut self, ctx: T) -> Self {
         let loc = Location::caller();
         match &mut self.trace {
             Some(trace) => {
-                trace.push_with_context(loc, Context::Any(Box::new(ctx)));
+                trace.push_with_context(loc, Context::Typed(Box::new(ctx)));
             }
             None => {
                 let mut trace = Trace::new();
-                trace.push_with_context(loc, Context::Any(Box::new(ctx)));
+                trace.push_with_context(loc, Context::Typed(Box::new(ctx)));
                 self.trace = Some(Box::new(trace));
             }
         }
@@ -516,7 +570,7 @@ impl<E: fmt::Debug> fmt::Debug for Traced<E> {
             for ctx in trace.contexts() {
                 match ctx {
                     Context::Text(msg) => writeln!(f, "  context: {}", msg)?,
-                    Context::Any(_) => writeln!(f, "  context: <typed data>")?,
+                    Context::Typed(t) => writeln!(f, "  context: {:?}", t)?,
                 }
             }
             // Show all locations (oldest first)
@@ -998,8 +1052,34 @@ mod tests {
         assert_eq!(text_ctx.as_text(), Some("hello"));
         assert!(text_ctx.downcast_ref::<u32>().is_none());
 
-        let any_ctx = Context::Any(Box::new(42u32));
-        assert_eq!(any_ctx.as_text(), None);
-        assert_eq!(any_ctx.downcast_ref::<u32>(), Some(&42));
+        // Typed context - requires Debug (u32 implements Debug)
+        let typed_ctx = Context::Typed(Box::new(42u32));
+        assert_eq!(typed_ctx.as_text(), None);
+        assert_eq!(typed_ctx.downcast_ref::<u32>(), Some(&42));
+
+        // Verify Debug output works
+        let debug_str = alloc::format!("{:?}", typed_ctx);
+        assert!(debug_str.contains("42"));
+    }
+
+    #[test]
+    fn test_typed_context_debug_output() {
+        #[derive(Debug)]
+        #[allow(dead_code)]
+        struct MyContext {
+            id: u64,
+            name: &'static str,
+        }
+
+        let err = TestError::NotFound.traced().at_context(MyContext {
+            id: 123,
+            name: "test",
+        });
+
+        let debug = alloc::format!("{:?}", err);
+        // Should contain the Debug output of MyContext
+        assert!(debug.contains("MyContext"));
+        assert!(debug.contains("123"));
+        assert!(debug.contains("test"));
     }
 }
