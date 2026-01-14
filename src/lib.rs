@@ -76,50 +76,231 @@ pub struct Traced<E> {
     trace: Option<Box<Trace>>,
 }
 
+/// Context data attached to a trace segment.
+///
+/// Can be either a simple string message or arbitrary typed data.
+pub enum Context {
+    /// A text message describing what operation was being performed.
+    Text(String),
+    /// Arbitrary typed context data (boxed to allow any type).
+    Any(Box<dyn core::any::Any + Send + Sync>),
+}
+
+impl Context {
+    /// Get as text, if this is a Text variant.
+    pub fn as_text(&self) -> Option<&str> {
+        match self {
+            Context::Text(s) => Some(s),
+            Context::Any(_) => None,
+        }
+    }
+
+    /// Try to downcast to a specific type, if this is an Any variant.
+    pub fn downcast_ref<T: 'static>(&self) -> Option<&T> {
+        match self {
+            Context::Text(_) => None,
+            Context::Any(b) => b.downcast_ref(),
+        }
+    }
+}
+
+impl fmt::Debug for Context {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Context::Text(s) => write!(f, "Text({:?})", s),
+            Context::Any(_) => write!(f, "Any(...)"),
+        }
+    }
+}
+
+/// A segment in the trace chain - contains a location, optional context, and link to previous.
+struct Segment {
+    location: &'static Location<'static>,
+    context: Option<Context>,
+    /// Locations accumulated between this segment and the next one.
+    locations_after: Vec<&'static Location<'static>>,
+    /// Link to previous segment (older context).
+    prev: Option<Box<Segment>>,
+}
+
 /// Internal trace storage - boxed to keep Traced<E> small.
+///
+/// Structure: linked list of Segments (newest first), plus recent locations.
 struct Trace {
-    locations: Vec<&'static Location<'static>>,
-    message: Option<String>,
+    /// Most recent segment (head of linked list).
+    head: Option<Box<Segment>>,
+    /// Locations accumulated since the last context was added.
+    recent: Vec<&'static Location<'static>>,
 }
 
 impl Trace {
     fn new() -> Self {
         Self {
-            locations: Vec::new(),
-            message: None,
+            head: None,
+            recent: Vec::new(),
         }
     }
 
     fn with_capacity(cap: usize) -> Self {
         Self {
-            locations: Vec::with_capacity(cap),
-            message: None,
+            head: None,
+            recent: Vec::with_capacity(cap),
         }
     }
 
     #[inline]
     fn push(&mut self, loc: &'static Location<'static>) {
-        self.locations.push(loc);
+        self.recent.push(loc);
     }
 
-    #[inline]
+    /// Push a location with context, creating a new segment.
+    fn push_with_context(&mut self, loc: &'static Location<'static>, context: Context) {
+        // Take the recent locations and create a new segment
+        let locations_after = core::mem::take(&mut self.recent);
+        let prev = self.head.take();
+        self.head = Some(Box::new(Segment {
+            location: loc,
+            context: Some(context),
+            locations_after,
+            prev,
+        }));
+    }
+
     fn len(&self) -> usize {
-        self.locations.len()
+        let mut count = self.recent.len();
+        let mut seg = self.head.as_ref();
+        while let Some(s) = seg {
+            count += 1 + s.locations_after.len();
+            seg = s.prev.as_ref();
+        }
+        count
     }
 
-    #[inline]
+    /// Iterate over all locations, oldest first.
     fn iter(&self) -> impl Iterator<Item = &'static Location<'static>> + '_ {
-        self.locations.iter().copied()
+        TraceIter::new(self)
     }
 
-    #[inline]
-    fn set_message(&mut self, msg: String) {
-        self.message = Some(msg);
-    }
-
-    #[inline]
+    /// Get the most recent context message (text only).
     fn message(&self) -> Option<&str> {
-        self.message.as_deref()
+        let mut seg = self.head.as_ref();
+        while let Some(s) = seg {
+            if let Some(Context::Text(ref msg)) = s.context {
+                return Some(msg);
+            }
+            seg = s.prev.as_ref();
+        }
+        None
+    }
+
+    /// Iterate over all context entries, newest first.
+    fn contexts(&self) -> impl Iterator<Item = &Context> {
+        ContextIter {
+            current: self.head.as_deref(),
+        }
+    }
+}
+
+/// Iterator over locations in a trace (oldest first).
+struct TraceIter<'a> {
+    /// Stack of segments to visit (we'll pop and process).
+    segments: Vec<&'a Segment>,
+    /// Current phase within a segment.
+    phase: TraceIterPhase<'a>,
+    /// Recent locations (processed last).
+    recent: &'a [&'static Location<'static>],
+    recent_idx: usize,
+}
+
+enum TraceIterPhase<'a> {
+    /// About to yield the segment's main location.
+    SegmentLocation(&'a Segment),
+    /// Yielding locations_after.
+    LocationsAfter(&'a [&'static Location<'static>], usize),
+    /// Done with segments, now yielding recent.
+    Recent,
+}
+
+impl<'a> TraceIter<'a> {
+    fn new(trace: &'a Trace) -> Self {
+        // Build stack of segments (oldest first by pushing in reverse order).
+        let mut segments = Vec::new();
+        let mut seg = trace.head.as_ref();
+        while let Some(s) = seg {
+            segments.push(s.as_ref());
+            seg = s.prev.as_ref();
+        }
+        // segments is now newest-first, we want oldest-first
+        segments.reverse();
+
+        let phase = if let Some(first) = segments.pop() {
+            TraceIterPhase::SegmentLocation(first)
+        } else {
+            TraceIterPhase::Recent
+        };
+
+        Self {
+            segments,
+            phase,
+            recent: &trace.recent,
+            recent_idx: 0,
+        }
+    }
+}
+
+impl<'a> Iterator for TraceIter<'a> {
+    type Item = &'static Location<'static>;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        loop {
+            match &mut self.phase {
+                TraceIterPhase::SegmentLocation(seg) => {
+                    let loc = seg.location;
+                    self.phase = TraceIterPhase::LocationsAfter(&seg.locations_after, 0);
+                    return Some(loc);
+                }
+                TraceIterPhase::LocationsAfter(locs, idx) => {
+                    if *idx < locs.len() {
+                        let loc = locs[*idx];
+                        *idx += 1;
+                        return Some(loc);
+                    }
+                    // Done with this segment, move to next
+                    if let Some(next_seg) = self.segments.pop() {
+                        self.phase = TraceIterPhase::SegmentLocation(next_seg);
+                    } else {
+                        self.phase = TraceIterPhase::Recent;
+                    }
+                }
+                TraceIterPhase::Recent => {
+                    if self.recent_idx < self.recent.len() {
+                        let loc = self.recent[self.recent_idx];
+                        self.recent_idx += 1;
+                        return Some(loc);
+                    }
+                    return None;
+                }
+            }
+        }
+    }
+}
+
+/// Iterator over context entries (newest first).
+struct ContextIter<'a> {
+    current: Option<&'a Segment>,
+}
+
+impl<'a> Iterator for ContextIter<'a> {
+    type Item = &'a Context;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        while let Some(seg) = self.current.take() {
+            self.current = seg.prev.as_deref();
+            if let Some(ref ctx) = seg.context {
+                return Some(ctx);
+            }
+        }
+        None
     }
 }
 
@@ -174,8 +355,9 @@ impl<E> Traced<E> {
 
     /// Add the caller's location and a context message to the trace.
     ///
-    /// The message is stored alongside the trace and replaces any previous message.
-    /// Use this to add human-readable context about what operation was being performed.
+    /// Each context message creates a new segment in the trace, preserving all
+    /// previous context. Use this to add human-readable context about what
+    /// operation was being performed.
     ///
     /// ## Example
     ///
@@ -200,13 +382,55 @@ impl<E> Traced<E> {
         let loc = Location::caller();
         match &mut self.trace {
             Some(trace) => {
-                trace.push(loc);
-                trace.set_message(msg.into());
+                trace.push_with_context(loc, Context::Text(msg.into()));
             }
             None => {
-                let mut trace = Trace::with_capacity(4);
-                trace.push(loc);
-                trace.set_message(msg.into());
+                let mut trace = Trace::new();
+                trace.push_with_context(loc, Context::Text(msg.into()));
+                self.trace = Some(Box::new(trace));
+            }
+        }
+        self
+    }
+
+    /// Add the caller's location and arbitrary typed context to the trace.
+    ///
+    /// This allows attaching any `Send + Sync + 'static` data to the error trace.
+    /// Use `contexts()` to retrieve context entries and `downcast_ref` to access them.
+    ///
+    /// ## Example
+    ///
+    /// ```rust
+    /// use errat::{Traced, Traceable, Context};
+    ///
+    /// #[derive(Debug)]
+    /// struct RequestInfo { user_id: u64, path: String }
+    ///
+    /// #[derive(Debug)]
+    /// enum MyError { Forbidden }
+    ///
+    /// let err = MyError::Forbidden
+    ///     .traced()
+    ///     .at_context(RequestInfo { user_id: 42, path: "/admin".into() });
+    ///
+    /// // Later, retrieve the context
+    /// for ctx in err.contexts() {
+    ///     if let Some(req) = ctx.downcast_ref::<RequestInfo>() {
+    ///         assert_eq!(req.user_id, 42);
+    ///     }
+    /// }
+    /// ```
+    #[track_caller]
+    #[inline]
+    pub fn at_context<T: Send + Sync + 'static>(mut self, ctx: T) -> Self {
+        let loc = Location::caller();
+        match &mut self.trace {
+            Some(trace) => {
+                trace.push_with_context(loc, Context::Any(Box::new(ctx)));
+            }
+            None => {
+                let mut trace = Trace::new();
+                trace.push_with_context(loc, Context::Any(Box::new(ctx)));
                 self.trace = Some(Box::new(trace));
             }
         }
@@ -252,37 +476,35 @@ impl<E> Traced<E> {
     /// Get the first (oldest) location in the trace, if any.
     #[inline]
     pub fn first_location(&self) -> Option<&'static Location<'static>> {
-        self.trace
-            .as_ref()
-            .and_then(|t| t.locations.first().copied())
+        self.trace_iter().next()
     }
 
     /// Get the last (most recent) location in the trace, if any.
     #[inline]
     pub fn last_location(&self) -> Option<&'static Location<'static>> {
-        self.trace
-            .as_ref()
-            .and_then(|t| t.locations.last().copied())
+        self.trace_iter().last()
     }
 
-    /// Get the context message, if any was set via `at_msg()`.
+    /// Get the most recent context message (text only), if any was set via `at_msg()`.
     #[inline]
     pub fn message(&self) -> Option<&str> {
         self.trace.as_ref().and_then(|t| t.message())
     }
 
-    /// Set or replace the context message.
+    /// Iterate over all context entries, newest first.
+    ///
+    /// Each call to `at_msg()` or `at_context()` creates a context entry.
+    pub fn contexts(&self) -> impl Iterator<Item = &Context> {
+        self.trace.iter().flat_map(|t| t.contexts())
+    }
+
+    /// Add a context message without a location.
+    ///
+    /// Prefer `at_msg()` which also captures the caller's location.
     #[inline]
-    pub fn with_message(mut self, msg: impl Into<String>) -> Self {
-        match &mut self.trace {
-            Some(trace) => trace.set_message(msg.into()),
-            None => {
-                let mut trace = Trace::new();
-                trace.set_message(msg.into());
-                self.trace = Some(Box::new(trace));
-            }
-        }
-        self
+    #[track_caller]
+    pub fn with_message(self, msg: impl Into<String>) -> Self {
+        self.at_msg(msg)
     }
 }
 
@@ -290,9 +512,14 @@ impl<E: fmt::Debug> fmt::Debug for Traced<E> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         writeln!(f, "{:?}", self.error)?;
         if let Some(trace) = &self.trace {
-            if let Some(msg) = trace.message() {
-                writeln!(f, "  context: {}", msg)?;
+            // Show all contexts (newest first)
+            for ctx in trace.contexts() {
+                match ctx {
+                    Context::Text(msg) => writeln!(f, "  context: {}", msg)?,
+                    Context::Any(_) => writeln!(f, "  context: <typed data>")?,
+                }
             }
+            // Show all locations (oldest first)
             for loc in trace.iter() {
                 writeln!(f, "  at {}:{}:{}", loc.file(), loc.line(), loc.column())?;
             }
@@ -707,5 +934,72 @@ mod tests {
         assert!(debug.contains("NotFound"));
         assert!(debug.contains("context: context info"));
         assert!(debug.contains("lib.rs"));
+    }
+
+    #[test]
+    fn test_at_context_typed() {
+        #[derive(Debug)]
+        struct RequestInfo {
+            user_id: u64,
+        }
+
+        let err = TestError::NotFound
+            .traced()
+            .at_context(RequestInfo { user_id: 42 });
+
+        assert_eq!(err.trace_len(), 2);
+
+        // Retrieve typed context
+        let mut found = false;
+        for ctx in err.contexts() {
+            if let Some(req) = ctx.downcast_ref::<RequestInfo>() {
+                assert_eq!(req.user_id, 42);
+                found = true;
+            }
+        }
+        assert!(found, "should find RequestInfo context");
+    }
+
+    #[test]
+    fn test_multiple_contexts() {
+        fn level1() -> Result<(), Traced<TestError>> {
+            Err(TestError::NotFound.traced())
+        }
+
+        fn level2() -> Result<(), Traced<TestError>> {
+            level1().at_msg("in level2")?;
+            Ok(())
+        }
+
+        fn level3() -> Result<(), Traced<TestError>> {
+            level2().at_msg("in level3")?;
+            Ok(())
+        }
+
+        let err = level3().unwrap_err();
+
+        // Should have 3 locations
+        assert_eq!(err.trace_len(), 3);
+
+        // Should have 2 context messages (level2 and level3)
+        let contexts: Vec<_> = err.contexts().collect();
+        assert_eq!(contexts.len(), 2);
+
+        // Most recent first
+        assert_eq!(contexts[0].as_text(), Some("in level3"));
+        assert_eq!(contexts[1].as_text(), Some("in level2"));
+    }
+
+    #[test]
+    fn test_context_enum() {
+        use super::Context;
+
+        let text_ctx = Context::Text(String::from("hello"));
+        assert_eq!(text_ctx.as_text(), Some("hello"));
+        assert!(text_ctx.downcast_ref::<u32>().is_none());
+
+        let any_ctx = Context::Any(Box::new(42u32));
+        assert_eq!(any_ctx.as_text(), None);
+        assert_eq!(any_ctx.downcast_ref::<u32>(), Some(&42));
     }
 }
