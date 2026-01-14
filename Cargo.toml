@@ -1,0 +1,21 @@
+[package]
+name = "errat"
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.85"
+license = "MIT OR Apache-2.0"
+description = "Lightweight error location tracking with small sizeof and no_std support"
+keywords = ["error", "trace", "stacktrace", "track_caller", "no_std"]
+categories = ["rust-patterns", "no-std"]
+
+[features]
+default = []
+std = []
+
+[dependencies]
+
+[dev-dependencies]
+static_assertions = "1.1"
+
+[lints.rust]
+unsafe_code = "deny"
