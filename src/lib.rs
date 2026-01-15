@@ -401,283 +401,92 @@ impl fmt::Display for Context {
     }
 }
 
-/// A segment in the trace chain - contains a location, optional context, and link to previous.
-struct Segment {
-    location: &'static Location<'static>,
-    context: Option<Context>,
-    /// Locations accumulated between this segment and the next one.
-    locations_after: LocationVec,
-    /// Link to previous segment (older context).
-    prev: Option<Box<Segment>>,
-}
-
 /// Internal trace storage - boxed to keep Traced<E> small.
 ///
-/// Structure: linked list of Segments (newest first), plus recent locations.
+/// Flat structure: contiguous location array + sparse context associations.
+/// Contexts are associated with locations by index (u16, saturating).
 struct Trace {
-    /// Most recent segment (head of linked list).
-    head: Option<Box<Segment>>,
-    /// Locations accumulated since the last context was added.
-    recent: LocationVec,
+    /// All locations in order (oldest first).
+    locations: LocationVec,
+    /// Context associations: (location_index, context).
+    /// Index saturates at u16::MAX; out-of-bounds associations are silently ignored.
+    contexts: Vec<(u16, Context)>,
 }
 
 impl Trace {
     fn new() -> Self {
         Self {
-            head: None,
-            recent: LocationVec::new(),
+            locations: LocationVec::new(),
+            contexts: Vec::new(),
         }
     }
 
     /// Try to create a Trace with pre-allocated capacity.
-    /// Returns None if allocation fails (Vec) or always succeeds (ArrayVec).
+    /// Returns None if allocation fails (Vec) or always succeeds (TinyVec).
     fn try_with_capacity(cap: usize) -> Option<Self> {
         Some(Self {
-            head: None,
-            recent: try_location_vec_with_capacity(cap)?,
+            locations: try_location_vec_with_capacity(cap)?,
+            contexts: Vec::new(),
         })
     }
 
-    /// Try to push a location. Returns false if allocation fails (Vec) or full (ArrayVec).
+    /// Try to push a location. Returns false if allocation fails.
     #[inline]
     fn try_push(&mut self, loc: &'static Location<'static>) -> bool {
-        try_push_location(&mut self.recent, loc)
+        try_push_location(&mut self.locations, loc)
     }
 
-    /// Try to push a location with context, creating a new segment.
-    /// On allocation failure, the context is lost but existing trace data is preserved.
+    /// Try to push a location with context.
+    /// On allocation failure, the location/context may be lost but existing data is preserved.
     fn try_push_with_context(&mut self, loc: &'static Location<'static>, context: Context) {
-        // Take the recent locations and create a new segment
-        let locations_after = core::mem::take(&mut self.recent);
-        let prev = self.head.take();
-
-        match try_box(Segment {
-            location: loc,
-            context: Some(context),
-            locations_after,
-            prev,
-        }) {
-            Some(segment) => {
-                self.head = Some(segment);
-            }
-            None => {
-                // Allocation failed - context is lost, but that's acceptable
-                // We could try to preserve the prev chain but that adds complexity
-                // In OOM scenarios, losing trace data is acceptable
-            }
+        if !try_push_location(&mut self.locations, loc) {
+            return; // Location push failed, skip context too
+        }
+        // Saturate index at u16::MAX
+        let idx = (self.locations.len() - 1).min(u16::MAX as usize) as u16;
+        // Try to push context; silently fail on OOM
+        if self.contexts.try_reserve(1).is_ok() {
+            self.contexts.push((idx, context));
         }
     }
 
+    #[inline]
     fn len(&self) -> usize {
-        let mut count = self.recent.len();
-        let mut seg = self.head.as_ref();
-        while let Some(s) = seg {
-            count += 1 + s.locations_after.len();
-            seg = s.prev.as_ref();
-        }
-        count
+        self.locations.len()
     }
 
     /// Iterate over all locations, oldest first.
     fn iter(&self) -> impl Iterator<Item = &'static Location<'static>> + '_ {
-        TraceIter::new(self)
+        self.locations.iter().map(|elem| unwrap_location(elem))
     }
 
     /// Get the most recent context message (text only).
     fn message(&self) -> Option<&str> {
-        let mut seg = self.head.as_ref();
-        while let Some(s) = seg {
-            if let Some(Context::Text(ref msg)) = s.context {
+        // Contexts are in order of addition, so iterate backwards for most recent
+        for (_, ctx) in self.contexts.iter().rev() {
+            if let Context::Text(msg) = ctx {
                 return Some(msg);
             }
-            seg = s.prev.as_ref();
         }
         None
     }
 
     /// Iterate over all context entries, newest first.
     fn contexts(&self) -> impl Iterator<Item = &Context> {
-        ContextIter {
-            current: self.head.as_deref(),
-        }
+        self.contexts.iter().rev().map(|(_, ctx)| ctx)
     }
 
-    /// Iterate over segments with their associated locations, oldest first.
-    /// Each item is (segment_location, context, locations_after).
-    /// Finally yields (None, None, recent) for locations without context.
-    fn segments_oldest_first(
-        &self,
-    ) -> impl Iterator<
-        Item = (
-            Option<&'static Location<'static>>,
-            Option<&Context>,
-            &[LocationElem],
-        ),
-    > {
-        SegmentIter::new(self)
-    }
-}
-
-/// Iterator over segments oldest first, yielding (location, context, trailing_locations).
-struct SegmentIter<'a> {
-    /// Segments collected in oldest-first order.
-    segments: Vec<&'a Segment>,
-    /// Index into segments.
-    idx: usize,
-    /// Recent locations (yielded last).
-    recent: &'a [LocationElem],
-    /// Have we yielded recent yet?
-    done_segments: bool,
-}
-
-impl<'a> SegmentIter<'a> {
-    fn new(trace: &'a Trace) -> Self {
-        // Collect segments oldest first
-        let mut segments = Vec::new();
-        let mut seg = trace.head.as_ref();
-        while let Some(s) = seg {
-            segments.push(s.as_ref());
-            seg = s.prev.as_ref();
+    /// Get context at a specific location index, if any.
+    fn context_at(&self, idx: usize) -> Option<&Context> {
+        if idx > u16::MAX as usize {
+            return None;
         }
-        segments.reverse(); // Now oldest first
-
-        Self {
-            segments,
-            idx: 0,
-            recent: &trace.recent,
-            done_segments: false,
-        }
-    }
-}
-
-impl<'a> Iterator for SegmentIter<'a> {
-    type Item = (
-        Option<&'static Location<'static>>,
-        Option<&'a Context>,
-        &'a [LocationElem],
-    );
-
-    fn next(&mut self) -> Option<Self::Item> {
-        if !self.done_segments {
-            if self.idx < self.segments.len() {
-                let seg = self.segments[self.idx];
-                self.idx += 1;
-                return Some((
-                    Some(seg.location),
-                    seg.context.as_ref(),
-                    &seg.locations_after,
-                ));
-            }
-            self.done_segments = true;
-            // Yield recent locations if any
-            if !self.recent.is_empty() {
-                return Some((None, None, self.recent));
-            }
-        }
-        None
-    }
-}
-
-/// Iterator over locations in a trace (oldest first).
-struct TraceIter<'a> {
-    /// Stack of segments to visit (we'll pop and process).
-    segments: Vec<&'a Segment>,
-    /// Current phase within a segment.
-    phase: TraceIterPhase<'a>,
-    /// Recent locations (processed last).
-    recent: &'a [LocationElem],
-    recent_idx: usize,
-}
-
-enum TraceIterPhase<'a> {
-    /// About to yield the segment's main location.
-    SegmentLocation(&'a Segment),
-    /// Yielding locations_after.
-    LocationsAfter(&'a [LocationElem], usize),
-    /// Done with segments, now yielding recent.
-    Recent,
-}
-
-impl<'a> TraceIter<'a> {
-    fn new(trace: &'a Trace) -> Self {
-        // Build stack of segments (oldest first by pushing in reverse order).
-        let mut segments = Vec::new();
-        let mut seg = trace.head.as_ref();
-        while let Some(s) = seg {
-            segments.push(s.as_ref());
-            seg = s.prev.as_ref();
-        }
-        // segments is now newest-first, we want oldest-first
-        segments.reverse();
-
-        let phase = if let Some(first) = segments.pop() {
-            TraceIterPhase::SegmentLocation(first)
-        } else {
-            TraceIterPhase::Recent
-        };
-
-        Self {
-            segments,
-            phase,
-            recent: &trace.recent,
-            recent_idx: 0,
-        }
-    }
-}
-
-impl<'a> Iterator for TraceIter<'a> {
-    type Item = &'static Location<'static>;
-
-    fn next(&mut self) -> Option<Self::Item> {
-        loop {
-            match &mut self.phase {
-                TraceIterPhase::SegmentLocation(seg) => {
-                    let loc = seg.location;
-                    self.phase = TraceIterPhase::LocationsAfter(&seg.locations_after, 0);
-                    return Some(loc);
-                }
-                TraceIterPhase::LocationsAfter(locs, idx) => {
-                    if *idx < locs.len() {
-                        let loc = unwrap_location(&locs[*idx]);
-                        *idx += 1;
-                        return Some(loc);
-                    }
-                    // Done with this segment, move to next
-                    if let Some(next_seg) = self.segments.pop() {
-                        self.phase = TraceIterPhase::SegmentLocation(next_seg);
-                    } else {
-                        self.phase = TraceIterPhase::Recent;
-                    }
-                }
-                TraceIterPhase::Recent => {
-                    if self.recent_idx < self.recent.len() {
-                        let loc = unwrap_location(&self.recent[self.recent_idx]);
-                        self.recent_idx += 1;
-                        return Some(loc);
-                    }
-                    return None;
-                }
-            }
-        }
-    }
-}
-
-/// Iterator over context entries (newest first).
-struct ContextIter<'a> {
-    current: Option<&'a Segment>,
-}
-
-impl<'a> Iterator for ContextIter<'a> {
-    type Item = &'a Context;
-
-    fn next(&mut self) -> Option<Self::Item> {
-        while let Some(seg) = self.current.take() {
-            self.current = seg.prev.as_deref();
-            if let Some(ref ctx) = seg.context {
-                return Some(ctx);
-            }
-        }
-        None
+        let idx = idx as u16;
+        // Linear search is fine - contexts vec is typically tiny (0-3 entries)
+        self.contexts
+            .iter()
+            .find(|(i, _)| *i == idx)
+            .map(|(_, ctx)| ctx)
     }
 }
 
@@ -971,23 +780,14 @@ impl<E: fmt::Debug> fmt::Debug for Traced<E> {
 
         writeln!(f)?;
 
-        // Show segments oldest first, with context associated to its location
-        for (loc, ctx, locations_before) in trace.segments_oldest_first() {
-            // Show locations that came before this context (from .at() calls)
-            for loc_elem in locations_before {
-                let location = unwrap_location(loc_elem);
-                writeln!(f, "    at {}:{}", location.file(), location.line())?;
-            }
-
-            // Show the segment's main location with its context
-            if let Some(location) = loc {
-                writeln!(f, "    at {}:{}", location.file(), location.line())?;
-                if let Some(context) = ctx {
-                    match context {
-                        Context::Text(msg) => writeln!(f, "       ╰─ {}", msg)?,
-                        Context::Debug(t) => writeln!(f, "       ╰─ {:?}", &**t)?,
-                        Context::Display(t) => writeln!(f, "       ╰─ {}", &**t)?,
-                    }
+        // Simple iteration: walk locations, check for context at each index
+        for (i, loc) in trace.iter().enumerate() {
+            writeln!(f, "    at {}:{}", loc.file(), loc.line())?;
+            if let Some(context) = trace.context_at(i) {
+                match context {
+                    Context::Text(msg) => writeln!(f, "       ╰─ {}", msg)?,
+                    Context::Debug(t) => writeln!(f, "       ╰─ {:?}", &**t)?,
+                    Context::Display(t) => writeln!(f, "       ╰─ {}", &**t)?,
                 }
             }
         }
@@ -1076,23 +876,14 @@ impl<E: fmt::Debug + ErrorMeta> fmt::Display for DisplayWithMeta<'_, E> {
             _ => None,
         };
 
-        // Show segments oldest first, with context associated to its location
-        for (loc, ctx, locations_before) in trace.segments_oldest_first() {
-            // Show locations that came before this context (from .at() calls)
-            for loc_elem in locations_before {
-                let location = unwrap_location(loc_elem);
-                write_location_meta(f, location, github_base.as_deref())?;
-            }
-
-            // Show the segment's main location with its context
-            if let Some(location) = loc {
-                write_location_meta(f, location, github_base.as_deref())?;
-                if let Some(context) = ctx {
-                    match context {
-                        Context::Text(msg) => writeln!(f, "       ╰─ {}", msg)?,
-                        Context::Debug(t) => writeln!(f, "       ╰─ {:?}", &**t)?,
-                        Context::Display(t) => writeln!(f, "       ╰─ {}", &**t)?,
-                    }
+        // Simple iteration: walk locations, check for context at each index
+        for (i, loc) in trace.iter().enumerate() {
+            write_location_meta(f, loc, github_base.as_deref())?;
+            if let Some(context) = trace.context_at(i) {
+                match context {
+                    Context::Text(msg) => writeln!(f, "       ╰─ {}", msg)?,
+                    Context::Debug(t) => writeln!(f, "       ╰─ {:?}", &**t)?,
+                    Context::Display(t) => writeln!(f, "       ╰─ {}", &**t)?,
                 }
             }
         }
@@ -1330,6 +1121,63 @@ mod tests {
 
         // For a 1-byte enum, should be 16 bytes (1 + 7 padding + 8 pointer)
         assert_eq!(traced_size, 16);
+    }
+
+    #[test]
+    fn test_sizeof_trace() {
+        use core::mem::size_of;
+
+        let trace_size = size_of::<Trace>();
+        let location_vec_size = size_of::<LocationVec>();
+        // Print sizes for documentation (visible with cargo test -- --nocapture)
+        // Trace = LocationVec + Vec<(u16, Context)>
+
+        // Without tinyvec: LocationVec = Vec = 24, contexts = 24, Trace = 48
+        #[cfg(not(any(feature = "tinyvec", feature = "tinyvec-256")))]
+        {
+            let contexts_vec_size = size_of::<Vec<(u16, Context)>>();
+            assert_eq!(location_vec_size, 24, "Vec<&Location> should be 24 bytes");
+            assert_eq!(
+                contexts_vec_size, 24,
+                "Vec<(u16, Context)> should be 24 bytes"
+            );
+            assert_eq!(trace_size, 48, "Trace should be 48 bytes without tinyvec");
+        }
+
+        // With tinyvec (3 slots): LocationVec = TinyVec<[Option<&Location>; 3]>
+        // 3 * 8 = 24 bytes inline + TinyVec overhead
+        #[cfg(all(feature = "tinyvec", not(feature = "tinyvec-256")))]
+        {
+            // TinyVec<[T; 3]> where T = 8 bytes, should be around 32 bytes
+            assert!(
+                location_vec_size <= 40,
+                "TinyVec<[Option<&Location>; 3]> should be <= 40 bytes, got {}",
+                location_vec_size
+            );
+            assert!(
+                trace_size <= 64,
+                "Trace with tinyvec should be <= 64 bytes, got {}",
+                trace_size
+            );
+        }
+
+        // With tinyvec-256 (30 slots): LocationVec = TinyVec<[Option<&Location>; 30]>
+        // 30 * 8 = 240 bytes inline + TinyVec overhead
+        #[cfg(feature = "tinyvec-256")]
+        {
+            // Should keep Trace under 256 bytes as documented
+            assert!(
+                trace_size < 300,
+                "Trace with tinyvec-256 should be < 300 bytes, got {}",
+                trace_size
+            );
+            // The LocationVec itself should be around 248 bytes
+            assert!(
+                location_vec_size >= 240,
+                "TinyVec<[Option<&Location>; 30]> should be >= 240 bytes, got {}",
+                location_vec_size
+            );
+        }
     }
 
     #[test]
