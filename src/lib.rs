@@ -8,14 +8,14 @@
 //! - **Small sizeof**: `At<E>` is only `sizeof(E) + 8` bytes (one pointer for boxed trace)
 //! - **Zero allocation on Ok path**: No heap allocation until an error occurs
 //! - **Simple API**: `.start_at()` on errors, `.at()` on Results
-//! - **Zero-copy static strings**: `.at_message("literal")` uses `Cow<'static, str>`
-//! - **Lazy evaluation**: `.at_display(|| ...)` defers computation to error path
+//! - **Zero-copy static strings**: `.at_str("literal")` is zero-cost
+//! - **Lazy evaluation**: `.at_string(|| ...)` and `.at_data(|| ...)` defer computation to error path
 //! - **no_std compatible**: Works with just `core` + `alloc`, `std` is optional
 //!
 //! ## Quick Start
 //!
 //! ```rust
-//! use errat::{At, Traceable, ResultExt};
+//! use errat::{at, At, ResultAtExt};
 //!
 //! #[derive(Debug)]
 //! enum MyError {
@@ -24,7 +24,7 @@
 //! }
 //!
 //! fn inner() -> Result<(), At<MyError>> {
-//!     Err(MyError::NotFound.start_at())  // .start_at() wraps and captures location
+//!     Err(at(MyError::NotFound))  // at() wraps and captures location
 //! }
 //!
 //! fn outer() -> Result<(), At<MyError>> {
@@ -38,38 +38,38 @@
 //!
 //! ## Adding Context
 //!
-//! Use `.at_message()` for string context, `.at_display()` for Display, `.at_debug()` for Debug:
+//! Use `.at_str()` for static strings, `.at_string()` for lazy strings, `.at_data()` for Display, `.at_debug()` for Debug:
 //!
 //! ```rust
-//! use errat::{At, Traceable, ResultExt};
+//! use errat::{at, At, ResultAtExt};
 //!
 //! #[derive(Debug)]
 //! enum MyError { IoError }
 //!
 //! fn read_config() -> Result<(), At<MyError>> {
-//!     Err(MyError::IoError.start_at())
+//!     Err(at(MyError::IoError))
 //! }
 //!
 //! fn init() -> Result<(), At<MyError>> {
-//!     read_config().at_message("loading configuration")?;  // static str, no alloc
+//!     read_config().at_str("loading configuration")?;  // static str, zero-cost
 //!     Ok(())
 //! }
 //! ```
 //!
-//! Context methods take closures for lazy evaluation (only runs on error):
+//! String context with closure for lazy evaluation (only runs on error):
 //!
 //! ```rust
-//! use errat::{At, Traceable, ResultExt};
+//! use errat::{at, At, ResultAtExt};
 //!
 //! #[derive(Debug)]
 //! enum MyError { NotFound }
 //!
 //! fn load(path: &str) -> Result<(), At<MyError>> {
-//!     Err(MyError::NotFound.start_at())
+//!     Err(at(MyError::NotFound))
 //! }
 //!
 //! fn init(path: &str) -> Result<(), At<MyError>> {
-//!     load(path).at_display(|| format!("loading {}", path))?;  // only allocates on error
+//!     load(path).at_string(|| format!("loading {}", path))?;  // only allocates on error
 //!     Ok(())
 //! }
 //! ```
@@ -79,7 +79,7 @@
 //! Use `.trace()` on Results with non-traced errors:
 //!
 //! ```rust
-//! use errat::{At, ResultTraceExt, ResultExt};
+//! use errat::{At, ResultTraceExt, ResultAtExt};
 //!
 //! fn external_api() -> Result<(), &'static str> {
 //!     Err("external error")
@@ -275,13 +275,13 @@ fn unwrap_location(loc: &LocationElem) -> &'static Location<'static> {
 /// ## Example
 ///
 /// ```rust
-/// use errat::{At, Traceable};
+/// use errat::{at, At};
 ///
 /// #[derive(Debug)]
 /// enum MyError { Oops }
 ///
-/// // Create a traced error
-/// let err: At<MyError> = MyError::Oops.start_at();
+/// // Create a traced error using at() function
+/// let err: At<MyError> = at(MyError::Oops);
 /// assert_eq!(err.trace_len(), 1);
 /// ```
 pub struct At<E> {
@@ -648,7 +648,7 @@ impl Trace {
 impl<E> At<E> {
     /// Create a new traced error without any location information.
     ///
-    /// Use `.at()` to add the first location, or use the `Traceable::at()` method
+    /// Use `.at()` to add the first location, or use the `ErrorAtExt::at()` method
     /// on the error directly.
     #[inline]
     pub const fn new(error: E) -> Self {
@@ -697,32 +697,77 @@ impl<E> At<E> {
         self
     }
 
-    /// Add the caller's location and a context message to the trace.
+    /// Add the caller's location and a static string context to the trace.
     ///
-    /// Accepts `&'static str` (zero-copy) or `String` (owned).
+    /// This is zero-cost for static strings - just stores a pointer.
+    /// For dynamically-computed strings, use `at_string()` instead.
     ///
     /// ## Example
     ///
     /// ```rust
-    /// use errat::{At, Traceable, ResultExt};
+    /// use errat::{at, At, ResultAtExt};
     ///
     /// #[derive(Debug)]
     /// enum MyError { IoError }
     ///
     /// fn read_config() -> Result<(), At<MyError>> {
-    ///     Err(MyError::IoError.start_at())
+    ///     Err(at(MyError::IoError))
     /// }
     ///
     /// fn init() -> Result<(), At<MyError>> {
-    ///     read_config().at_message("while loading configuration")?;
+    ///     read_config().at_str("while loading configuration")?;
     ///     Ok(())
     /// }
     /// ```
     #[track_caller]
     #[inline]
-    pub fn at_message(mut self, msg: impl Into<Cow<'static, str>>) -> Self {
+    pub fn at_str(mut self, msg: &'static str) -> Self {
         let loc = Location::caller();
-        let context = Context::Text(msg.into());
+        let context = Context::Text(Cow::Borrowed(msg));
+
+        match &mut self.trace {
+            Some(trace) => {
+                trace.try_push_with_context(loc, context);
+            }
+            None => {
+                let mut trace = Trace::new();
+                trace.try_push_with_context(loc, context);
+                if let Some(boxed) = try_box(trace) {
+                    self.trace = Some(boxed);
+                }
+            }
+        }
+        self
+    }
+
+    /// Add the caller's location and a lazily-computed string context to the trace.
+    ///
+    /// The closure is only called on error path, avoiding allocation on success.
+    /// For static strings, use `at_str()` instead for zero overhead.
+    ///
+    /// ## Example
+    ///
+    /// ```rust
+    /// use errat::{at, At, ResultAtExt};
+    ///
+    /// #[derive(Debug)]
+    /// enum MyError { NotFound }
+    ///
+    /// fn load(path: &str) -> Result<(), At<MyError>> {
+    ///     Err(at(MyError::NotFound))
+    /// }
+    ///
+    /// fn init(path: &str) -> Result<(), At<MyError>> {
+    ///     // Closure only runs on Err - no allocation on Ok path
+    ///     load(path).at_string(|| format!("loading {}", path))?;
+    ///     Ok(())
+    /// }
+    /// ```
+    #[track_caller]
+    #[inline]
+    pub fn at_string(mut self, f: impl FnOnce() -> String) -> Self {
+        let loc = Location::caller();
+        let context = Context::Text(Cow::Owned(f()));
 
         match &mut self.trace {
             Some(trace) => {
@@ -742,28 +787,40 @@ impl<E> At<E> {
     /// Add the caller's location and lazily-computed typed context (Display formatted).
     ///
     /// The closure is only called on error path, avoiding allocation on success.
-    /// Use for human-readable context messages.
+    /// Use for typed data that you want to format with `Display` and later retrieve
+    /// via `downcast_ref::<T>()`.
+    ///
+    /// For plain string messages, prefer `at_str()` or `at_string()`.
+    /// For Debug-formatted data, use `at_debug()`.
     ///
     /// ## Example
     ///
     /// ```rust
-    /// use errat::{At, Traceable};
+    /// use errat::{at, At, Context};
     ///
     /// #[derive(Debug)]
     /// enum MyError { NotFound }
     ///
+    /// // Custom Display type for rich context
+    /// struct PathContext(String);
+    /// impl std::fmt::Display for PathContext {
+    ///     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+    ///         write!(f, "path: {}", self.0)
+    ///     }
+    /// }
+    ///
     /// fn load(path: &str) -> Result<(), At<MyError>> {
-    ///     Err(MyError::NotFound.start_at())
+    ///     Err(at(MyError::NotFound))
     /// }
     ///
     /// fn init(path: &str) -> Result<(), At<MyError>> {
-    ///     load(path).map_err(|e| e.at_display(|| format!("loading {}", path)))?;
+    ///     load(path).map_err(|e| e.at_data(|| PathContext(path.into())))?;
     ///     Ok(())
     /// }
     /// ```
     #[track_caller]
     #[inline]
-    pub fn at_display<T: fmt::Display + Send + Sync + 'static>(
+    pub fn at_data<T: fmt::Display + Send + Sync + 'static>(
         mut self,
         f: impl FnOnce() -> T,
     ) -> Self {
@@ -797,7 +854,7 @@ impl<E> At<E> {
     /// ## Example
     ///
     /// ```rust
-    /// use errat::{At, Traceable, Context};
+    /// use errat::{at, At, Context};
     ///
     /// #[derive(Debug)]
     /// struct RequestInfo { user_id: u64, path: String }
@@ -805,8 +862,7 @@ impl<E> At<E> {
     /// #[derive(Debug)]
     /// enum MyError { Forbidden }
     ///
-    /// let err = MyError::Forbidden
-    ///     .start_at()
+    /// let err = at(MyError::Forbidden)
     ///     .at_debug(|| RequestInfo { user_id: 42, path: "/admin".into() });
     ///
     /// // Later, retrieve the context
@@ -854,15 +910,14 @@ impl<E> At<E> {
     /// ## Example
     ///
     /// ```rust
-    /// use errat::{At, Traceable, crate_info};
+    /// use errat::{at, At, crate_info};
     ///
     /// #[derive(Debug)]
     /// enum MyError { Wrapped(String) }
     ///
     /// // When receiving an error from a dependency:
     /// fn wrap_external_error(msg: &str) -> At<MyError> {
-    ///     MyError::Wrapped(msg.into())
-    ///         .start_at()
+    ///     at(MyError::Wrapped(msg.into()))
     ///         .at_crate(crate_info!())  // Mark crate boundary
     /// }
     /// ```
@@ -1100,7 +1155,7 @@ impl<E: core::error::Error> core::error::Error for At<E> {
 }
 
 // ============================================================================
-// Traceable Trait - for calling .at() directly on error values
+// ErrorAtExt Trait - for calling .at() directly on error values
 // ============================================================================
 
 /// Extension trait that allows calling `.start_at()` on error types.
@@ -1109,7 +1164,7 @@ impl<E: core::error::Error> core::error::Error for At<E> {
 /// For types without `Error`, use the `at()` function or `at!()` macro instead.
 ///
 /// ```rust
-/// use errat::{Traceable, ResultExt};
+/// use errat::{ErrorAtExt, ResultAtExt};
 /// use core::fmt;
 ///
 /// #[derive(Debug)]
@@ -1132,37 +1187,32 @@ impl<E: core::error::Error> core::error::Error for At<E> {
 ///     Ok(())
 /// }
 /// ```
-pub trait Traceable: Sized {
+pub trait ErrorAtExt: Sized {
     /// Wrap this value in `At<E>` and add the caller's location.
     /// If allocation fails, the error is still wrapped but trace may be empty.
     ///
     /// For crate-aware tracing with repository links, use `at!(err)` or
     /// `err.start_at().at_crate(crate_info!())` instead.
+    ///
+    /// After calling `.start_at()`, you can chain context methods:
+    /// - `.at_str("msg")` - static string context (zero-cost)
+    /// - `.at_string(|| format!(...))` - lazy string context
+    /// - `.at_data(|| value)` - lazy typed context (Display)
+    /// - `.at_debug(|| value)` - lazy typed context (Debug)
     #[track_caller]
     fn start_at(self) -> At<Self>;
-
-    /// Wrap this value in `At<E>` and add the caller's location with a message.
-    /// If allocation fails, the error is still wrapped but trace may be empty.
-    #[track_caller]
-    fn start_at_message(self, msg: impl Into<Cow<'static, str>>) -> At<Self>;
 }
 
-impl<E: core::error::Error> Traceable for E {
+impl<E: core::error::Error> ErrorAtExt for E {
     #[track_caller]
     #[inline]
     fn start_at(self) -> At<Self> {
         At::new(self).at()
     }
-
-    #[track_caller]
-    #[inline]
-    fn start_at_message(self, msg: impl Into<Cow<'static, str>>) -> At<Self> {
-        At::new(self).at_message(msg)
-    }
 }
 
 // ============================================================================
-// ResultExt Trait - for calling .at() on Results with At<E> errors
+// ResultAtExt Trait - for calling .at() on Results with At<E> errors
 // ============================================================================
 
 /// Extension trait for adding location tracking to `Result<T, At<E>>`.
@@ -1170,13 +1220,13 @@ impl<E: core::error::Error> Traceable for E {
 /// ## Example
 ///
 /// ```rust
-/// use errat::{At, Traceable, ResultExt};
+/// use errat::{at, At, ResultAtExt};
 ///
 /// #[derive(Debug)]
 /// enum MyError { Oops }
 ///
 /// fn inner() -> Result<(), At<MyError>> {
-///     Err(MyError::Oops.start_at())
+///     Err(at(MyError::Oops))
 /// }
 ///
 /// fn outer() -> Result<(), At<MyError>> {
@@ -1184,18 +1234,22 @@ impl<E: core::error::Error> Traceable for E {
 ///     Ok(())
 /// }
 /// ```
-pub trait ResultExt<T, E> {
+pub trait ResultAtExt<T, E> {
     /// Add the caller's location to the error trace if this is `Err`.
     #[track_caller]
     fn at(self) -> Result<T, At<E>>;
 
-    /// Add location and message context.
+    /// Add location and static message context. Zero-cost for static strings.
     #[track_caller]
-    fn at_message(self, msg: impl Into<Cow<'static, str>>) -> Result<T, At<E>>;
+    fn at_str(self, msg: &'static str) -> Result<T, At<E>>;
+
+    /// Add location and lazily-computed string context.
+    #[track_caller]
+    fn at_string(self, f: impl FnOnce() -> String) -> Result<T, At<E>>;
 
     /// Add location and lazily-computed typed context (Display formatted).
     #[track_caller]
-    fn at_display<C: fmt::Display + Send + Sync + 'static>(
+    fn at_data<C: fmt::Display + Send + Sync + 'static>(
         self,
         f: impl FnOnce() -> C,
     ) -> Result<T, At<E>>;
@@ -1212,7 +1266,7 @@ pub trait ResultExt<T, E> {
     fn at_crate(self, info: &'static CrateInfo) -> Result<T, At<E>>;
 }
 
-impl<T, E> ResultExt<T, E> for Result<T, At<E>> {
+impl<T, E> ResultAtExt<T, E> for Result<T, At<E>> {
     #[track_caller]
     #[inline]
     fn at(self) -> Result<T, At<E>> {
@@ -1224,22 +1278,31 @@ impl<T, E> ResultExt<T, E> for Result<T, At<E>> {
 
     #[track_caller]
     #[inline]
-    fn at_message(self, msg: impl Into<Cow<'static, str>>) -> Result<T, At<E>> {
+    fn at_str(self, msg: &'static str) -> Result<T, At<E>> {
         match self {
             Ok(v) => Ok(v),
-            Err(e) => Err(e.at_message(msg)),
+            Err(e) => Err(e.at_str(msg)),
         }
     }
 
     #[track_caller]
     #[inline]
-    fn at_display<C: fmt::Display + Send + Sync + 'static>(
+    fn at_string(self, f: impl FnOnce() -> String) -> Result<T, At<E>> {
+        match self {
+            Ok(v) => Ok(v),
+            Err(e) => Err(e.at_string(f)),
+        }
+    }
+
+    #[track_caller]
+    #[inline]
+    fn at_data<C: fmt::Display + Send + Sync + 'static>(
         self,
         f: impl FnOnce() -> C,
     ) -> Result<T, At<E>> {
         match self {
             Ok(v) => Ok(v),
-            Err(e) => Err(e.at_display(f)),
+            Err(e) => Err(e.at_data(f)),
         }
     }
 
@@ -1268,7 +1331,7 @@ impl<T, E> ResultExt<T, E> for Result<T, At<E>> {
 /// Extension trait for converting non-traced errors to traced errors.
 ///
 /// Use `.trace()` on `Result<T, E>` to wrap the error in `At<E>` and capture
-/// the first location. For Results that already have `At<E>`, use `ResultExt::at()`.
+/// the first location. For Results that already have `At<E>`, use `ResultAtExt::at()`.
 ///
 /// ## Example
 ///
@@ -1289,32 +1352,24 @@ pub trait ResultTraceExt<T, E> {
     #[track_caller]
     fn trace(self) -> Result<T, At<E>>;
 
-    /// Convert to `At<E>` with message context. Use `trace_with_msg` for lazy evaluation.
+    /// Convert to `At<E>` with static message context (zero-cost).
     #[track_caller]
-    fn trace_msg(self, msg: impl Into<Cow<'static, str>>) -> Result<T, At<E>>;
+    fn trace_str(self, msg: &'static str) -> Result<T, At<E>>;
 
-    /// Convert to `At<E>` with lazily-computed message context.
+    /// Convert to `At<E>` with lazily-computed string context.
     #[track_caller]
-    fn trace_with_msg(self, f: impl FnOnce() -> String) -> Result<T, At<E>>;
+    fn trace_string(self, f: impl FnOnce() -> String) -> Result<T, At<E>>;
 
-    /// Convert to `At<E>` with typed context (Display).
+    /// Convert to `At<E>` with lazily-computed typed context (Display formatted).
     #[track_caller]
-    fn trace_ctx<C: fmt::Display + Send + Sync + 'static>(self, ctx: C) -> Result<T, At<E>>;
-
-    /// Convert to `At<E>` with lazily-computed typed context (Display).
-    #[track_caller]
-    fn trace_with_ctx<C: fmt::Display + Send + Sync + 'static>(
+    fn trace_data<C: fmt::Display + Send + Sync + 'static>(
         self,
         f: impl FnOnce() -> C,
     ) -> Result<T, At<E>>;
 
-    /// Convert to `At<E>` with typed context (Debug).
+    /// Convert to `At<E>` with lazily-computed typed context (Debug formatted).
     #[track_caller]
-    fn trace_dbg_ctx<C: fmt::Debug + Send + Sync + 'static>(self, ctx: C) -> Result<T, At<E>>;
-
-    /// Convert to `At<E>` with lazily-computed typed context (Debug).
-    #[track_caller]
-    fn trace_with_dbg_ctx<C: fmt::Debug + Send + Sync + 'static>(
+    fn trace_debug<C: fmt::Debug + Send + Sync + 'static>(
         self,
         f: impl FnOnce() -> C,
     ) -> Result<T, At<E>>;
@@ -1332,55 +1387,37 @@ impl<T, E> ResultTraceExt<T, E> for Result<T, E> {
 
     #[track_caller]
     #[inline]
-    fn trace_msg(self, msg: impl Into<Cow<'static, str>>) -> Result<T, At<E>> {
+    fn trace_str(self, msg: &'static str) -> Result<T, At<E>> {
         match self {
             Ok(v) => Ok(v),
-            Err(e) => Err(At::new(e).at_message(msg)),
+            Err(e) => Err(At::new(e).at_str(msg)),
         }
     }
 
     #[track_caller]
     #[inline]
-    fn trace_with_msg(self, f: impl FnOnce() -> String) -> Result<T, At<E>> {
+    fn trace_string(self, f: impl FnOnce() -> String) -> Result<T, At<E>> {
         match self {
             Ok(v) => Ok(v),
-            Err(e) => Err(At::new(e).at_message(f())),
+            Err(e) => Err(At::new(e).at_string(f)),
         }
     }
 
     #[track_caller]
     #[inline]
-    fn trace_ctx<C: fmt::Display + Send + Sync + 'static>(self, ctx: C) -> Result<T, At<E>> {
-        match self {
-            Ok(v) => Ok(v),
-            Err(e) => Err(At::new(e).at_display(|| ctx)),
-        }
-    }
-
-    #[track_caller]
-    #[inline]
-    fn trace_with_ctx<C: fmt::Display + Send + Sync + 'static>(
+    fn trace_data<C: fmt::Display + Send + Sync + 'static>(
         self,
         f: impl FnOnce() -> C,
     ) -> Result<T, At<E>> {
         match self {
             Ok(v) => Ok(v),
-            Err(e) => Err(At::new(e).at_display(f)),
+            Err(e) => Err(At::new(e).at_data(f)),
         }
     }
 
     #[track_caller]
     #[inline]
-    fn trace_dbg_ctx<C: fmt::Debug + Send + Sync + 'static>(self, ctx: C) -> Result<T, At<E>> {
-        match self {
-            Ok(v) => Ok(v),
-            Err(e) => Err(At::new(e).at_debug(|| ctx)),
-        }
-    }
-
-    #[track_caller]
-    #[inline]
-    fn trace_with_dbg_ctx<C: fmt::Debug + Send + Sync + 'static>(
+    fn trace_debug<C: fmt::Debug + Send + Sync + 'static>(
         self,
         f: impl FnOnce() -> C,
     ) -> Result<T, At<E>> {
@@ -1661,20 +1698,20 @@ mod tests {
     }
 
     #[test]
-    fn test_at_msg() {
-        let err = TestError::NotFound.start_at_message("while fetching user");
-        assert_eq!(err.trace_len(), 1);
+    fn test_at_str() {
+        let err = TestError::NotFound.start_at().at_str("while fetching user");
+        assert_eq!(err.trace_len(), 2); // start_at + at_str
         assert_eq!(err.message(), Some("while fetching user"));
     }
 
     #[test]
-    fn test_msg_propagation() {
+    fn test_str_propagation() {
         fn inner() -> Result<(), At<TestError>> {
             Err(TestError::NotFound.start_at())
         }
 
         fn outer() -> Result<(), At<TestError>> {
-            inner().at_message("during initialization")?;
+            inner().at_str("during initialization")?;
             Ok(())
         }
 
@@ -1684,13 +1721,13 @@ mod tests {
     }
 
     #[test]
-    fn test_trace_msg() {
+    fn test_trace_str() {
         fn fallible() -> Result<(), &'static str> {
             Err("oops")
         }
 
         fn wrapper() -> Result<(), At<&'static str>> {
-            fallible().trace_msg("while doing something")?;
+            fallible().trace_str("while doing something")?;
             Ok(())
         }
 
@@ -1701,7 +1738,7 @@ mod tests {
 
     #[test]
     fn test_debug_with_message() {
-        let err = TestError::NotFound.start_at_message("context info");
+        let err = TestError::NotFound.start_at().at_str("context info");
         let debug = alloc::format!("{:?}", err);
         assert!(debug.contains("NotFound"));
         assert!(debug.contains("╰─ context info"));
@@ -1739,12 +1776,12 @@ mod tests {
         }
 
         fn level2() -> Result<(), At<TestError>> {
-            level1().at_message("in level2")?;
+            level1().at_str("in level2")?;
             Ok(())
         }
 
         fn level3() -> Result<(), At<TestError>> {
-            level2().at_message("in level3")?;
+            level2().at_str("in level3")?;
             Ok(())
         }
 
@@ -1816,11 +1853,11 @@ mod tests {
     }
 
     #[test]
-    fn test_ctx_display() {
+    fn test_ctx_data() {
         // Use a type that has both Display and Debug but we want Display formatting
         let err = TestError::NotFound
             .start_at()
-            .at_display(|| "user-friendly message");
+            .at_data(|| "user-friendly message");
 
         assert_eq!(err.trace_len(), 2);
 
@@ -1849,9 +1886,9 @@ mod tests {
 
         let err = TestError::NotFound
             .start_at()
-            .at_message("text message")
+            .at_str("text message")
             .at_debug(|| DebugInfo { code: 42 })
-            .at_display(|| "display message");
+            .at_data(|| "display message");
 
         // Should have 4 locations (traced + 3 context methods)
         assert_eq!(err.trace_len(), 4);
@@ -1874,12 +1911,12 @@ mod tests {
         }
 
         fn level2() -> Result<(), At<TestError>> {
-            level1().at_message("in level2")?;
+            level1().at_str("in level2")?;
             Ok(())
         }
 
         fn level3() -> Result<(), At<TestError>> {
-            level2().at_message("in level3")?;
+            level2().at_str("in level3")?;
             Ok(())
         }
 
@@ -1913,7 +1950,7 @@ mod tests {
         }
 
         fn wrapper() -> Result<(), At<TestError>> {
-            origin().at_message("wrapping")?;
+            origin().at_str("wrapping")?;
             Ok(())
         }
 
@@ -1928,7 +1965,7 @@ mod tests {
         let first_at = lines.iter().find(|l| l.contains("at src/lib.rs:")).unwrap();
 
         // It should be the origin location (before the wrapper's context)
-        // The origin .start_at() call will be at a lower line than wrapper's .at_message()
+        // The origin .start_at() call will be at a lower line than wrapper's .at_str()
         assert!(
             !first_at.contains("╰─"),
             "First location should be origin without context"

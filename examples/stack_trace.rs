@@ -1,6 +1,6 @@
 //! Demonstrates errat stack traces in a realistic scenario.
 
-use errat::{At, ResultExt, Traceable};
+use errat::{At, ErrorAtExt, ResultAtExt};
 
 #[derive(Debug)]
 #[allow(dead_code)]
@@ -39,11 +39,11 @@ mod service {
     use super::*;
 
     pub fn get_user(id: u64) -> Result<(), At<AppError>> {
-        db::query_user(id).at_message("querying database")
+        db::query_user(id).at_str("querying database")
     }
 
     pub fn validate_user_access(user_id: u64, _resource: &str) -> Result<(), At<AppError>> {
-        get_user(user_id).at_message("checking user exists")?;
+        get_user(user_id).at_str("checking user exists")?;
         // More validation...
         Ok(())
     }
@@ -54,7 +54,7 @@ mod handler {
     use super::*;
 
     pub fn handle_request(user_id: u64) -> Result<(), At<AppError>> {
-        service::validate_user_access(user_id, "/admin").at_message("validating access")
+        service::validate_user_access(user_id, "/admin").at_str("validating access")
     }
 }
 

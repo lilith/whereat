@@ -1,8 +1,8 @@
 //! Demonstrates errat with manual error type setup.
 //!
-//! Run with: cargo run --example derive_macro --features std
+//! Run with: cargo run --example derive_macro
 
-use errat::{At, ResultExt, at, crate_info};
+use errat::{At, ResultAtExt, at, crate_info};
 
 #[derive(Debug)]
 #[allow(dead_code)]
@@ -55,8 +55,8 @@ fn read_config() -> Result<String, At<AppError>> {
 }
 
 fn process_request(user_id: u64, input: &str) -> Result<String, At<AppError>> {
-    validate_input(input).at_message("validating request input")?;
-    let user = find_user(user_id).at_message("looking up user")?;
+    validate_input(input).at_str("validating request input")?;
+    let user = find_user(user_id).at_str("looking up user")?;
     Ok(format!(
         "Processed request for {} with input '{}'",
         user, input

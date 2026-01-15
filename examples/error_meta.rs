@@ -1,6 +1,6 @@
 //! Demonstrates enhanced trace display with CrateInfo and GitHub links.
 
-use errat::{At, ResultExt, at, crate_info};
+use errat::{At, ResultAtExt, at, crate_info};
 
 #[derive(Debug)]
 #[allow(dead_code)]
@@ -31,12 +31,12 @@ fn fetch_user(id: u64) -> Result<(), At<AppError>> {
 }
 
 fn process_request(user_id: u64) -> Result<(), At<AppError>> {
-    fetch_user(user_id).at_message("fetching user data")?;
+    fetch_user(user_id).at_str("fetching user data")?;
     Ok(())
 }
 
 fn handle_api_call() -> Result<(), At<AppError>> {
-    process_request(42).at_message("processing API request")
+    process_request(42).at_str("processing API request")
 }
 
 fn main() {

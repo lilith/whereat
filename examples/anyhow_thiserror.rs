@@ -1,11 +1,11 @@
 //! Demonstrates errat integration with thiserror and anyhow.
 //!
-//! Run with: cargo run --example anyhow_thiserror --features std
+//! Run with: cargo run --example anyhow_thiserror
 
 // Note: This example requires std feature and external crates
 // For now, we'll simulate what the integration would look like
 
-use errat::{At, ResultExt, Traceable};
+use errat::{At, ErrorAtExt, ResultAtExt};
 
 // ============================================================================
 // Simulating thiserror-style errors
@@ -52,11 +52,11 @@ fn read_config_file(path: &str) -> Result<String, At<AppError>> {
 }
 
 fn load_config() -> Result<String, At<AppError>> {
-    read_config_file("/etc/app.conf").at_message("loading application config")
+    read_config_file("/etc/app.conf").at_str("loading application config")
 }
 
 fn init_app() -> Result<(), At<AppError>> {
-    let _config = load_config().at_message("during initialization")?;
+    let _config = load_config().at_str("during initialization")?;
     Ok(())
 }
 
@@ -92,11 +92,11 @@ fn middle_layer() -> Result<(), At<AppError>> {
     inner_operation()
         .map_err(AppError::Io)
         .map_err(|e| e.start_at())
-        .at_message("connecting to database")
+        .at_str("connecting to database")
 }
 
 fn outer_layer() -> Result<(), At<AppError>> {
-    middle_layer().at_message("in business logic")
+    middle_layer().at_str("in business logic")
 }
 
 // ============================================================================
@@ -138,7 +138,7 @@ fn main() {
         "
 errat works well with thiserror-style errors:
 - Wrap any error with .start_at() to start collecting locations
-- Use .at_message() to add context as errors propagate
+- Use .at_str() to add context as errors propagate
 - At<E> implements Error, so it can be boxed like anyhow
 - The error source chain is preserved through At<E>
 
