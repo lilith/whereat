@@ -5,6 +5,7 @@ edition = "2024"
 rust-version = "1.85"
 license = "MIT OR Apache-2.0"
 description = "Lightweight error location tracking with small sizeof and no_std support"
+repository = "https://github.com/imazen/errat"
 keywords = ["error", "trace", "stacktrace", "track_caller", "no_std"]
 categories = ["rust-patterns", "no-std"]
 

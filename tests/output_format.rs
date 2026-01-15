@@ -1,7 +1,7 @@
 //! Integration tests for error output formatting.
 
 use core::error::Error;
-use errat::{at, start_at_late, At, ErrorAtExt, ResultAtExt, ResultTraceExt};
+use errat::{At, ErrorAtExt, ResultAtExt, ResultTraceExt, at, start_at_late};
 
 #[derive(Debug)]
 enum TestError {
@@ -119,9 +119,7 @@ fn debug_context_shows_debug_format() {
         id: u64,
     }
 
-    let err = TestError::NotFound
-        .start_at()
-        .at_debug(|| Info { id: 42 });
+    let err = TestError::NotFound.start_at().at_debug(|| Info { id: 42 });
     let output = format!("{:?}", err);
 
     assert!(
@@ -423,9 +421,19 @@ fn error_chain_traversable() {
 
     // At<E> is transparent - delegates source() directly to E::source()
     // Chain: At<AppError> (displays as AppError) -> IoError
-    assert_eq!(chain.len(), 2, "Chain should have 2 errors: At<AppError> -> IoError");
-    assert!(chain[0].contains("request failed"), "First should be AppError (via At)");
-    assert!(chain[1].contains("connection reset"), "Second should be IoError");
+    assert_eq!(
+        chain.len(),
+        2,
+        "Chain should have 2 errors: At<AppError> -> IoError"
+    );
+    assert!(
+        chain[0].contains("request failed"),
+        "First should be AppError (via At)"
+    );
+    assert!(
+        chain[1].contains("connection reset"),
+        "Second should be IoError"
+    );
 }
 
 #[test]
@@ -434,7 +442,11 @@ fn nested_at_errors() {
     let inner_traced: At<IoError> = at(IoError { msg: "read failed" });
     let outer_traced: At<At<IoError>> = at(inner_traced);
 
-    assert_eq!(outer_traced.trace_len(), 1, "Outer should have its own trace");
+    assert_eq!(
+        outer_traced.trace_len(),
+        1,
+        "Outer should have its own trace"
+    );
     assert_eq!(
         outer_traced.error().trace_len(),
         1,
@@ -487,7 +499,10 @@ fn three_level_error_chain() {
     }
 
     // Chain: At<ThreeLevelError> -> AppError -> IoError (At is transparent)
-    assert_eq!(depth, 3, "Should have 3 levels: At<ThreeLevelError> -> AppError -> IoError");
+    assert_eq!(
+        depth, 3,
+        "Should have 3 levels: At<ThreeLevelError> -> AppError -> IoError"
+    );
 }
 
 #[test]

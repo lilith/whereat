@@ -3,7 +3,7 @@
 #![allow(dead_code)]
 
 use core::mem::size_of;
-use errat::{at, at_crate, crate_info, At, CrateInfo, Context};
+use errat::{At, Context, CrateInfo, at, at_crate, crate_info};
 
 #[derive(Debug)]
 struct TestError;
@@ -48,7 +48,9 @@ fn crate_info_repo_from_cargo_toml() {
     if let Some(repo) = info.repo {
         if !repo.is_empty() {
             assert!(
-                repo.contains("github.com") || repo.contains("gitlab.com") || repo.starts_with("https://"),
+                repo.contains("github.com")
+                    || repo.contains("gitlab.com")
+                    || repo.starts_with("https://"),
                 "Repo should be a URL. Got: {}",
                 repo
             );
@@ -141,7 +143,7 @@ fn display_with_meta_uses_crate_info() {
 
 mod simulated_dep {
     //! Simulates a dependency crate
-    use errat::{at, At};
+    use errat::{At, at};
 
     #[derive(Debug)]
     pub struct DepError;
@@ -196,7 +198,10 @@ fn crate_boundary_updates_github_links() {
 fn sizeof_at_is_error_plus_pointer() {
     // At<E> = E (inline) + Option<Box<Trace>> (8 bytes on 64-bit)
     let ptr_size = size_of::<Option<Box<()>>>();
-    assert_eq!(ptr_size, 8, "Option<Box<T>> should be 8 bytes (null optimization)");
+    assert_eq!(
+        ptr_size, 8,
+        "Option<Box<T>> should be 8 bytes (null optimization)"
+    );
 
     // Small error
     #[derive(Debug)]
@@ -270,7 +275,11 @@ fn sizeof_common_error_types() {
     // Common patterns users might use
 
     #[derive(Debug)]
-    enum SmallEnum { A, B, C }
+    enum SmallEnum {
+        A,
+        B,
+        C,
+    }
     assert!(
         size_of::<At<SmallEnum>>() <= 16,
         "At<SmallEnum> should be <= 16 bytes. Got: {}",
@@ -462,9 +471,9 @@ fn crate_boundary_affects_subsequent_locations() {
 
     // Locations after boundary should use that crate's info
     let err = errat::At::new(TestError)
-        .at_crate(&CRATE_X)  // Boundary
-        .at()                // Should use CRATE_X
-        .at();               // Should use CRATE_X
+        .at_crate(&CRATE_X) // Boundary
+        .at() // Should use CRATE_X
+        .at(); // Should use CRATE_X
 
     let output = format!("{}", err.display_with_meta());
 
@@ -611,7 +620,10 @@ fn github_link_line_number_is_numeric() {
 
     let anchor_idx = link_part.find("#L").unwrap();
     let after_anchor = &link_part[anchor_idx + 2..];
-    let line_num: String = after_anchor.chars().take_while(|c| c.is_ascii_digit()).collect();
+    let line_num: String = after_anchor
+        .chars()
+        .take_while(|c| c.is_ascii_digit())
+        .collect();
 
     assert!(
         !line_num.is_empty(),
@@ -661,7 +673,9 @@ fn crate_info_commit_is_compile_time() {
     let info = crate_info!();
 
     // Should always have a commit (either env var or version tag fallback)
-    let commit = info.commit.expect("commit should always be Some due to version fallback");
+    let commit = info
+        .commit
+        .expect("commit should always be Some due to version fallback");
 
     // Either a hex commit hash OR a version tag like "v0.1.0"
     let is_hex = commit.chars().all(|c| c.is_ascii_hexdigit());
@@ -680,7 +694,9 @@ fn crate_info_version_tag_fallback() {
     // This makes crates.io dependencies work automatically!
 
     let info = crate_info!();
-    let commit = info.commit.expect("should have commit from version fallback");
+    let commit = info
+        .commit
+        .expect("should have commit from version fallback");
 
     // In tests without CI env vars, should be version tag
     // (unless someone set GIT_COMMIT in their environment)
@@ -750,7 +766,7 @@ fn crate_path_included_in_github_url() {
         "workspace-crate",
         Some("https://github.com/org/monorepo"),
         Some("abc123"),
-        Some("crates/mylib/"),  // Crate is in subdirectory
+        Some("crates/mylib/"), // Crate is in subdirectory
         "workspace_crate",
     );
 
@@ -771,7 +787,7 @@ fn crate_path_none_works() {
         "root-crate",
         Some("https://github.com/org/repo"),
         Some("def456"),
-        None,  // Crate at repo root
+        None, // Crate at repo root
         "root_crate",
     );
 
@@ -792,7 +808,7 @@ fn crate_path_with_trailing_slash() {
         "test",
         Some("https://github.com/org/repo"),
         Some("abc"),
-        Some("packages/core/"),  // With trailing slash
+        Some("packages/core/"), // With trailing slash
         "test",
     );
 
@@ -818,7 +834,7 @@ fn crate_path_without_trailing_slash() {
         "test",
         Some("https://github.com/org/repo"),
         Some("abc"),
-        Some("packages/core"),  // Without trailing slash
+        Some("packages/core"), // Without trailing slash
         "test",
     );
 
@@ -831,4 +847,83 @@ fn crate_path_without_trailing_slash() {
         "Path should be combined. Got:\n{}",
         output
     );
+}
+
+// ============================================================================
+// Explicit Path Macro Variant
+// ============================================================================
+
+#[test]
+fn crate_info_explicit_path_macro() {
+    // crate_info!("path/") variant for workspace crates
+    let info = crate_info!("crates/mylib/");
+
+    assert_eq!(info.name, "errat", "Should still capture CARGO_PKG_NAME");
+    assert_eq!(
+        info.crate_path,
+        Some("crates/mylib/"),
+        "Should use the explicit path"
+    );
+}
+
+#[test]
+fn crate_info_explicit_path_overrides_env() {
+    // Explicit path should be used even if CRATE_PATH env var is set
+    // (the macro variant ignores the env var and uses the literal)
+    let info = crate_info!("explicit/path/");
+
+    assert_eq!(info.crate_path, Some("explicit/path/"));
+}
+
+#[test]
+fn crate_info_explicit_path_in_github_url() {
+    // Use crate_info!("path/") in an actual trace
+    let info = crate_info!("workspace/subcrate/");
+
+    let err = errat::At::new(TestError).at().at_crate(info);
+    let output = format!("{}", err.display_with_meta());
+
+    // URL should include the explicit crate_path
+    // Note: commit is version tag fallback (v{VERSION})
+    assert!(
+        output.contains("workspace/subcrate/"),
+        "URL should include explicit crate_path. Got:\n{}",
+        output
+    );
+}
+
+#[test]
+fn crate_info_explicit_empty_path() {
+    // Explicit empty path (crate at repo root)
+    let info = crate_info!("");
+
+    assert_eq!(
+        info.crate_path,
+        Some(""),
+        "Empty string is valid for root crate"
+    );
+}
+
+#[test]
+fn crate_info_explicit_path_has_commit() {
+    // Explicit path variant should still capture commit (version fallback)
+    let info = crate_info!("mypath/");
+
+    // Should have commit from env var or version tag fallback
+    assert!(
+        info.commit.is_some(),
+        "Should have commit (version fallback)"
+    );
+}
+
+#[test]
+fn crate_info_both_variants_same_other_fields() {
+    let auto_info = crate_info!();
+    let explicit_info = crate_info!("some/path/");
+
+    // All fields except crate_path should be the same
+    assert_eq!(auto_info.name, explicit_info.name);
+    assert_eq!(auto_info.repo, explicit_info.repo);
+    // commit may differ if one env var vs version fallback, but format is same
+    // module differs because they're different call sites
 }

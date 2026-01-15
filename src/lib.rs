@@ -498,8 +498,28 @@ impl CrateInfo {
 /// ```
 #[macro_export]
 macro_rules! crate_info {
+    // With explicit crate path for workspace crates
+    ($crate_path:literal) => {{
+        static INFO: $crate::CrateInfo = $crate::CrateInfo::with_path(
+            env!("CARGO_PKG_NAME"),
+            option_env!("CARGO_PKG_REPOSITORY"),
+            match option_env!("GIT_COMMIT") {
+                Some(c) => Some(c),
+                None => match option_env!("GITHUB_SHA") {
+                    Some(c) => Some(c),
+                    None => match option_env!("CI_COMMIT_SHA") {
+                        Some(c) => Some(c),
+                        None => Some(concat!("v", env!("CARGO_PKG_VERSION"))),
+                    },
+                },
+            },
+            Some($crate_path),
+            module_path!(),
+        );
+        &INFO
+    }};
+    // Auto-detect (works for root crates, or with CRATE_PATH env var)
     () => {{
-        // Use match instead of .or() because Option::or isn't const on stable
         static INFO: $crate::CrateInfo = $crate::CrateInfo::with_path(
             env!("CARGO_PKG_NAME"),
             option_env!("CARGO_PKG_REPOSITORY"),

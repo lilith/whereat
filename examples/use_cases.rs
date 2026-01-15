@@ -4,7 +4,7 @@
 
 #![allow(dead_code)]
 
-use errat::{at, at_crate, start_at_late, At, ErrorAtExt, ResultAtExt, ResultTraceExt};
+use errat::{At, ErrorAtExt, ResultAtExt, ResultTraceExt, at, at_crate, start_at_late};
 
 // ============================================================================
 // Use Case 1: Basic Error Propagation
@@ -77,8 +77,7 @@ mod use_case_2 {
 
     // Chain with more context
     pub fn load_settings() -> Result<String, At<io::Error>> {
-        read_config("/nonexistent/config.toml")
-            .at_string(|| "loading application settings".into())
+        read_config("/nonexistent/config.toml").at_string(|| "loading application settings".into())
     }
 
     pub fn demo() {
@@ -195,7 +194,10 @@ mod use_case_4 {
         // Later: extract typed context for structured logging
         for context in err.contexts() {
             if let Some(req) = context.downcast_ref::<RequestContext>() {
-                println!("\nExtracted context: user_id={}, trace_id={}", req.user_id, req.trace_id);
+                println!(
+                    "\nExtracted context: user_id={}, trace_id={}",
+                    req.user_id, req.trace_id
+                );
             }
         }
         println!();
@@ -221,7 +223,7 @@ mod use_case_5 {
     // Wrapper that starts tracing late
     pub fn wrap_legacy() -> Result<(), At<&'static str>> {
         legacy::old_function()
-            .trace_skipped()  // Marks that earlier frames were skipped
+            .trace_skipped() // Marks that earlier frames were skipped
             .at_str("calling legacy code")
     }
 
