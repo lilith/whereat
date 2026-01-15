@@ -20,6 +20,8 @@ impl core::fmt::Display for AppError {
     }
 }
 
+impl std::error::Error for AppError {}
+
 // Simulated database layer
 mod db {
     use super::*;

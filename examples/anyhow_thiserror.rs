@@ -74,7 +74,7 @@ fn traced_to_any<E: std::error::Error + Send + Sync + 'static>(err: At<E>) -> An
 
 /// Wrap an anyhow-style error with errat tracing
 fn any_to_traced(err: AnyError) -> At<AnyError> {
-    err.start_at()
+    errat::at(err)
 }
 
 // ============================================================================

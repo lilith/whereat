@@ -37,6 +37,6 @@ example-trace:
 example-anyhow:
     cargo run --example anyhow_thiserror --features std
 
-# Run ErrorMeta example with GitHub links
+# Run CrateInfo example with GitHub links
 example-meta:
     cargo run --example error_meta

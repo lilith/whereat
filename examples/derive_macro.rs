@@ -2,7 +2,7 @@
 //!
 //! Run with: cargo run --example derive_macro --features std
 
-use errat::{At, ErrorMeta, ResultExt, at, crate_info};
+use errat::{At, ResultExt, at, crate_info};
 
 #[derive(Debug)]
 #[allow(dead_code)]
@@ -25,20 +25,6 @@ impl core::fmt::Display for AppError {
             }
             AppError::Internal => write!(f, "internal error"),
         }
-    }
-}
-
-impl ErrorMeta for AppError {
-    fn crate_name(&self) -> Option<&'static str> {
-        Some("errat")
-    }
-
-    fn repo_url(&self) -> Option<&'static str> {
-        Some("https://github.com/imazen/errat")
-    }
-
-    fn git_commit(&self) -> Option<&'static str> {
-        Some("main")
     }
 }
 
@@ -98,7 +84,7 @@ fn main() {
     println!("Display: {}", err);
     println!("Debug:\n{:?}", err);
 
-    println!("\n=== Example 5: ErrorMeta with display_with_meta ===\n");
+    println!("\n=== Example 5: Enhanced output with display_with_meta ===\n");
     let err = process_request(0, "test").unwrap_err();
     println!("{}", err.display_with_meta());
 

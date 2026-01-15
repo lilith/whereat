@@ -113,10 +113,6 @@ use alloc::vec::Vec;
 use core::fmt;
 use core::panic::Location;
 
-// Re-export derive macro when feature is enabled
-#[cfg(feature = "derive")]
-pub use errat_derive::TracedError;
-
 // ============================================================================
 // LocationVec - configurable storage for trace locations
 // ============================================================================
@@ -164,79 +160,6 @@ type LocationElem = Option<&'static Location<'static>>;
     feature = "tinyvec-256-bytes"
 )))]
 type LocationElem = &'static Location<'static>;
-
-// ============================================================================
-// ErrorMeta Trait - optional metadata for enhanced trace display
-// ============================================================================
-
-/// Optional trait for error types to provide metadata for enhanced trace display.
-///
-/// Implement this trait on your error types to get:
-/// - Clickable GitHub links in stack traces (requires `repo_url` and `git_commit`)
-/// - Custom error summaries
-/// - Documentation links
-///
-/// **Required:** `git_commit()` must be implemented. Use `option_env!("GIT_COMMIT")`
-/// or a build script to capture the commit at build time.
-///
-/// ## Example
-///
-/// ```rust
-/// use errat::ErrorMeta;
-///
-/// #[derive(Debug)]
-/// enum MyError {
-///     NotFound,
-///     DatabaseError(String),
-/// }
-///
-/// impl ErrorMeta for MyError {
-///     fn git_commit(&self) -> Option<&'static str> {
-///         option_env!("GIT_COMMIT")
-///     }
-///
-///     fn repo_url(&self) -> Option<&'static str> {
-///         Some("https://github.com/user/my_app")
-///     }
-///
-///     fn crate_name(&self) -> Option<&'static str> {
-///         Some("my_app")
-///     }
-/// }
-/// ```
-pub trait ErrorMeta {
-    /// Git commit hash, tag, or branch for permalink generation.
-    ///
-    /// **Required.** Use `option_env!("GIT_COMMIT")` or a build script to capture
-    /// the commit at build time. Return `None` if unavailable (links won't be generated).
-    fn git_commit(&self) -> Option<&'static str>;
-
-    /// Repository URL for generating source links (e.g., "https://github.com/user/repo").
-    fn repo_url(&self) -> Option<&'static str> {
-        None
-    }
-
-    /// Crate name where this error type is defined (e.g., "my_app").
-    fn crate_name(&self) -> Option<&'static str> {
-        None
-    }
-
-    /// Module path where this error is defined (e.g., "my_app::errors").
-    fn module_path(&self) -> Option<&'static str> {
-        None
-    }
-
-    /// Custom one-line summary for trace display (instead of Debug).
-    /// Return None to use default Debug formatting.
-    fn trace_summary(&self) -> Option<&str> {
-        None
-    }
-
-    /// Optional documentation URL for this error type.
-    fn docs_url(&self) -> Option<&'static str> {
-        None
-    }
-}
 
 // ============================================================================
 // Fallible Allocation Helpers
@@ -511,10 +434,31 @@ macro_rules! crate_info {
 /// ```
 #[macro_export]
 macro_rules! at {
-    ($err:expr) => {{
-        use $crate::Traceable;
-        $err.start_at().at_crate($crate::crate_info!())
-    }};
+    ($err:expr) => {{ $crate::At::new($err).at().at_crate($crate::crate_info!()) }};
+}
+
+/// Wrap any value in `At<E>` and capture the caller's location.
+///
+/// This function works with any type, not just `Error` types.
+/// For types implementing `Error`, you can also use `.start_at()`.
+/// For crate-aware tracing with GitHub links, use `at!()` instead.
+///
+/// ## Example
+///
+/// ```rust
+/// use errat::{at, At};
+///
+/// #[derive(Debug)]
+/// struct SimpleError { code: u32 }
+///
+/// fn fallible() -> Result<(), At<SimpleError>> {
+///     Err(at(SimpleError { code: 42 }))
+/// }
+/// ```
+#[track_caller]
+#[inline]
+pub fn at<E>(err: E) -> At<E> {
+    At::new(err).at()
 }
 
 // ============================================================================
@@ -1034,94 +978,92 @@ impl<E: fmt::Debug> fmt::Debug for At<E> {
 }
 
 // ============================================================================
-// Enhanced display with ErrorMeta
+// Enhanced display with CrateInfo from trace
 // ============================================================================
 
-impl<E: fmt::Debug + ErrorMeta> At<E> {
-    /// Format the error with enhanced metadata from ErrorMeta.
+impl<E: fmt::Debug> At<E> {
+    /// Format the error with GitHub links using CrateInfo from the trace.
     ///
-    /// This includes:
-    /// - Custom trace_summary if provided
-    /// - Crate name and docs URL if available
-    /// - Clickable GitHub links if repo_url and git_commit are set
+    /// When you use `at!()` or `.at_crate(crate_info!())`, the crate metadata
+    /// is stored in the trace. This method uses that metadata to generate
+    /// clickable GitHub links for each location.
+    ///
+    /// For cross-crate traces, each `at_crate()` call updates the repository
+    /// used for subsequent locations until another crate boundary is encountered.
     ///
     /// ## Example
     ///
     /// ```rust
-    /// use errat::{At, ErrorMeta, Traceable};
+    /// use errat::{at, At};
     ///
     /// #[derive(Debug)]
     /// struct MyError;
     ///
-    /// impl ErrorMeta for MyError {
-    ///     fn repo_url(&self) -> Option<&'static str> {
-    ///         Some("https://github.com/user/repo")
-    ///     }
-    ///     fn git_commit(&self) -> Option<&'static str> {
-    ///         Some("abc123")
-    ///     }
-    /// }
-    ///
-    /// let err = MyError.start_at();
-    /// let formatted = err.display_with_meta();
-    /// println!("{}", formatted);
+    /// // at!() captures crate info automatically
+    /// let err = at!(MyError);
+    /// println!("{}", err.display_with_meta());
     /// ```
     pub fn display_with_meta(&self) -> impl fmt::Display + '_ {
         DisplayWithMeta { traced: self }
     }
 }
 
-/// Wrapper for displaying At<E> with ErrorMeta enhancements.
+/// Wrapper for displaying At<E> with CrateInfo enhancements.
 struct DisplayWithMeta<'a, E> {
     traced: &'a At<E>,
 }
 
-impl<E: fmt::Debug + ErrorMeta> fmt::Display for DisplayWithMeta<'_, E> {
+impl<E: fmt::Debug> fmt::Display for DisplayWithMeta<'_, E> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        let error = &self.traced.error;
-
-        // Error header - use trace_summary if provided, else Debug
-        write!(f, "Error: ")?;
-        if let Some(summary) = error.trace_summary() {
-            writeln!(f, "{}", summary)?;
-        } else {
-            writeln!(f, "{:?}", error)?;
-        }
-
-        // Show crate info if available
-        if let Some(crate_name) = error.crate_name() {
-            writeln!(f, "  crate: {}", crate_name)?;
-        }
-
-        // Show docs URL if available
-        if let Some(docs) = error.docs_url() {
-            writeln!(f, "  docs: {}", docs)?;
-        }
+        // Error header
+        writeln!(f, "Error: {:?}", self.traced.error)?;
 
         let Some(trace) = &self.traced.trace else {
             return Ok(());
         };
 
+        // Find initial CrateInfo from first Context::Crate in trace
+        let mut current_crate: Option<&'static CrateInfo> = None;
+        for ctx in trace.contexts() {
+            if let Context::Crate(info) = ctx {
+                current_crate = Some(info);
+                break;
+            }
+        }
+
+        // Show crate info if available
+        if let Some(info) = current_crate {
+            writeln!(f, "  crate: {}", info.name)?;
+        }
+
         writeln!(f)?;
 
-        // Build GitHub URL base if repo info is available
-        let github_base: Option<String> = match (error.repo_url(), error.git_commit()) {
-            (Some(repo), Some(commit)) => {
-                let repo = repo.trim_end_matches('/');
-                Some(alloc::format!("{}/blob/{}/", repo, commit))
-            }
-            _ => None,
-        };
-
-        // Simple iteration: walk locations, check for context at each index
+        // Walk locations, updating crate context as we encounter Crate entries
         for (i, loc) in trace.iter().enumerate() {
+            // Check for crate boundary at this location
+            if let Some(Context::Crate(info)) = trace.context_at(i) {
+                current_crate = Some(info);
+            }
+
+            // Build GitHub URL if crate info is available
+            let github_base: Option<String> =
+                current_crate.and_then(|info| match (info.repo, info.commit) {
+                    (Some(repo), Some(commit)) => {
+                        let repo = repo.trim_end_matches('/');
+                        Some(alloc::format!("{}/blob/{}/", repo, commit))
+                    }
+                    _ => None,
+                });
+
             write_location_meta(f, loc, github_base.as_deref())?;
+
+            // Show non-crate context
             if let Some(context) = trace.context_at(i) {
                 match context {
                     Context::Text(msg) => writeln!(f, "       ╰─ {}", msg)?,
                     Context::Debug(t) => writeln!(f, "       ╰─ {:?}", &**t)?,
                     Context::Display(t) => writeln!(f, "       ╰─ {}", &**t)?,
-                    Context::Crate(_) => {} // TODO: update github_base for subsequent locations
+                    Context::Crate(_) => {} // Already handled above
                 }
             }
         }
@@ -1151,22 +1093,35 @@ impl<E: fmt::Display> fmt::Display for At<E> {
     }
 }
 
-impl<E: fmt::Debug + fmt::Display> core::error::Error for At<E> {}
+impl<E: core::error::Error> core::error::Error for At<E> {
+    fn source(&self) -> Option<&(dyn core::error::Error + 'static)> {
+        self.error.source()
+    }
+}
 
 // ============================================================================
 // Traceable Trait - for calling .at() directly on error values
 // ============================================================================
 
-/// Extension trait that allows calling `.start_at()` on any error value.
+/// Extension trait that allows calling `.start_at()` on error types.
 ///
-/// Use `.start_at()` to wrap an error and capture the first location.
-/// Then use `.at()` on Results to add more locations as the error propagates.
+/// This trait is implemented for all types that implement `core::error::Error`.
+/// For types without `Error`, use the `at()` function or `at!()` macro instead.
 ///
 /// ```rust
 /// use errat::{Traceable, ResultExt};
+/// use core::fmt;
 ///
 /// #[derive(Debug)]
 /// enum MyError { NotFound }
+///
+/// impl fmt::Display for MyError {
+///     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+///         match self { MyError::NotFound => write!(f, "not found") }
+///     }
+/// }
+///
+/// impl core::error::Error for MyError {}
 ///
 /// fn inner() -> Result<(), errat::At<MyError>> {
 ///     Err(MyError::NotFound.start_at())
@@ -1192,7 +1147,7 @@ pub trait Traceable: Sized {
     fn start_at_message(self, msg: impl Into<Cow<'static, str>>) -> At<Self>;
 }
 
-impl<E> Traceable for E {
+impl<E: core::error::Error> Traceable for E {
     #[track_caller]
     #[inline]
     fn start_at(self) -> At<Self> {
@@ -1471,6 +1426,8 @@ mod tests {
         }
     }
 
+    impl core::error::Error for TestError {}
+
     #[test]
     fn test_sizeof() {
         use core::mem::size_of;
@@ -1678,7 +1635,7 @@ mod tests {
             count: u32,
         }
 
-        let mut err = MutableError { count: 0 }.start_at();
+        let mut err = at(MutableError { count: 0 });
         err.error_mut().count = 42;
         assert_eq!(err.error().count, 42);
     }
@@ -1693,12 +1650,11 @@ mod tests {
             data: [u8; 32],
         }
 
-        let err = LargeError {
+        let err = at(LargeError {
             message: String::from("test"),
             code: 42,
             data: [0; 32],
-        }
-        .start_at();
+        });
 
         assert_eq!(err.trace_len(), 1);
         assert_eq!(err.error().code, 42);

@@ -1,6 +1,6 @@
-//! Demonstrates ErrorMeta for enhanced trace display with GitHub links.
+//! Demonstrates enhanced trace display with CrateInfo and GitHub links.
 
-use errat::{At, ErrorMeta, ResultExt, Traceable};
+use errat::{At, ResultExt, at, crate_info};
 
 #[derive(Debug)]
 #[allow(dead_code)]
@@ -20,45 +20,14 @@ impl core::fmt::Display for AppError {
     }
 }
 
-// Implement ErrorMeta for enhanced trace output
-impl ErrorMeta for AppError {
-    fn crate_name(&self) -> Option<&'static str> {
-        Some("my_app")
-    }
-
-    fn repo_url(&self) -> Option<&'static str> {
-        // In real code, use env!("CARGO_PKG_REPOSITORY") or similar
-        Some("https://github.com/imazen/errat")
-    }
-
-    fn git_commit(&self) -> Option<&'static str> {
-        // In real code, capture at build time with build.rs
-        // option_env!("GIT_COMMIT")
-        Some("main") // Using branch name for demo
-    }
-
-    fn trace_summary(&self) -> Option<&str> {
-        // Provide a cleaner summary than Debug format
-        match self {
-            AppError::NotFound { .. } => Some("Resource not found"),
-            AppError::Unauthorized => Some("Access denied"),
-            AppError::DatabaseError(_) => Some("Database operation failed"),
-        }
-    }
-
-    fn docs_url(&self) -> Option<&'static str> {
-        Some("https://docs.rs/errat")
-    }
-}
-
 fn fetch_user(id: u64) -> Result<(), At<AppError>> {
     if id == 0 {
-        return Err(AppError::Unauthorized.start_at());
+        // at!() captures crate info automatically
+        return Err(at!(AppError::Unauthorized));
     }
-    Err(AppError::NotFound {
+    Err(at!(AppError::NotFound {
         resource: format!("user/{}", id),
-    }
-    .start_at())
+    }))
 }
 
 fn process_request(user_id: u64) -> Result<(), At<AppError>> {
@@ -76,19 +45,35 @@ fn main() {
     println!("=== Standard Debug output ===\n");
     println!("{:?}", err);
 
-    println!("\n=== Enhanced output with ErrorMeta ===\n");
+    println!("\n=== Enhanced output with CrateInfo ===\n");
     println!("{}", err.display_with_meta());
 
-    println!("=== What ErrorMeta provides ===");
+    println!("=== How CrateInfo works ===");
     println!(
         "
-With ErrorMeta implemented, display_with_meta() adds:
-- trace_summary(): Clean one-line error description
-- crate_name(): Shows which crate the error comes from
-- repo_url() + git_commit(): Clickable GitHub links for each location
-- docs_url(): Link to documentation
+When you use at!() to create errors, it automatically:
+1. Captures the crate name, repo URL, and git commit
+2. Stores this as CrateInfo in the trace
+3. display_with_meta() uses this to generate GitHub links
 
-This makes production error logs much more actionable!
+The crate_info!() macro captures:
+"
+    );
+
+    let info = crate_info!();
+    println!("  - name: {}", info.name);
+    println!("  - module: {}", info.module);
+    if let Some(repo) = info.repo {
+        println!("  - repo: {}", repo);
+    }
+    if let Some(commit) = info.commit {
+        println!("  - commit: {}", commit);
+    }
+
+    println!(
+        "
+For cross-crate error handling, use .at_crate(crate_info!())
+at crate boundaries to switch the repository used for links.
 "
     );
 }
