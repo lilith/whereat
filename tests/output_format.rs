@@ -1,7 +1,7 @@
 //! Integration tests for error output formatting.
 
 use core::error::Error;
-use errat::{At, ErrorAtExt, ResultAtExt, ResultTraceExt, at, start_at_late};
+use errat::{At, ErrorAtExt, ResultAtExt, ResultStartAtExt, at};
 
 // Define the crate-level static for at!() to reference
 errat::crate_info_static!();
@@ -68,7 +68,7 @@ fn display_output_is_just_error() {
 }
 
 // ============================================================================
-// Context Formatting
+// AtContext Formatting
 // ============================================================================
 
 #[test]
@@ -78,7 +78,7 @@ fn context_uses_corner_prefix() {
 
     assert!(
         output.contains("╰─ doing something"),
-        "Context should use '╰─' prefix. Got:\n{}",
+        "AtContext should use '╰─' prefix. Got:\n{}",
         output
     );
 }
@@ -159,7 +159,7 @@ fn data_context_shows_display_format() {
 
 #[test]
 fn skip_marker_shows_brackets() {
-    let err = start_at_late!(TestError::NotFound);
+    let err = at(TestError::NotFound).at_skipped();
     let output = format!("{:?}", err);
 
     assert!(
@@ -182,12 +182,12 @@ fn at_skipped_adds_skip_marker() {
 }
 
 #[test]
-fn trace_skipped_adds_skip_marker() {
+fn start_at_late_adds_skip_marker() {
     fn fallible() -> Result<(), &'static str> {
         Err("legacy error")
     }
 
-    let err = fallible().trace_skipped().unwrap_err();
+    let err = fallible().start_at_late().unwrap_err();
     let output = format!("{:?}", err);
 
     assert!(
@@ -271,7 +271,7 @@ fn context_indentation_deeper_than_location() {
 
     assert!(
         ctx_indent > at_indent,
-        "Context should be indented more than location. at={}, ctx={}",
+        "AtContext should be indented more than location. at={}, ctx={}",
         at_indent,
         ctx_indent
     );

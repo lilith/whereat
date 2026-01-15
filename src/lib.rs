@@ -36,7 +36,7 @@
 //! assert_eq!(err.trace_len(), 2);
 //! ```
 //!
-//! ## Adding Context
+//! ## Adding AtContext
 //!
 //! Use `.at_str()` for static strings, `.at_string()` for lazy strings, `.at_data()` for Display, `.at_debug()` for Debug:
 //!
@@ -76,17 +76,17 @@
 //!
 //! ## Converting Non-Traced Errors
 //!
-//! Use `.trace()` on Results with non-traced errors:
+//! Use `.start_at()` on Results with non-traced errors:
 //!
 //! ```rust
-//! use errat::{At, ResultTraceExt, ResultAtExt};
+//! use errat::{At, ResultStartAtExt, ResultAtExt};
 //!
 //! fn external_api() -> Result<(), &'static str> {
 //!     Err("external error")
 //! }
 //!
 //! fn wrapper() -> Result<(), At<&'static str>> {
-//!     external_api().trace()?;  // converts to At
+//!     external_api().start_at()?;  // converts to At
 //!     Ok(())
 //! }
 //! ```
@@ -314,7 +314,7 @@ pub struct At<E> {
 }
 
 // ============================================================================
-// DebugAny Trait - combines Any + Debug in a single trait object
+// AtDebugAny Trait - combines Any + Debug in a single trait object
 // ============================================================================
 
 /// Trait combining `Any` and `Debug` for type-erased context data.
@@ -322,7 +322,7 @@ pub struct At<E> {
 /// This allows storing arbitrary typed data while still being able to:
 /// - Debug-print it
 /// - Downcast it back to the original type
-pub trait DebugAny: core::any::Any + fmt::Debug + Send + Sync {
+pub trait AtDebugAny: core::any::Any + fmt::Debug + Send + Sync {
     /// Get a reference to self as `&dyn Any` for downcasting.
     fn as_any(&self) -> &dyn core::any::Any;
 
@@ -330,7 +330,7 @@ pub trait DebugAny: core::any::Any + fmt::Debug + Send + Sync {
     fn type_name(&self) -> &'static str;
 }
 
-impl<T: core::any::Any + fmt::Debug + Send + Sync> DebugAny for T {
+impl<T: core::any::Any + fmt::Debug + Send + Sync> AtDebugAny for T {
     fn as_any(&self) -> &dyn core::any::Any {
         self
     }
@@ -341,14 +341,14 @@ impl<T: core::any::Any + fmt::Debug + Send + Sync> DebugAny for T {
 }
 
 // ============================================================================
-// DisplayAny Trait - combines Any + Display in a single trait object
+// AtDisplayAny Trait - combines Any + Display in a single trait object
 // ============================================================================
 
 /// Trait combining `Any` and `Display` for type-erased context data.
 ///
-/// Similar to `DebugAny` but for types that implement `Display`.
+/// Similar to `AtDebugAny` but for types that implement `Display`.
 /// Use this when you want human-readable output instead of debug format.
-pub trait DisplayAny: core::any::Any + fmt::Display + Send + Sync {
+pub trait AtDisplayAny: core::any::Any + fmt::Display + Send + Sync {
     /// Get a reference to self as `&dyn Any` for downcasting.
     fn as_any(&self) -> &dyn core::any::Any;
 
@@ -356,7 +356,7 @@ pub trait DisplayAny: core::any::Any + fmt::Display + Send + Sync {
     fn type_name(&self) -> &'static str;
 }
 
-impl<T: core::any::Any + fmt::Display + Send + Sync> DisplayAny for T {
+impl<T: core::any::Any + fmt::Display + Send + Sync> AtDisplayAny for T {
     fn as_any(&self) -> &dyn core::any::Any {
         self
     }
@@ -914,34 +914,6 @@ macro_rules! at_crate {
     ($result:expr) => {{ $crate::ResultAtExt::at_crate($result, &crate::__ERRAT_CRATE_INFO) }};
 }
 
-/// Start tracing an error with a skip marker indicating late entry.
-///
-/// Use this when wrapping an error that originated elsewhere and you want
-/// to indicate that the trace doesn't show the full call stack.
-///
-/// ## Example
-///
-/// ```rust
-/// use errat::{start_at_late, At};
-///
-/// #[derive(Debug)]
-/// enum MyError { Legacy(String) }
-///
-/// // Wrapping an error from code that doesn't use errat
-/// fn wrap_legacy_error(msg: &str) -> At<MyError> {
-///     start_at_late!(MyError::Legacy(msg.into()))
-/// }
-///
-/// let err = wrap_legacy_error("old system failed");
-/// // Debug output will show [...] to indicate skipped frames
-/// let output = format!("{:?}", err);
-/// assert!(output.contains("[...]"));
-/// ```
-#[macro_export]
-macro_rules! start_at_late {
-    ($err:expr) => {{ $crate::At::new($err).at_skipped() }};
-}
-
 /// Wrap any value in `At<E>` and capture the caller's location.
 ///
 /// This function works with any type, not just `Error` types.
@@ -967,21 +939,21 @@ pub fn at<E>(err: E) -> At<E> {
 }
 
 // ============================================================================
-// Context Enum
+// AtContext Enum
 // ============================================================================
 
-/// Context data attached to a trace segment.
+/// AtContext data attached to a trace segment.
 ///
 /// Can be a simple string message, typed data (Debug/Display), or
 /// crate boundary information for cross-crate tracing.
-pub enum Context {
+pub enum AtContext {
     /// A text message describing what operation was being performed.
     /// Uses `Cow<'static, str>` for zero-copy static strings.
     Text(Cow<'static, str>),
     /// Typed context data formatted via Debug.
-    Debug(Box<dyn DebugAny>),
+    Debug(Box<dyn AtDebugAny>),
     /// Typed context data formatted via Display.
-    Display(Box<dyn DisplayAny>),
+    Display(Box<dyn AtDisplayAny>),
     /// Crate boundary marker - changes the assumed crate for subsequent locations.
     /// Used for generating correct repository links in cross-crate traces.
     Crate(&'static AtCrateInfo),
@@ -991,11 +963,11 @@ pub enum Context {
     Skipped,
 }
 
-impl Context {
+impl AtContext {
     /// Get as text, if this is a Text variant.
     pub fn as_text(&self) -> Option<&str> {
         match self {
-            Context::Text(s) => Some(s),
+            AtContext::Text(s) => Some(s),
             _ => None,
         }
     }
@@ -1003,7 +975,7 @@ impl Context {
     /// Get as crate info, if this is a Crate variant.
     pub fn as_crate_info(&self) -> Option<&'static AtCrateInfo> {
         match self {
-            Context::Crate(info) => Some(info),
+            AtContext::Crate(info) => Some(info),
             _ => None,
         }
     }
@@ -1011,59 +983,59 @@ impl Context {
     /// Try to downcast to a specific type, if this is a typed variant.
     pub fn downcast_ref<T: 'static>(&self) -> Option<&T> {
         match self {
-            Context::Text(_) | Context::Crate(_) | Context::Skipped => None,
+            AtContext::Text(_) | AtContext::Crate(_) | AtContext::Skipped => None,
             // Must use (**b) to call as_any on the trait object, not the Box
-            // (Box<dyn DebugAny> itself implements DebugAny through the blanket impl)
-            Context::Debug(b) => (**b).as_any().downcast_ref(),
-            Context::Display(b) => (**b).as_any().downcast_ref(),
+            // (Box<dyn AtDebugAny> itself implements AtDebugAny through the blanket impl)
+            AtContext::Debug(b) => (**b).as_any().downcast_ref(),
+            AtContext::Display(b) => (**b).as_any().downcast_ref(),
         }
     }
 
     /// Get the type name if this is a typed variant.
     pub fn type_name(&self) -> Option<&'static str> {
         match self {
-            Context::Text(_) | Context::Crate(_) | Context::Skipped => None,
-            Context::Debug(b) => Some((**b).type_name()),
-            Context::Display(b) => Some((**b).type_name()),
+            AtContext::Text(_) | AtContext::Crate(_) | AtContext::Skipped => None,
+            AtContext::Debug(b) => Some((**b).type_name()),
+            AtContext::Display(b) => Some((**b).type_name()),
         }
     }
 
     /// Check if this context uses Display formatting.
     pub fn is_display(&self) -> bool {
-        matches!(self, Context::Text(_) | Context::Display(_))
+        matches!(self, AtContext::Text(_) | AtContext::Display(_))
     }
 
     /// Check if this is a crate boundary marker.
     pub fn is_crate_boundary(&self) -> bool {
-        matches!(self, Context::Crate(_))
+        matches!(self, AtContext::Crate(_))
     }
 
     /// Check if this is a skip marker.
     pub fn is_skipped(&self) -> bool {
-        matches!(self, Context::Skipped)
+        matches!(self, AtContext::Skipped)
     }
 }
 
-impl fmt::Debug for Context {
+impl fmt::Debug for AtContext {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            Context::Text(s) => write!(f, "{:?}", s),
-            Context::Debug(t) => write!(f, "{:?}", &**t),
-            Context::Display(t) => write!(f, "{}", &**t), // Display types use Display even in Debug
-            Context::Crate(info) => write!(f, "[crate: {}]", info.name),
-            Context::Skipped => write!(f, "[...]"),
+            AtContext::Text(s) => write!(f, "{:?}", s),
+            AtContext::Debug(t) => write!(f, "{:?}", &**t),
+            AtContext::Display(t) => write!(f, "{}", &**t), // Display types use Display even in Debug
+            AtContext::Crate(info) => write!(f, "[crate: {}]", info.name),
+            AtContext::Skipped => write!(f, "[...]"),
         }
     }
 }
 
-impl fmt::Display for Context {
+impl fmt::Display for AtContext {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            Context::Text(s) => write!(f, "{}", s),
-            Context::Debug(t) => write!(f, "{:?}", &**t), // Debug types use Debug in Display
-            Context::Display(t) => write!(f, "{}", &**t),
-            Context::Crate(info) => write!(f, "[crate: {}]", info.name),
-            Context::Skipped => write!(f, "[...]"),
+            AtContext::Text(s) => write!(f, "{}", s),
+            AtContext::Debug(t) => write!(f, "{:?}", &**t), // Debug types use Debug in Display
+            AtContext::Display(t) => write!(f, "{}", &**t),
+            AtContext::Crate(info) => write!(f, "[crate: {}]", info.name),
+            AtContext::Skipped => write!(f, "[...]"),
         }
     }
 }
@@ -1075,9 +1047,9 @@ impl fmt::Display for Context {
 struct Trace {
     /// All locations in order (oldest first).
     locations: LocationVec,
-    /// Context associations: (location_index, context).
+    /// AtContext associations: (location_index, context).
     /// Index saturates at u16::MAX; out-of-bounds associations are silently ignored.
-    contexts: Vec<(u16, Context)>,
+    contexts: Vec<(u16, AtContext)>,
 }
 
 impl Trace {
@@ -1105,7 +1077,7 @@ impl Trace {
 
     /// Try to push a location with context.
     /// On allocation failure, the location/context may be lost but existing data is preserved.
-    fn try_push_with_context(&mut self, loc: &'static Location<'static>, context: Context) {
+    fn try_push_with_context(&mut self, loc: &'static Location<'static>, context: AtContext) {
         if !try_push_location(&mut self.locations, loc) {
             return; // Location push failed, skip context too
         }
@@ -1131,7 +1103,7 @@ impl Trace {
     fn message(&self) -> Option<&str> {
         // Contexts are in order of addition, so iterate backwards for most recent
         for (_, ctx) in self.contexts.iter().rev() {
-            if let Context::Text(msg) = ctx {
+            if let AtContext::Text(msg) = ctx {
                 return Some(msg);
             }
         }
@@ -1139,12 +1111,12 @@ impl Trace {
     }
 
     /// Iterate over all context entries, newest first.
-    fn contexts(&self) -> impl Iterator<Item = &Context> {
+    fn contexts(&self) -> impl Iterator<Item = &AtContext> {
         self.contexts.iter().rev().map(|(_, ctx)| ctx)
     }
 
     /// Get context at a specific location index, if any.
-    fn context_at(&self, idx: usize) -> Option<&Context> {
+    fn context_at(&self, idx: usize) -> Option<&AtContext> {
         if idx > u16::MAX as usize {
             return None;
         }
@@ -1239,7 +1211,7 @@ impl<E> At<E> {
     #[inline]
     pub fn at_str(mut self, msg: &'static str) -> Self {
         let loc = Location::caller();
-        let context = Context::Text(Cow::Borrowed(msg));
+        let context = AtContext::Text(Cow::Borrowed(msg));
 
         match &mut self.trace {
             Some(trace) => {
@@ -1283,7 +1255,7 @@ impl<E> At<E> {
     #[inline]
     pub fn at_string(mut self, f: impl FnOnce() -> String) -> Self {
         let loc = Location::caller();
-        let context = Context::Text(Cow::Owned(f()));
+        let context = AtContext::Text(Cow::Owned(f()));
 
         match &mut self.trace {
             Some(trace) => {
@@ -1312,7 +1284,7 @@ impl<E> At<E> {
     /// ## Example
     ///
     /// ```rust
-    /// use errat::{at, At, Context};
+    /// use errat::{at, At, AtContext};
     ///
     /// #[derive(Debug)]
     /// enum MyError { NotFound }
@@ -1345,7 +1317,7 @@ impl<E> At<E> {
         let Some(boxed_ctx) = try_box(ctx) else {
             return self;
         };
-        let context = Context::Display(boxed_ctx);
+        let context = AtContext::Display(boxed_ctx);
 
         match &mut self.trace {
             Some(trace) => {
@@ -1370,7 +1342,7 @@ impl<E> At<E> {
     /// ## Example
     ///
     /// ```rust
-    /// use errat::{at, At, Context};
+    /// use errat::{at, At, AtContext};
     ///
     /// #[derive(Debug)]
     /// struct RequestInfo { user_id: u64, path: String }
@@ -1399,7 +1371,7 @@ impl<E> At<E> {
         let Some(boxed_ctx) = try_box(ctx) else {
             return self;
         };
-        let context = Context::Debug(boxed_ctx);
+        let context = AtContext::Debug(boxed_ctx);
 
         match &mut self.trace {
             Some(trace) => {
@@ -1441,7 +1413,7 @@ impl<E> At<E> {
     #[inline]
     pub fn at_crate(mut self, info: &'static AtCrateInfo) -> Self {
         let loc = Location::caller();
-        let context = Context::Crate(info);
+        let context = AtContext::Crate(info);
 
         match &mut self.trace {
             Some(trace) => {
@@ -1481,7 +1453,7 @@ impl<E> At<E> {
     #[inline]
     pub fn at_skipped(mut self) -> Self {
         let loc = Location::caller();
-        let context = Context::Skipped;
+        let context = AtContext::Skipped;
 
         match &mut self.trace {
             Some(trace) => {
@@ -1555,7 +1527,7 @@ impl<E> At<E> {
     /// Iterate over all context entries, newest first.
     ///
     /// Each call to `at_msg()` or `at_context()` creates a context entry.
-    pub fn contexts(&self) -> impl Iterator<Item = &Context> {
+    pub fn contexts(&self) -> impl Iterator<Item = &AtContext> {
         self.trace.iter().flat_map(|t| t.contexts())
     }
 }
@@ -1576,11 +1548,11 @@ impl<E: fmt::Debug> fmt::Debug for At<E> {
             writeln!(f, "    at {}:{}", loc.file(), loc.line())?;
             if let Some(context) = trace.context_at(i) {
                 match context {
-                    Context::Text(msg) => writeln!(f, "       ╰─ {}", msg)?,
-                    Context::Debug(t) => writeln!(f, "       ╰─ {:?}", &**t)?,
-                    Context::Display(t) => writeln!(f, "       ╰─ {}", &**t)?,
-                    Context::Crate(_) => {} // Crate boundaries don't display in basic Debug
-                    Context::Skipped => writeln!(f, "       [...]")?,
+                    AtContext::Text(msg) => writeln!(f, "       ╰─ {}", msg)?,
+                    AtContext::Debug(t) => writeln!(f, "       ╰─ {:?}", &**t)?,
+                    AtContext::Display(t) => writeln!(f, "       ╰─ {}", &**t)?,
+                    AtContext::Crate(_) => {} // Crate boundaries don't display in basic Debug
+                    AtContext::Skipped => writeln!(f, "       [...]")?,
                 }
             }
         }
@@ -1634,10 +1606,10 @@ impl<E: fmt::Debug> fmt::Display for DisplayWithMeta<'_, E> {
             return Ok(());
         };
 
-        // Find initial AtCrateInfo from first Context::Crate in trace
+        // Find initial AtCrateInfo from first AtContext::Crate in trace
         let mut current_crate: Option<&'static AtCrateInfo> = None;
         for ctx in trace.contexts() {
-            if let Context::Crate(info) = ctx {
+            if let AtContext::Crate(info) = ctx {
                 current_crate = Some(info);
                 break;
             }
@@ -1653,7 +1625,7 @@ impl<E: fmt::Debug> fmt::Display for DisplayWithMeta<'_, E> {
         // Walk locations, updating crate context as we encounter Crate entries
         for (i, loc) in trace.iter().enumerate() {
             // Check for crate boundary at this location
-            if let Some(Context::Crate(info)) = trace.context_at(i) {
+            if let Some(AtContext::Crate(info)) = trace.context_at(i) {
                 current_crate = Some(info);
             }
 
@@ -1674,11 +1646,11 @@ impl<E: fmt::Debug> fmt::Display for DisplayWithMeta<'_, E> {
             // Show non-crate context
             if let Some(context) = trace.context_at(i) {
                 match context {
-                    Context::Text(msg) => writeln!(f, "       ╰─ {}", msg)?,
-                    Context::Debug(t) => writeln!(f, "       ╰─ {:?}", &**t)?,
-                    Context::Display(t) => writeln!(f, "       ╰─ {}", &**t)?,
-                    Context::Crate(_) => {} // Already handled above
-                    Context::Skipped => writeln!(f, "       [...]")?,
+                    AtContext::Text(msg) => writeln!(f, "       ╰─ {}", msg)?,
+                    AtContext::Debug(t) => writeln!(f, "       ╰─ {:?}", &**t)?,
+                    AtContext::Display(t) => writeln!(f, "       ╰─ {}", &**t)?,
+                    AtContext::Crate(_) => {} // Already handled above
+                    AtContext::Skipped => writeln!(f, "       [...]")?,
                 }
             }
         }
@@ -1903,59 +1875,43 @@ impl<T, E> ResultAtExt<T, E> for Result<T, At<E>> {
 
 /// Extension trait for converting non-traced errors to traced errors.
 ///
-/// Use `.trace()` on `Result<T, E>` to wrap the error in `At<E>` and capture
+/// Use `.start_at()` on `Result<T, E>` to wrap the error in `At<E>` and capture
 /// the first location. For Results that already have `At<E>`, use `ResultAtExt::at()`.
 ///
 /// ## Example
 ///
 /// ```rust
-/// use errat::ResultTraceExt;
+/// use errat::ResultStartAtExt;
 ///
 /// fn fallible() -> Result<(), &'static str> {
 ///     Err("something went wrong")
 /// }
 ///
 /// fn wrapper() -> Result<(), errat::At<&'static str>> {
-///     fallible().trace()?;  // converts to At and captures location
+///     fallible().start_at()?;  // converts to At and captures location
 ///     Ok(())
 /// }
 /// ```
-pub trait ResultTraceExt<T, E> {
+pub trait ResultStartAtExt<T, E> {
     /// Convert the error to `At<E>` and add the caller's location.
+    ///
+    /// Use this to wrap errors from code that doesn't use errat.
+    /// Chain with `ResultAtExt` methods for context: `.start_at().at_str("msg")?`
     #[track_caller]
-    fn trace(self) -> Result<T, At<E>>;
-
-    /// Convert to `At<E>` with static message context (zero-cost).
-    #[track_caller]
-    fn trace_str(self, msg: &'static str) -> Result<T, At<E>>;
-
-    /// Convert to `At<E>` with lazily-computed string context.
-    #[track_caller]
-    fn trace_string(self, f: impl FnOnce() -> String) -> Result<T, At<E>>;
-
-    /// Convert to `At<E>` with lazily-computed typed context (Display formatted).
-    #[track_caller]
-    fn trace_data<C: fmt::Display + Send + Sync + 'static>(
-        self,
-        f: impl FnOnce() -> C,
-    ) -> Result<T, At<E>>;
-
-    /// Convert to `At<E>` with lazily-computed typed context (Debug formatted).
-    #[track_caller]
-    fn trace_debug<C: fmt::Debug + Send + Sync + 'static>(
-        self,
-        f: impl FnOnce() -> C,
-    ) -> Result<T, At<E>>;
+    fn start_at(self) -> Result<T, At<E>>;
 
     /// Convert to `At<E>` with a skip marker indicating late tracing.
+    ///
+    /// Use when wrapping errors where earlier frames were not traced.
+    /// The `[...]` marker indicates the trace started late.
     #[track_caller]
-    fn trace_skipped(self) -> Result<T, At<E>>;
+    fn start_at_late(self) -> Result<T, At<E>>;
 }
 
-impl<T, E> ResultTraceExt<T, E> for Result<T, E> {
+impl<T, E> ResultStartAtExt<T, E> for Result<T, E> {
     #[track_caller]
     #[inline]
-    fn trace(self) -> Result<T, At<E>> {
+    fn start_at(self) -> Result<T, At<E>> {
         match self {
             Ok(v) => Ok(v),
             Err(e) => Err(At::new(e).at()),
@@ -1964,49 +1920,7 @@ impl<T, E> ResultTraceExt<T, E> for Result<T, E> {
 
     #[track_caller]
     #[inline]
-    fn trace_str(self, msg: &'static str) -> Result<T, At<E>> {
-        match self {
-            Ok(v) => Ok(v),
-            Err(e) => Err(At::new(e).at_str(msg)),
-        }
-    }
-
-    #[track_caller]
-    #[inline]
-    fn trace_string(self, f: impl FnOnce() -> String) -> Result<T, At<E>> {
-        match self {
-            Ok(v) => Ok(v),
-            Err(e) => Err(At::new(e).at_string(f)),
-        }
-    }
-
-    #[track_caller]
-    #[inline]
-    fn trace_data<C: fmt::Display + Send + Sync + 'static>(
-        self,
-        f: impl FnOnce() -> C,
-    ) -> Result<T, At<E>> {
-        match self {
-            Ok(v) => Ok(v),
-            Err(e) => Err(At::new(e).at_data(f)),
-        }
-    }
-
-    #[track_caller]
-    #[inline]
-    fn trace_debug<C: fmt::Debug + Send + Sync + 'static>(
-        self,
-        f: impl FnOnce() -> C,
-    ) -> Result<T, At<E>> {
-        match self {
-            Ok(v) => Ok(v),
-            Err(e) => Err(At::new(e).at_debug(f)),
-        }
-    }
-
-    #[track_caller]
-    #[inline]
-    fn trace_skipped(self) -> Result<T, At<E>> {
+    fn start_at_late(self) -> Result<T, At<E>> {
         match self {
             Ok(v) => Ok(v),
             Err(e) => Err(At::new(e).at_skipped()),
@@ -2078,7 +1992,7 @@ mod tests {
         let trace_size = size_of::<Trace>();
         let location_vec_size = size_of::<LocationVec>();
         // Print sizes for documentation (visible with cargo test -- --nocapture)
-        // Trace = LocationVec + Vec<(u16, Context)>
+        // Trace = LocationVec + Vec<(u16, AtContext)>
 
         // Without tinyvec: LocationVec = Vec = 24, contexts = 24, Trace = 48
         #[cfg(not(any(
@@ -2087,11 +2001,11 @@ mod tests {
             feature = "tinyvec-256-bytes"
         )))]
         {
-            let contexts_vec_size = size_of::<Vec<(u16, Context)>>();
+            let contexts_vec_size = size_of::<Vec<(u16, AtContext)>>();
             assert_eq!(location_vec_size, 24, "Vec<&Location> should be 24 bytes");
             assert_eq!(
                 contexts_vec_size, 24,
-                "Vec<(u16, Context)> should be 24 bytes"
+                "Vec<(u16, AtContext)> should be 24 bytes"
             );
             assert_eq!(trace_size, 48, "Trace should be 48 bytes without tinyvec");
         }
@@ -2181,7 +2095,7 @@ mod tests {
         }
 
         fn wrapper() -> Result<(), At<&'static str>> {
-            fallible().trace()?;
+            fallible().start_at()?;
             Ok(())
         }
 
@@ -2307,13 +2221,13 @@ mod tests {
     }
 
     #[test]
-    fn test_trace_str() {
+    fn test_start_at_with_context() {
         fn fallible() -> Result<(), &'static str> {
             Err("oops")
         }
 
         fn wrapper() -> Result<(), At<&'static str>> {
-            fallible().trace_str("while doing something")?;
+            fallible().start_at().at_str("while doing something")?;
             Ok(())
         }
 
@@ -2387,14 +2301,14 @@ mod tests {
 
     #[test]
     fn test_context_enum() {
-        use super::Context;
+        use super::AtContext;
 
-        let text_ctx = Context::Text(String::from("hello").into());
+        let text_ctx = AtContext::Text(String::from("hello").into());
         assert_eq!(text_ctx.as_text(), Some("hello"));
         assert!(text_ctx.downcast_ref::<u32>().is_none());
 
         // Debug context - requires Debug (u32 implements Debug)
-        let debug_ctx = Context::Debug(Box::new(42u32));
+        let debug_ctx = AtContext::Debug(Box::new(42u32));
         assert_eq!(debug_ctx.as_text(), None);
         assert_eq!(debug_ctx.downcast_ref::<u32>(), Some(&42));
 
@@ -2403,7 +2317,7 @@ mod tests {
         assert!(debug_str.contains("42"));
 
         // Display context - requires Display (u32 implements Display)
-        let display_ctx = Context::Display(Box::new(99u32));
+        let display_ctx = AtContext::Display(Box::new(99u32));
         assert_eq!(display_ctx.as_text(), None);
         assert_eq!(display_ctx.downcast_ref::<u32>(), Some(&99));
 

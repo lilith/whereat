@@ -3,7 +3,7 @@
 #![allow(dead_code)]
 
 use core::mem::size_of;
-use errat::{At, AtCrateInfo, Context, at, at_crate, crate_info};
+use errat::{At, AtContext, AtCrateInfo, at, at_crate, crate_info};
 
 // Define the crate-level static for at!() and at_crate!() to reference
 errat::crate_info_static!();
@@ -245,13 +245,13 @@ fn sizeof_crate_info_is_six_fields() {
 
 #[test]
 fn sizeof_context_is_bounded() {
-    let ctx_size = size_of::<Context>();
+    let ctx_size = size_of::<AtContext>();
 
-    // Context is an enum with largest variant being Box<dyn ...> (fat pointer = 16 bytes)
+    // AtContext is an enum with largest variant being Box<dyn ...> (fat pointer = 16 bytes)
     // Plus discriminant and padding
     assert!(
         ctx_size <= 24,
-        "Context should be <= 24 bytes. Got: {}",
+        "AtContext should be <= 24 bytes. Got: {}",
         ctx_size
     );
 }

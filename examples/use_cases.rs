@@ -4,7 +4,7 @@
 
 #![allow(dead_code)]
 
-use errat::{At, ErrorAtExt, ResultAtExt, ResultTraceExt, at, at_crate, start_at_late};
+use errat::{At, ErrorAtExt, ResultAtExt, ResultStartAtExt, at, at_crate};
 
 // Required for at!() and at_crate!() macros - defines __ERRAT_CRATE_INFO
 errat::crate_info_static!();
@@ -75,7 +75,9 @@ mod use_case_2 {
 
     // Wrap std::io::Error
     fn read_config(path: &str) -> Result<String, At<io::Error>> {
-        std::fs::read_to_string(path).trace_str("reading config file")
+        std::fs::read_to_string(path)
+            .start_at()
+            .at_str("reading config file")
     }
 
     // Chain with more context
@@ -140,7 +142,7 @@ mod use_case_3 {
 }
 
 // ============================================================================
-// Use Case 4: Typed Context for Structured Logging
+// Use Case 4: Typed AtContext for Structured Logging
 // ============================================================================
 //
 // Attach structured data for later retrieval (e.g., for JSON logging).
@@ -183,7 +185,7 @@ mod use_case_4 {
     }
 
     pub fn demo() {
-        println!("=== Use Case 4: Typed Context ===\n");
+        println!("=== Use Case 4: Typed AtContext ===\n");
 
         let ctx = RequestContext {
             user_id: 42,
@@ -226,15 +228,15 @@ mod use_case_5 {
     // Wrapper that starts tracing late
     pub fn wrap_legacy() -> Result<(), At<&'static str>> {
         legacy::old_function()
-            .trace_skipped() // Marks that earlier frames were skipped
+            .start_at_late() // Marks that earlier frames were skipped
             .at_str("calling legacy code")
     }
 
-    // Alternative: use start_at_late! macro
+    // Alternative: direct construction with at() + at_skipped()
     pub fn wrap_legacy_alt() -> At<&'static str> {
         match legacy::old_function() {
             Ok(()) => unreachable!(),
-            Err(e) => start_at_late!(e),
+            Err(e) => at(e).at_skipped(),
         }
     }
 
@@ -242,10 +244,10 @@ mod use_case_5 {
         println!("=== Use Case 5: Late Tracing (Legacy Code) ===\n");
 
         let err = wrap_legacy().unwrap_err();
-        println!("With trace_skipped():");
+        println!("With start_at_late():");
         println!("{:?}", err);
 
-        println!("\nWith start_at_late!():");
+        println!("\nWith at().at_skipped():");
         let err = wrap_legacy_alt();
         println!("{:?}", err);
         println!();
@@ -265,8 +267,8 @@ fn main() {
 
     println!("=== Summary ===\n");
     println!("1. Basic:      .start_at() + .at() / .at_str() / .at_string()");
-    println!("2. External:   .trace() / .trace_str() to wrap non-At errors");
+    println!("2. External:   .start_at() / .trace_str() to wrap non-At errors");
     println!("3. Cross-crate: at!() + at_crate!() for GitHub links");
     println!("4. Typed ctx:  .at_debug() / .at_data() + .downcast_ref()");
-    println!("5. Legacy:     start_at_late!() / .trace_skipped() for [...]");
+    println!("5. Legacy:     .start_at_late() / at().at_skipped() for [...]");
 }
