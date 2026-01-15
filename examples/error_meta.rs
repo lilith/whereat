@@ -1,6 +1,6 @@
 //! Demonstrates ErrorMeta for enhanced trace display with GitHub links.
 
-use errat::{ErrorMeta, ResultExt, Traceable, Traced};
+use errat::{At, ErrorMeta, ResultExt, Traceable};
 
 #[derive(Debug)]
 #[allow(dead_code)]
@@ -51,7 +51,7 @@ impl ErrorMeta for AppError {
     }
 }
 
-fn fetch_user(id: u64) -> Result<(), Traced<AppError>> {
+fn fetch_user(id: u64) -> Result<(), At<AppError>> {
     if id == 0 {
         return Err(AppError::Unauthorized.start_at());
     }
@@ -61,12 +61,12 @@ fn fetch_user(id: u64) -> Result<(), Traced<AppError>> {
     .start_at())
 }
 
-fn process_request(user_id: u64) -> Result<(), Traced<AppError>> {
+fn process_request(user_id: u64) -> Result<(), At<AppError>> {
     fetch_user(user_id).at_message("fetching user data")?;
     Ok(())
 }
 
-fn handle_api_call() -> Result<(), Traced<AppError>> {
+fn handle_api_call() -> Result<(), At<AppError>> {
     process_request(42).at_message("processing API request")
 }
 

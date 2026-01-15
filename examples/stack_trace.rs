@@ -1,6 +1,6 @@
 //! Demonstrates errat stack traces in a realistic scenario.
 
-use errat::{ResultExt, Traceable, Traced};
+use errat::{At, ResultExt, Traceable};
 
 #[derive(Debug)]
 #[allow(dead_code)]
@@ -24,7 +24,7 @@ impl core::fmt::Display for AppError {
 mod db {
     use super::*;
 
-    pub fn query_user(id: u64) -> Result<(), Traced<AppError>> {
+    pub fn query_user(id: u64) -> Result<(), At<AppError>> {
         if id == 0 {
             return Err(AppError::Database("connection timeout".into()).start_at());
         }
@@ -36,11 +36,11 @@ mod db {
 mod service {
     use super::*;
 
-    pub fn get_user(id: u64) -> Result<(), Traced<AppError>> {
+    pub fn get_user(id: u64) -> Result<(), At<AppError>> {
         db::query_user(id).at_message("querying database")
     }
 
-    pub fn validate_user_access(user_id: u64, _resource: &str) -> Result<(), Traced<AppError>> {
+    pub fn validate_user_access(user_id: u64, _resource: &str) -> Result<(), At<AppError>> {
         get_user(user_id).at_message("checking user exists")?;
         // More validation...
         Ok(())
@@ -51,7 +51,7 @@ mod service {
 mod handler {
     use super::*;
 
-    pub fn handle_request(user_id: u64) -> Result<(), Traced<AppError>> {
+    pub fn handle_request(user_id: u64) -> Result<(), At<AppError>> {
         service::validate_user_access(user_id, "/admin").at_message("validating access")
     }
 }

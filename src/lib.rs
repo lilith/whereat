@@ -5,17 +5,17 @@
 //!
 //! ## Design Goals
 //!
-//! - **Small sizeof**: `Traced<E>` is only `sizeof(E) + 8` bytes (one pointer for boxed trace)
+//! - **Small sizeof**: `At<E>` is only `sizeof(E) + 8` bytes (one pointer for boxed trace)
 //! - **Zero allocation on Ok path**: No heap allocation until an error occurs
-//! - **Simple API**: `.traced()` on errors, `.at()` on Results
-//! - **Zero-copy static strings**: `.msg("literal")` uses `Cow<'static, str>`
-//! - **Lazy evaluation**: `.with_msg(|| ...)` defers computation to error path
+//! - **Simple API**: `.start_at()` on errors, `.at()` on Results
+//! - **Zero-copy static strings**: `.at_message("literal")` uses `Cow<'static, str>`
+//! - **Lazy evaluation**: `.at_display(|| ...)` defers computation to error path
 //! - **no_std compatible**: Works with just `core` + `alloc`, `std` is optional
 //!
 //! ## Quick Start
 //!
 //! ```rust
-//! use errat::{Traced, Traceable, ResultExt};
+//! use errat::{At, Traceable, ResultExt};
 //!
 //! #[derive(Debug)]
 //! enum MyError {
@@ -23,11 +23,11 @@
 //!     InvalidInput(String),
 //! }
 //!
-//! fn inner() -> Result<(), Traced<MyError>> {
-//!     Err(MyError::NotFound.traced())  // .traced() wraps and captures location
+//! fn inner() -> Result<(), At<MyError>> {
+//!     Err(MyError::NotFound.start_at())  // .start_at() wraps and captures location
 //! }
 //!
-//! fn outer() -> Result<(), Traced<MyError>> {
+//! fn outer() -> Result<(), At<MyError>> {
 //!     inner().at()?;  // .at() adds another location
 //!     Ok(())
 //! }
@@ -38,38 +38,38 @@
 //!
 //! ## Adding Context
 //!
-//! Use `.msg()` for string context, `.ctx()` for Display, `.dbg_ctx()` for Debug:
+//! Use `.at_message()` for string context, `.at_display()` for Display, `.at_debug()` for Debug:
 //!
 //! ```rust
-//! use errat::{Traced, Traceable, ResultExt};
+//! use errat::{At, Traceable, ResultExt};
 //!
 //! #[derive(Debug)]
 //! enum MyError { IoError }
 //!
-//! fn read_config() -> Result<(), Traced<MyError>> {
-//!     Err(MyError::IoError.traced())
+//! fn read_config() -> Result<(), At<MyError>> {
+//!     Err(MyError::IoError.start_at())
 //! }
 //!
-//! fn init() -> Result<(), Traced<MyError>> {
-//!     read_config().msg("loading configuration")?;  // static str, no alloc
+//! fn init() -> Result<(), At<MyError>> {
+//!     read_config().at_message("loading configuration")?;  // static str, no alloc
 //!     Ok(())
 //! }
 //! ```
 //!
-//! Use `with_*` variants for lazy evaluation (only runs on error):
+//! Context methods take closures for lazy evaluation (only runs on error):
 //!
 //! ```rust
-//! use errat::{Traced, Traceable, ResultExt};
+//! use errat::{At, Traceable, ResultExt};
 //!
 //! #[derive(Debug)]
 //! enum MyError { NotFound }
 //!
-//! fn load(path: &str) -> Result<(), Traced<MyError>> {
-//!     Err(MyError::NotFound.traced())
+//! fn load(path: &str) -> Result<(), At<MyError>> {
+//!     Err(MyError::NotFound.start_at())
 //! }
 //!
-//! fn init(path: &str) -> Result<(), Traced<MyError>> {
-//!     load(path).with_msg(|| format!("loading {}", path))?;  // only allocates on error
+//! fn init(path: &str) -> Result<(), At<MyError>> {
+//!     load(path).at_display(|| format!("loading {}", path))?;  // only allocates on error
 //!     Ok(())
 //! }
 //! ```
@@ -79,14 +79,14 @@
 //! Use `.trace()` on Results with non-traced errors:
 //!
 //! ```rust
-//! use errat::{Traced, ResultTraceExt, ResultExt};
+//! use errat::{At, ResultTraceExt, ResultExt};
 //!
 //! fn external_api() -> Result<(), &'static str> {
 //!     Err("external error")
 //! }
 //!
-//! fn wrapper() -> Result<(), Traced<&'static str>> {
-//!     external_api().trace()?;  // converts to Traced
+//! fn wrapper() -> Result<(), At<&'static str>> {
+//!     external_api().trace()?;  // converts to At
 //!     Ok(())
 //! }
 //! ```
@@ -98,7 +98,7 @@
 //!
 //! If memory allocation fails:
 //! - Vec/String trace entries are silently skipped
-//! - The error `E` itself always propagates (it's stored inline in `Traced<E>`)
+//! - The error `E` itself always propagates (it's stored inline in `At<E>`)
 //! - Box allocation failure will panic (rare in practice)
 
 #![no_std]
@@ -108,7 +108,7 @@ extern crate alloc;
 
 use alloc::borrow::Cow;
 use alloc::boxed::Box;
-use alloc::string::{String, ToString};
+use alloc::string::String;
 use alloc::vec::Vec;
 use core::fmt;
 use core::panic::Location;
@@ -245,7 +245,7 @@ pub trait ErrorMeta {
 // Uses stable try_reserve APIs where available. Box::try_new is not yet stable,
 // so Box allocations use regular Box::new which can panic on OOM.
 // In practice, OOM panics are rare and the error itself still propagates
-// (since E is stored inline in Traced<E>).
+// (since E is stored inline in At<E>).
 
 /// Try to allocate a Box. Returns Some on success.
 /// Note: Box::try_new is not yet stable, so this can panic on OOM.
@@ -341,27 +341,27 @@ fn unwrap_location(loc: &LocationElem) -> &'static Location<'static> {
 // Core Types
 // ============================================================================
 
-/// A traced error that wraps any error type with location tracking.
+/// An error with location tracking - wraps any error type.
 ///
 /// ## Size
 ///
-/// `Traced<E>` is `sizeof(E) + 8` bytes on 64-bit platforms:
+/// `At<E>` is `sizeof(E) + 8` bytes on 64-bit platforms:
 /// - The error `E` is stored inline
 /// - The trace is boxed (8-byte pointer, null when empty)
 ///
 /// ## Example
 ///
 /// ```rust
-/// use errat::{Traced, Traceable};
+/// use errat::{At, Traceable};
 ///
 /// #[derive(Debug)]
 /// enum MyError { Oops }
 ///
 /// // Create a traced error
-/// let err: Traced<MyError> = MyError::Oops.traced();
+/// let err: At<MyError> = MyError::Oops.start_at();
 /// assert_eq!(err.trace_len(), 1);
 /// ```
-pub struct Traced<E> {
+pub struct At<E> {
     error: E,
     trace: Option<Box<Trace>>,
 }
@@ -497,12 +497,12 @@ macro_rules! crate_info {
 /// ## Example
 ///
 /// ```rust
-/// use errat::{at, Traced};
+/// use errat::{at, At};
 ///
 /// #[derive(Debug)]
 /// enum MyError { NotFound }
 ///
-/// fn find_user(id: u64) -> Result<String, Traced<MyError>> {
+/// fn find_user(id: u64) -> Result<String, At<MyError>> {
 ///     if id == 0 {
 ///         return Err(at!(MyError::NotFound));
 ///     }
@@ -608,7 +608,7 @@ impl fmt::Display for Context {
     }
 }
 
-/// Internal trace storage - boxed to keep Traced<E> small.
+/// Internal trace storage - boxed to keep At<E> small.
 ///
 /// Flat structure: contiguous location array + sparse context associations.
 /// Contexts are associated with locations by index (u16, saturating).
@@ -698,10 +698,10 @@ impl Trace {
 }
 
 // ============================================================================
-// Traced<E> Implementation
+// At<E> Implementation
 // ============================================================================
 
-impl<E> Traced<E> {
+impl<E> At<E> {
     /// Create a new traced error without any location information.
     ///
     /// Use `.at()` to add the first location, or use the `Traceable::at()` method
@@ -719,16 +719,16 @@ impl<E> Traced<E> {
     /// ## Example
     ///
     /// ```rust
-    /// use errat::Traced;
+    /// use errat::At;
     ///
     /// #[derive(Debug)]
     /// enum MyError { Oops }
     ///
-    /// fn inner() -> Result<(), Traced<MyError>> {
-    ///     Err(Traced::new(MyError::Oops).at())
+    /// fn inner() -> Result<(), At<MyError>> {
+    ///     Err(At::new(MyError::Oops).at())
     /// }
     ///
-    /// fn outer() -> Result<(), Traced<MyError>> {
+    /// fn outer() -> Result<(), At<MyError>> {
     ///     inner().map_err(|e| e.at())
     /// }
     /// ```
@@ -760,16 +760,16 @@ impl<E> Traced<E> {
     /// ## Example
     ///
     /// ```rust
-    /// use errat::{Traced, Traceable, ResultExt};
+    /// use errat::{At, Traceable, ResultExt};
     ///
     /// #[derive(Debug)]
     /// enum MyError { IoError }
     ///
-    /// fn read_config() -> Result<(), Traced<MyError>> {
+    /// fn read_config() -> Result<(), At<MyError>> {
     ///     Err(MyError::IoError.start_at())
     /// }
     ///
-    /// fn init() -> Result<(), Traced<MyError>> {
+    /// fn init() -> Result<(), At<MyError>> {
     ///     read_config().at_message("while loading configuration")?;
     ///     Ok(())
     /// }
@@ -803,16 +803,16 @@ impl<E> Traced<E> {
     /// ## Example
     ///
     /// ```rust
-    /// use errat::{Traced, Traceable};
+    /// use errat::{At, Traceable};
     ///
     /// #[derive(Debug)]
     /// enum MyError { NotFound }
     ///
-    /// fn load(path: &str) -> Result<(), Traced<MyError>> {
+    /// fn load(path: &str) -> Result<(), At<MyError>> {
     ///     Err(MyError::NotFound.start_at())
     /// }
     ///
-    /// fn init(path: &str) -> Result<(), Traced<MyError>> {
+    /// fn init(path: &str) -> Result<(), At<MyError>> {
     ///     load(path).map_err(|e| e.at_display(|| format!("loading {}", path)))?;
     ///     Ok(())
     /// }
@@ -853,7 +853,7 @@ impl<E> Traced<E> {
     /// ## Example
     ///
     /// ```rust
-    /// use errat::{Traced, Traceable, Context};
+    /// use errat::{At, Traceable, Context};
     ///
     /// #[derive(Debug)]
     /// struct RequestInfo { user_id: u64, path: String }
@@ -910,13 +910,13 @@ impl<E> Traced<E> {
     /// ## Example
     ///
     /// ```rust
-    /// use errat::{Traced, Traceable, crate_info};
+    /// use errat::{At, Traceable, crate_info};
     ///
     /// #[derive(Debug)]
     /// enum MyError { Wrapped(String) }
     ///
     /// // When receiving an error from a dependency:
-    /// fn wrap_external_error(msg: &str) -> Traced<MyError> {
+    /// fn wrap_external_error(msg: &str) -> At<MyError> {
     ///     MyError::Wrapped(msg.into())
     ///         .start_at()
     ///         .at_crate(crate_info!())  // Mark crate boundary
@@ -941,73 +941,6 @@ impl<E> Traced<E> {
             }
         }
         self
-    }
-
-    // Legacy aliases for backwards compatibility
-    #[doc(hidden)]
-    #[track_caller]
-    #[inline]
-    pub fn msg(self, msg: impl Into<Cow<'static, str>>) -> Self {
-        self.at_message(msg)
-    }
-
-    #[doc(hidden)]
-    #[track_caller]
-    #[inline]
-    pub fn with_msg(self, f: impl FnOnce() -> String) -> Self {
-        self.at_message(f())
-    }
-
-    #[doc(hidden)]
-    #[track_caller]
-    #[inline]
-    pub fn ctx<T: fmt::Display + Send + Sync + 'static>(self, ctx: T) -> Self {
-        self.at_display(|| ctx)
-    }
-
-    #[doc(hidden)]
-    #[track_caller]
-    #[inline]
-    pub fn with_ctx<T: fmt::Display + Send + Sync + 'static>(self, f: impl FnOnce() -> T) -> Self {
-        self.at_display(f)
-    }
-
-    #[doc(hidden)]
-    #[track_caller]
-    #[inline]
-    pub fn dbg_ctx<T: fmt::Debug + Send + Sync + 'static>(self, ctx: T) -> Self {
-        self.at_debug(|| ctx)
-    }
-
-    #[doc(hidden)]
-    #[track_caller]
-    #[inline]
-    pub fn with_dbg_ctx<T: fmt::Debug + Send + Sync + 'static>(
-        self,
-        f: impl FnOnce() -> T,
-    ) -> Self {
-        self.at_debug(f)
-    }
-
-    #[doc(hidden)]
-    #[track_caller]
-    #[inline]
-    pub fn at_msg(self, msg: &str) -> Self {
-        self.at_message(msg.to_string())
-    }
-
-    #[doc(hidden)]
-    #[track_caller]
-    #[inline]
-    pub fn at_context<T: fmt::Debug + Send + Sync + 'static>(self, ctx: T) -> Self {
-        self.at_debug(|| ctx)
-    }
-
-    #[doc(hidden)]
-    #[track_caller]
-    #[inline]
-    pub fn at_context_display<T: fmt::Display + Send + Sync + 'static>(self, ctx: T) -> Self {
-        self.ctx(ctx)
     }
 
     /// Get a reference to the inner error.
@@ -1072,7 +1005,7 @@ impl<E> Traced<E> {
     }
 }
 
-impl<E: fmt::Debug> fmt::Debug for Traced<E> {
+impl<E: fmt::Debug> fmt::Debug for At<E> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         // Error header
         writeln!(f, "Error: {:?}", self.error)?;
@@ -1104,7 +1037,7 @@ impl<E: fmt::Debug> fmt::Debug for Traced<E> {
 // Enhanced display with ErrorMeta
 // ============================================================================
 
-impl<E: fmt::Debug + ErrorMeta> Traced<E> {
+impl<E: fmt::Debug + ErrorMeta> At<E> {
     /// Format the error with enhanced metadata from ErrorMeta.
     ///
     /// This includes:
@@ -1115,7 +1048,7 @@ impl<E: fmt::Debug + ErrorMeta> Traced<E> {
     /// ## Example
     ///
     /// ```rust
-    /// use errat::{ErrorMeta, Traced, Traceable};
+    /// use errat::{At, ErrorMeta, Traceable};
     ///
     /// #[derive(Debug)]
     /// struct MyError;
@@ -1129,7 +1062,7 @@ impl<E: fmt::Debug + ErrorMeta> Traced<E> {
     ///     }
     /// }
     ///
-    /// let err = MyError.traced();
+    /// let err = MyError.start_at();
     /// let formatted = err.display_with_meta();
     /// println!("{}", formatted);
     /// ```
@@ -1138,9 +1071,9 @@ impl<E: fmt::Debug + ErrorMeta> Traced<E> {
     }
 }
 
-/// Wrapper for displaying Traced<E> with ErrorMeta enhancements.
+/// Wrapper for displaying At<E> with ErrorMeta enhancements.
 struct DisplayWithMeta<'a, E> {
-    traced: &'a Traced<E>,
+    traced: &'a At<E>,
 }
 
 impl<E: fmt::Debug + ErrorMeta> fmt::Display for DisplayWithMeta<'_, E> {
@@ -1212,21 +1145,21 @@ fn write_location_meta(
     Ok(())
 }
 
-impl<E: fmt::Display> fmt::Display for Traced<E> {
+impl<E: fmt::Display> fmt::Display for At<E> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(f, "{}", self.error)
     }
 }
 
-impl<E: fmt::Debug + fmt::Display> core::error::Error for Traced<E> {}
+impl<E: fmt::Debug + fmt::Display> core::error::Error for At<E> {}
 
 // ============================================================================
 // Traceable Trait - for calling .at() directly on error values
 // ============================================================================
 
-/// Extension trait that allows calling `.traced()` on any error value.
+/// Extension trait that allows calling `.start_at()` on any error value.
 ///
-/// Use `.traced()` to wrap an error and capture the first location.
+/// Use `.start_at()` to wrap an error and capture the first location.
 /// Then use `.at()` on Results to add more locations as the error propagates.
 ///
 /// ```rust
@@ -1235,84 +1168,63 @@ impl<E: fmt::Debug + fmt::Display> core::error::Error for Traced<E> {}
 /// #[derive(Debug)]
 /// enum MyError { NotFound }
 ///
-/// fn inner() -> Result<(), errat::Traced<MyError>> {
-///     Err(MyError::NotFound.traced())  // .traced() wraps the error
+/// fn inner() -> Result<(), errat::At<MyError>> {
+///     Err(MyError::NotFound.start_at())
 /// }
 ///
-/// fn outer() -> Result<(), errat::Traced<MyError>> {
+/// fn outer() -> Result<(), errat::At<MyError>> {
 ///     inner().at()?;  // .at() adds another location
 ///     Ok(())
 /// }
 /// ```
 pub trait Traceable: Sized {
-    /// Wrap this value in a `Traced` and add the caller's location.
+    /// Wrap this value in `At<E>` and add the caller's location.
     /// If allocation fails, the error is still wrapped but trace may be empty.
     ///
     /// For crate-aware tracing with repository links, use `at!(err)` or
-    /// `err.at_crate(crate_info!())` instead.
+    /// `err.start_at().at_crate(crate_info!())` instead.
     #[track_caller]
-    fn start_at(self) -> Traced<Self>;
+    fn start_at(self) -> At<Self>;
 
-    /// Wrap this value in a `Traced` and add the caller's location with a message.
+    /// Wrap this value in `At<E>` and add the caller's location with a message.
     /// If allocation fails, the error is still wrapped but trace may be empty.
     #[track_caller]
-    fn start_at_message(self, msg: impl Into<Cow<'static, str>>) -> Traced<Self>;
-
-    // Legacy alias
-    #[doc(hidden)]
-    #[track_caller]
-    fn traced(self) -> Traced<Self>;
-
-    #[doc(hidden)]
-    #[track_caller]
-    fn traced_msg(self, msg: &str) -> Traced<Self>;
+    fn start_at_message(self, msg: impl Into<Cow<'static, str>>) -> At<Self>;
 }
 
 impl<E> Traceable for E {
     #[track_caller]
     #[inline]
-    fn start_at(self) -> Traced<Self> {
-        Traced::new(self).at()
+    fn start_at(self) -> At<Self> {
+        At::new(self).at()
     }
 
     #[track_caller]
     #[inline]
-    fn start_at_message(self, msg: impl Into<Cow<'static, str>>) -> Traced<Self> {
-        Traced::new(self).at_message(msg)
-    }
-
-    #[track_caller]
-    #[inline]
-    fn traced(self) -> Traced<Self> {
-        self.start_at()
-    }
-
-    #[track_caller]
-    #[inline]
-    fn traced_msg(self, msg: &str) -> Traced<Self> {
-        self.start_at_message(msg.to_string())
+    fn start_at_message(self, msg: impl Into<Cow<'static, str>>) -> At<Self> {
+        At::new(self).at_message(msg)
     }
 }
 
 // ============================================================================
-// ResultExt Trait - for calling .at() on Results with Traced errors
+// ResultExt Trait - for calling .at() on Results with At<E> errors
 // ============================================================================
 
-/// Extension trait for adding location tracking to `Result<T, Traced<E>>`.
+/// Extension trait for adding location tracking to `Result<T, At<E>>`.
 ///
 /// ## Example
 ///
 /// ```rust
-/// use errat::{Traced, Traceable, ResultExt};
+/// use errat::{At, Traceable, ResultExt};
 ///
 /// #[derive(Debug)]
 /// enum MyError { Oops }
 ///
-/// fn inner() -> Result<(), Traced<MyError>> {
+/// fn inner() -> Result<(), At<MyError>> {
 ///     Err(MyError::Oops.start_at())
 /// }
 ///
-/// fn outer() -> Result<(), Traced<MyError>> {
+/// fn outer() -> Result<(), At<MyError>> {
 ///     inner().at()?;
 ///     Ok(())
 /// }
@@ -1320,61 +1232,35 @@ impl<E> Traceable for E {
 pub trait ResultExt<T, E> {
     /// Add the caller's location to the error trace if this is `Err`.
     #[track_caller]
-    fn at(self) -> Result<T, Traced<E>>;
+    fn at(self) -> Result<T, At<E>>;
 
     /// Add location and message context.
     #[track_caller]
-    fn at_message(self, msg: impl Into<Cow<'static, str>>) -> Result<T, Traced<E>>;
+    fn at_message(self, msg: impl Into<Cow<'static, str>>) -> Result<T, At<E>>;
 
     /// Add location and lazily-computed typed context (Display formatted).
     #[track_caller]
     fn at_display<C: fmt::Display + Send + Sync + 'static>(
         self,
         f: impl FnOnce() -> C,
-    ) -> Result<T, Traced<E>>;
+    ) -> Result<T, At<E>>;
 
     /// Add location and lazily-computed typed context (Debug formatted).
     #[track_caller]
     fn at_debug<C: fmt::Debug + Send + Sync + 'static>(
         self,
         f: impl FnOnce() -> C,
-    ) -> Result<T, Traced<E>>;
+    ) -> Result<T, At<E>>;
 
     /// Add a crate boundary marker. Use with `crate_info!()` for cross-crate tracing.
     #[track_caller]
-    fn at_crate(self, info: &'static CrateInfo) -> Result<T, Traced<E>>;
-
-    // Legacy aliases
-    #[doc(hidden)]
-    #[track_caller]
-    fn msg(self, msg: impl Into<Cow<'static, str>>) -> Result<T, Traced<E>>;
-    #[doc(hidden)]
-    #[track_caller]
-    fn with_msg(self, f: impl FnOnce() -> String) -> Result<T, Traced<E>>;
-    #[doc(hidden)]
-    #[track_caller]
-    fn ctx<C: fmt::Display + Send + Sync + 'static>(self, ctx: C) -> Result<T, Traced<E>>;
-    #[doc(hidden)]
-    #[track_caller]
-    fn with_ctx<C: fmt::Display + Send + Sync + 'static>(
-        self,
-        f: impl FnOnce() -> C,
-    ) -> Result<T, Traced<E>>;
-    #[doc(hidden)]
-    #[track_caller]
-    fn dbg_ctx<C: fmt::Debug + Send + Sync + 'static>(self, ctx: C) -> Result<T, Traced<E>>;
-    #[doc(hidden)]
-    #[track_caller]
-    fn with_dbg_ctx<C: fmt::Debug + Send + Sync + 'static>(
-        self,
-        f: impl FnOnce() -> C,
-    ) -> Result<T, Traced<E>>;
+    fn at_crate(self, info: &'static CrateInfo) -> Result<T, At<E>>;
 }
 
-impl<T, E> ResultExt<T, E> for Result<T, Traced<E>> {
+impl<T, E> ResultExt<T, E> for Result<T, At<E>> {
     #[track_caller]
     #[inline]
-    fn at(self) -> Result<T, Traced<E>> {
+    fn at(self) -> Result<T, At<E>> {
         match self {
             Ok(v) => Ok(v),
             Err(e) => Err(e.at()),
@@ -1383,7 +1269,7 @@ impl<T, E> ResultExt<T, E> for Result<T, Traced<E>> {
 
     #[track_caller]
     #[inline]
-    fn at_message(self, msg: impl Into<Cow<'static, str>>) -> Result<T, Traced<E>> {
+    fn at_message(self, msg: impl Into<Cow<'static, str>>) -> Result<T, At<E>> {
         match self {
             Ok(v) => Ok(v),
             Err(e) => Err(e.at_message(msg)),
@@ -1395,7 +1281,7 @@ impl<T, E> ResultExt<T, E> for Result<T, Traced<E>> {
     fn at_display<C: fmt::Display + Send + Sync + 'static>(
         self,
         f: impl FnOnce() -> C,
-    ) -> Result<T, Traced<E>> {
+    ) -> Result<T, At<E>> {
         match self {
             Ok(v) => Ok(v),
             Err(e) => Err(e.at_display(f)),
@@ -1407,7 +1293,7 @@ impl<T, E> ResultExt<T, E> for Result<T, Traced<E>> {
     fn at_debug<C: fmt::Debug + Send + Sync + 'static>(
         self,
         f: impl FnOnce() -> C,
-    ) -> Result<T, Traced<E>> {
+    ) -> Result<T, At<E>> {
         match self {
             Ok(v) => Ok(v),
             Err(e) => Err(e.at_debug(f)),
@@ -1416,61 +1302,18 @@ impl<T, E> ResultExt<T, E> for Result<T, Traced<E>> {
 
     #[track_caller]
     #[inline]
-    fn at_crate(self, info: &'static CrateInfo) -> Result<T, Traced<E>> {
+    fn at_crate(self, info: &'static CrateInfo) -> Result<T, At<E>> {
         match self {
             Ok(v) => Ok(v),
             Err(e) => Err(e.at_crate(info)),
         }
     }
-
-    // Legacy aliases
-    #[track_caller]
-    #[inline]
-    fn msg(self, msg: impl Into<Cow<'static, str>>) -> Result<T, Traced<E>> {
-        self.at_message(msg)
-    }
-
-    #[track_caller]
-    #[inline]
-    fn with_msg(self, f: impl FnOnce() -> String) -> Result<T, Traced<E>> {
-        self.at_message(f())
-    }
-
-    #[track_caller]
-    #[inline]
-    fn ctx<C: fmt::Display + Send + Sync + 'static>(self, ctx: C) -> Result<T, Traced<E>> {
-        self.at_display(|| ctx)
-    }
-
-    #[track_caller]
-    #[inline]
-    fn with_ctx<C: fmt::Display + Send + Sync + 'static>(
-        self,
-        f: impl FnOnce() -> C,
-    ) -> Result<T, Traced<E>> {
-        self.at_display(f)
-    }
-
-    #[track_caller]
-    #[inline]
-    fn dbg_ctx<C: fmt::Debug + Send + Sync + 'static>(self, ctx: C) -> Result<T, Traced<E>> {
-        self.at_debug(|| ctx)
-    }
-
-    #[track_caller]
-    #[inline]
-    fn with_dbg_ctx<C: fmt::Debug + Send + Sync + 'static>(
-        self,
-        f: impl FnOnce() -> C,
-    ) -> Result<T, Traced<E>> {
-        self.at_debug(f)
-    }
 }
 
 /// Extension trait for converting non-traced errors to traced errors.
 ///
-/// Use `.trace()` on `Result<T, E>` to wrap the error in `Traced<E>` and capture
-/// the first location. For Results that already have `Traced<E>`, use `ResultExt::at()`.
+/// Use `.trace()` on `Result<T, E>` to wrap the error in `At<E>` and capture
+/// the first location. For Results that already have `At<E>`, use `ResultExt::at()`.
 ///
 /// ## Example
 ///
@@ -1481,81 +1324,81 @@ impl<T, E> ResultExt<T, E> for Result<T, Traced<E>> {
 ///     Err("something went wrong")
 /// }
 ///
-/// fn wrapper() -> Result<(), errat::Traced<&'static str>> {
-///     fallible().trace()?;  // converts to Traced and captures location
+/// fn wrapper() -> Result<(), errat::At<&'static str>> {
+///     fallible().trace()?;  // converts to At and captures location
 ///     Ok(())
 /// }
 /// ```
 pub trait ResultTraceExt<T, E> {
-    /// Convert the error to a `Traced<E>` and add the caller's location.
+    /// Convert the error to `At<E>` and add the caller's location.
     #[track_caller]
-    fn trace(self) -> Result<T, Traced<E>>;
+    fn trace(self) -> Result<T, At<E>>;
 
-    /// Convert to `Traced<E>` with message context. Use `trace_with_msg` for lazy evaluation.
+    /// Convert to `At<E>` with message context. Use `trace_with_msg` for lazy evaluation.
     #[track_caller]
-    fn trace_msg(self, msg: impl Into<Cow<'static, str>>) -> Result<T, Traced<E>>;
+    fn trace_msg(self, msg: impl Into<Cow<'static, str>>) -> Result<T, At<E>>;
 
-    /// Convert to `Traced<E>` with lazily-computed message context.
+    /// Convert to `At<E>` with lazily-computed message context.
     #[track_caller]
-    fn trace_with_msg(self, f: impl FnOnce() -> String) -> Result<T, Traced<E>>;
+    fn trace_with_msg(self, f: impl FnOnce() -> String) -> Result<T, At<E>>;
 
-    /// Convert to `Traced<E>` with typed context (Display).
+    /// Convert to `At<E>` with typed context (Display).
     #[track_caller]
-    fn trace_ctx<C: fmt::Display + Send + Sync + 'static>(self, ctx: C) -> Result<T, Traced<E>>;
+    fn trace_ctx<C: fmt::Display + Send + Sync + 'static>(self, ctx: C) -> Result<T, At<E>>;
 
-    /// Convert to `Traced<E>` with lazily-computed typed context (Display).
+    /// Convert to `At<E>` with lazily-computed typed context (Display).
     #[track_caller]
     fn trace_with_ctx<C: fmt::Display + Send + Sync + 'static>(
         self,
         f: impl FnOnce() -> C,
-    ) -> Result<T, Traced<E>>;
+    ) -> Result<T, At<E>>;
 
-    /// Convert to `Traced<E>` with typed context (Debug).
+    /// Convert to `At<E>` with typed context (Debug).
     #[track_caller]
-    fn trace_dbg_ctx<C: fmt::Debug + Send + Sync + 'static>(self, ctx: C) -> Result<T, Traced<E>>;
+    fn trace_dbg_ctx<C: fmt::Debug + Send + Sync + 'static>(self, ctx: C) -> Result<T, At<E>>;
 
-    /// Convert to `Traced<E>` with lazily-computed typed context (Debug).
+    /// Convert to `At<E>` with lazily-computed typed context (Debug).
     #[track_caller]
     fn trace_with_dbg_ctx<C: fmt::Debug + Send + Sync + 'static>(
         self,
         f: impl FnOnce() -> C,
-    ) -> Result<T, Traced<E>>;
+    ) -> Result<T, At<E>>;
 }
 
 impl<T, E> ResultTraceExt<T, E> for Result<T, E> {
     #[track_caller]
     #[inline]
-    fn trace(self) -> Result<T, Traced<E>> {
+    fn trace(self) -> Result<T, At<E>> {
         match self {
             Ok(v) => Ok(v),
-            Err(e) => Err(Traced::new(e).at()),
+            Err(e) => Err(At::new(e).at()),
         }
     }
 
     #[track_caller]
     #[inline]
-    fn trace_msg(self, msg: impl Into<Cow<'static, str>>) -> Result<T, Traced<E>> {
+    fn trace_msg(self, msg: impl Into<Cow<'static, str>>) -> Result<T, At<E>> {
         match self {
             Ok(v) => Ok(v),
-            Err(e) => Err(Traced::new(e).msg(msg)),
+            Err(e) => Err(At::new(e).at_message(msg)),
         }
     }
 
     #[track_caller]
     #[inline]
-    fn trace_with_msg(self, f: impl FnOnce() -> String) -> Result<T, Traced<E>> {
+    fn trace_with_msg(self, f: impl FnOnce() -> String) -> Result<T, At<E>> {
         match self {
             Ok(v) => Ok(v),
-            Err(e) => Err(Traced::new(e).with_msg(f)),
+            Err(e) => Err(At::new(e).at_message(f())),
         }
     }
 
     #[track_caller]
     #[inline]
-    fn trace_ctx<C: fmt::Display + Send + Sync + 'static>(self, ctx: C) -> Result<T, Traced<E>> {
+    fn trace_ctx<C: fmt::Display + Send + Sync + 'static>(self, ctx: C) -> Result<T, At<E>> {
         match self {
             Ok(v) => Ok(v),
-            Err(e) => Err(Traced::new(e).ctx(ctx)),
+            Err(e) => Err(At::new(e).at_display(|| ctx)),
         }
     }
 
@@ -1564,19 +1407,19 @@ impl<T, E> ResultTraceExt<T, E> for Result<T, E> {
     fn trace_with_ctx<C: fmt::Display + Send + Sync + 'static>(
         self,
         f: impl FnOnce() -> C,
-    ) -> Result<T, Traced<E>> {
+    ) -> Result<T, At<E>> {
         match self {
             Ok(v) => Ok(v),
-            Err(e) => Err(Traced::new(e).with_ctx(f)),
+            Err(e) => Err(At::new(e).at_display(f)),
         }
     }
 
     #[track_caller]
     #[inline]
-    fn trace_dbg_ctx<C: fmt::Debug + Send + Sync + 'static>(self, ctx: C) -> Result<T, Traced<E>> {
+    fn trace_dbg_ctx<C: fmt::Debug + Send + Sync + 'static>(self, ctx: C) -> Result<T, At<E>> {
         match self {
             Ok(v) => Ok(v),
-            Err(e) => Err(Traced::new(e).dbg_ctx(ctx)),
+            Err(e) => Err(At::new(e).at_debug(|| ctx)),
         }
     }
 
@@ -1585,10 +1428,10 @@ impl<T, E> ResultTraceExt<T, E> for Result<T, E> {
     fn trace_with_dbg_ctx<C: fmt::Debug + Send + Sync + 'static>(
         self,
         f: impl FnOnce() -> C,
-    ) -> Result<T, Traced<E>> {
+    ) -> Result<T, At<E>> {
         match self {
             Ok(v) => Ok(v),
-            Err(e) => Err(Traced::new(e).with_dbg_ctx(f)),
+            Err(e) => Err(At::new(e).at_debug(f)),
         }
     }
 }
@@ -1597,10 +1440,10 @@ impl<T, E> ResultTraceExt<T, E> for Result<T, E> {
 // From implementations
 // ============================================================================
 
-impl<E> From<E> for Traced<E> {
+impl<E> From<E> for At<E> {
     #[inline]
     fn from(error: E) -> Self {
-        Traced::new(error)
+        At::new(error)
     }
 }
 
@@ -1632,11 +1475,11 @@ mod tests {
     fn test_sizeof() {
         use core::mem::size_of;
 
-        // Traced<E> should be sizeof(E) + 8 (pointer to boxed trace)
+        // At<E> should be sizeof(E) + 8 (pointer to boxed trace)
         // With alignment, a 1-byte enum becomes 16 bytes total
         assert_eq!(size_of::<Option<Box<Trace>>>(), 8);
 
-        let traced_size = size_of::<Traced<TestError>>();
+        let traced_size = size_of::<At<TestError>>();
         let error_size = size_of::<TestError>();
         let pointer_size = size_of::<Option<Box<Trace>>>();
 
@@ -1718,7 +1561,7 @@ mod tests {
 
     #[test]
     fn test_basic_trace() {
-        let err = TestError::NotFound.traced();
+        let err = TestError::NotFound.start_at();
         assert_eq!(*err.error(), TestError::NotFound);
         assert_eq!(err.trace_len(), 1);
         assert!(!err.trace_is_empty());
@@ -1726,15 +1569,15 @@ mod tests {
 
     #[test]
     fn test_propagation() {
-        fn inner() -> Result<(), Traced<TestError>> {
-            Err(TestError::NotFound.traced())
+        fn inner() -> Result<(), At<TestError>> {
+            Err(TestError::NotFound.start_at())
         }
 
-        fn middle() -> Result<(), Traced<TestError>> {
+        fn middle() -> Result<(), At<TestError>> {
             inner().at()
         }
 
-        fn outer() -> Result<(), Traced<TestError>> {
+        fn outer() -> Result<(), At<TestError>> {
             middle().at()
         }
 
@@ -1757,7 +1600,7 @@ mod tests {
             Err("oops")
         }
 
-        fn wrapper() -> Result<(), Traced<&'static str>> {
+        fn wrapper() -> Result<(), At<&'static str>> {
             fallible().trace()?;
             Ok(())
         }
@@ -1769,22 +1612,22 @@ mod tests {
 
     #[test]
     fn test_into_inner() {
-        let err = TestError::InvalidInput.traced();
+        let err = TestError::InvalidInput.start_at();
         let inner = err.into_inner();
         assert_eq!(inner, TestError::InvalidInput);
     }
 
     #[test]
     fn test_first_last_location() {
-        fn level1() -> Result<(), Traced<TestError>> {
-            Err(TestError::NotFound.traced())
+        fn level1() -> Result<(), At<TestError>> {
+            Err(TestError::NotFound.start_at())
         }
 
-        fn level2() -> Result<(), Traced<TestError>> {
+        fn level2() -> Result<(), At<TestError>> {
             level1().at()
         }
 
-        fn level3() -> Result<(), Traced<TestError>> {
+        fn level3() -> Result<(), At<TestError>> {
             level2().at()
         }
 
@@ -1799,7 +1642,7 @@ mod tests {
 
     #[test]
     fn test_display_debug() {
-        let err = TestError::NotFound.traced();
+        let err = TestError::NotFound.start_at();
 
         // Display should just show the error
         let display = alloc::format!("{}", err);
@@ -1814,7 +1657,7 @@ mod tests {
 
     #[test]
     fn test_no_trace() {
-        let err: Traced<TestError> = Traced::new(TestError::NotFound);
+        let err: At<TestError> = At::new(TestError::NotFound);
         assert_eq!(err.trace_len(), 0);
         assert!(err.trace_is_empty());
         assert!(err.first_location().is_none());
@@ -1823,7 +1666,7 @@ mod tests {
 
     #[test]
     fn test_from_impl() {
-        let err: Traced<TestError> = TestError::NotFound.into();
+        let err: At<TestError> = TestError::NotFound.into();
         assert_eq!(*err.error(), TestError::NotFound);
         assert!(err.trace_is_empty()); // From doesn't add trace
     }
@@ -1835,7 +1678,7 @@ mod tests {
             count: u32,
         }
 
-        let mut err = MutableError { count: 0 }.traced();
+        let mut err = MutableError { count: 0 }.start_at();
         err.error_mut().count = 42;
         assert_eq!(err.error().count, 42);
     }
@@ -1855,7 +1698,7 @@ mod tests {
             code: 42,
             data: [0; 32],
         }
-        .traced();
+        .start_at();
 
         assert_eq!(err.trace_len(), 1);
         assert_eq!(err.error().code, 42);
@@ -1863,19 +1706,19 @@ mod tests {
 
     #[test]
     fn test_at_msg() {
-        let err = TestError::NotFound.traced_msg("while fetching user");
+        let err = TestError::NotFound.start_at_message("while fetching user");
         assert_eq!(err.trace_len(), 1);
         assert_eq!(err.message(), Some("while fetching user"));
     }
 
     #[test]
     fn test_msg_propagation() {
-        fn inner() -> Result<(), Traced<TestError>> {
-            Err(TestError::NotFound.traced())
+        fn inner() -> Result<(), At<TestError>> {
+            Err(TestError::NotFound.start_at())
         }
 
-        fn outer() -> Result<(), Traced<TestError>> {
-            inner().msg("during initialization")?;
+        fn outer() -> Result<(), At<TestError>> {
+            inner().at_message("during initialization")?;
             Ok(())
         }
 
@@ -1890,7 +1733,7 @@ mod tests {
             Err("oops")
         }
 
-        fn wrapper() -> Result<(), Traced<&'static str>> {
+        fn wrapper() -> Result<(), At<&'static str>> {
             fallible().trace_msg("while doing something")?;
             Ok(())
         }
@@ -1902,7 +1745,7 @@ mod tests {
 
     #[test]
     fn test_debug_with_message() {
-        let err = TestError::NotFound.traced_msg("context info");
+        let err = TestError::NotFound.start_at_message("context info");
         let debug = alloc::format!("{:?}", err);
         assert!(debug.contains("NotFound"));
         assert!(debug.contains("╰─ context info"));
@@ -1917,8 +1760,8 @@ mod tests {
         }
 
         let err = TestError::NotFound
-            .traced()
-            .dbg_ctx(RequestInfo { user_id: 42 });
+            .start_at()
+            .at_debug(|| RequestInfo { user_id: 42 });
 
         assert_eq!(err.trace_len(), 2);
 
@@ -1935,17 +1778,17 @@ mod tests {
 
     #[test]
     fn test_multiple_contexts() {
-        fn level1() -> Result<(), Traced<TestError>> {
-            Err(TestError::NotFound.traced())
+        fn level1() -> Result<(), At<TestError>> {
+            Err(TestError::NotFound.start_at())
         }
 
-        fn level2() -> Result<(), Traced<TestError>> {
-            level1().msg("in level2")?;
+        fn level2() -> Result<(), At<TestError>> {
+            level1().at_message("in level2")?;
             Ok(())
         }
 
-        fn level3() -> Result<(), Traced<TestError>> {
-            level2().msg("in level3")?;
+        fn level3() -> Result<(), At<TestError>> {
+            level2().at_message("in level3")?;
             Ok(())
         }
 
@@ -2004,7 +1847,7 @@ mod tests {
             name: &'static str,
         }
 
-        let err = TestError::NotFound.traced().dbg_ctx(MyContext {
+        let err = TestError::NotFound.start_at().at_debug(|| MyContext {
             id: 123,
             name: "test",
         });
@@ -2019,7 +1862,9 @@ mod tests {
     #[test]
     fn test_ctx_display() {
         // Use a type that has both Display and Debug but we want Display formatting
-        let err = TestError::NotFound.traced().ctx("user-friendly message");
+        let err = TestError::NotFound
+            .start_at()
+            .at_display(|| "user-friendly message");
 
         assert_eq!(err.trace_len(), 2);
 
@@ -2047,10 +1892,10 @@ mod tests {
         }
 
         let err = TestError::NotFound
-            .traced()
-            .msg("text message")
-            .dbg_ctx(DebugInfo { code: 42 })
-            .ctx("display message");
+            .start_at()
+            .at_message("text message")
+            .at_debug(|| DebugInfo { code: 42 })
+            .at_display(|| "display message");
 
         // Should have 4 locations (traced + 3 context methods)
         assert_eq!(err.trace_len(), 4);
@@ -2068,17 +1913,17 @@ mod tests {
     #[test]
     fn test_trace_format_structure() {
         // Test that trace format shows locations oldest-first with contexts
-        fn level1() -> Result<(), Traced<TestError>> {
-            Err(TestError::NotFound.traced())
+        fn level1() -> Result<(), At<TestError>> {
+            Err(TestError::NotFound.start_at())
         }
 
-        fn level2() -> Result<(), Traced<TestError>> {
-            level1().msg("in level2")?;
+        fn level2() -> Result<(), At<TestError>> {
+            level1().at_message("in level2")?;
             Ok(())
         }
 
-        fn level3() -> Result<(), Traced<TestError>> {
-            level2().msg("in level3")?;
+        fn level3() -> Result<(), At<TestError>> {
+            level2().at_message("in level3")?;
             Ok(())
         }
 
@@ -2107,12 +1952,12 @@ mod tests {
 
     #[test]
     fn test_trace_origin_comes_first() {
-        fn origin() -> Result<(), Traced<TestError>> {
-            Err(TestError::NotFound.traced())
+        fn origin() -> Result<(), At<TestError>> {
+            Err(TestError::NotFound.start_at())
         }
 
-        fn wrapper() -> Result<(), Traced<TestError>> {
-            origin().msg("wrapping")?;
+        fn wrapper() -> Result<(), At<TestError>> {
+            origin().at_message("wrapping")?;
             Ok(())
         }
 
@@ -2127,7 +1972,7 @@ mod tests {
         let first_at = lines.iter().find(|l| l.contains("at src/lib.rs:")).unwrap();
 
         // It should be the origin location (before the wrapper's context)
-        // The origin .traced() call will be at a lower line than wrapper's .msg()
+        // The origin .start_at() call will be at a lower line than wrapper's .at_message()
         assert!(
             !first_at.contains("╰─"),
             "First location should be origin without context"

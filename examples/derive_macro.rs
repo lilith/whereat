@@ -1,52 +1,74 @@
-//! Demonstrates the TracedError derive macro.
+//! Demonstrates errat with manual error type setup.
 //!
-//! Run with: cargo run --example derive_macro --features derive,std
+//! Run with: cargo run --example derive_macro --features std
 
-use errat::{ResultExt, Traceable, Traced, TracedError};
+use errat::{At, ErrorMeta, ResultExt, at, crate_info};
 
-#[derive(Debug, TracedError)]
-#[errat(repo = "https://github.com/imazen/errat", commit = "main")]
+#[derive(Debug)]
 #[allow(dead_code)]
 enum AppError {
-    #[error("not found: {0}")]
     NotFound(String),
-
-    #[error("invalid input: {0}")]
     InvalidInput(String),
-
-    #[error("io error: {0}")]
-    #[from]
     Io(std::io::Error),
-
-    #[error("resource '{name}' is unavailable (code: {code})")]
     Unavailable { name: String, code: u32 },
-
-    #[error("internal error")]
     Internal,
 }
 
-fn find_user(id: u64) -> Result<String, Traced<AppError>> {
+impl core::fmt::Display for AppError {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        match self {
+            AppError::NotFound(s) => write!(f, "not found: {}", s),
+            AppError::InvalidInput(s) => write!(f, "invalid input: {}", s),
+            AppError::Io(e) => write!(f, "io error: {}", e),
+            AppError::Unavailable { name, code } => {
+                write!(f, "resource '{}' is unavailable (code: {})", name, code)
+            }
+            AppError::Internal => write!(f, "internal error"),
+        }
+    }
+}
+
+impl ErrorMeta for AppError {
+    fn crate_name(&self) -> Option<&'static str> {
+        Some("errat")
+    }
+
+    fn repo_url(&self) -> Option<&'static str> {
+        Some("https://github.com/imazen/errat")
+    }
+
+    fn git_commit(&self) -> Option<&'static str> {
+        Some("main")
+    }
+}
+
+impl From<std::io::Error> for AppError {
+    fn from(err: std::io::Error) -> Self {
+        AppError::Io(err)
+    }
+}
+
+fn find_user(id: u64) -> Result<String, At<AppError>> {
     if id == 0 {
-        return Err(AppError::NotFound(format!("user/{}", id)).start_at());
+        // Use at!() macro for crate-aware error creation
+        return Err(at!(AppError::NotFound(format!("user/{}", id))));
     }
     Ok(format!("User {}", id))
 }
 
-fn validate_input(s: &str) -> Result<(), Traced<AppError>> {
+fn validate_input(s: &str) -> Result<(), At<AppError>> {
     if s.is_empty() {
-        return Err(AppError::InvalidInput("empty string".into()).start_at());
+        return Err(at!(AppError::InvalidInput("empty string".into())));
     }
     Ok(())
 }
 
-fn read_config() -> Result<String, Traced<AppError>> {
-    // This uses the #[from] impl - io::Error converts to AppError::Io
-    // Then we use .start_at() to wrap in Traced and capture location
+fn read_config() -> Result<String, At<AppError>> {
     let err = std::io::Error::new(std::io::ErrorKind::NotFound, "config.toml not found");
-    Err(AppError::from(err).start_at())
+    Err(at!(AppError::from(err)))
 }
 
-fn process_request(user_id: u64, input: &str) -> Result<String, Traced<AppError>> {
+fn process_request(user_id: u64, input: &str) -> Result<String, At<AppError>> {
     validate_input(input).at_message("validating request input")?;
     let user = find_user(user_id).at_message("looking up user")?;
     Ok(format!(
@@ -64,20 +86,27 @@ fn main() {
     let err = process_request(0, "hello").unwrap_err();
     println!("{:?}", err);
 
-    println!("\n=== Example 3: From impl with #[from] ===\n");
+    println!("\n=== Example 3: From impl ===\n");
     let err = read_config().unwrap_err();
     println!("{:?}", err);
 
     println!("\n=== Example 4: Named fields in error ===\n");
-    let err = AppError::Unavailable {
+    let err = at!(AppError::Unavailable {
         name: "database".into(),
         code: 503,
-    }
-    .start_at();
+    });
     println!("Display: {}", err);
     println!("Debug:\n{:?}", err);
 
     println!("\n=== Example 5: ErrorMeta with display_with_meta ===\n");
     let err = process_request(0, "test").unwrap_err();
     println!("{}", err.display_with_meta());
+
+    println!("\n=== Example 6: CrateInfo macro ===\n");
+    let info = crate_info!();
+    println!("Crate: {}", info.name);
+    println!("Module: {}", info.module);
+    if let Some(repo) = info.repo {
+        println!("Repo: {}", repo);
+    }
 }

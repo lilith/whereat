@@ -5,7 +5,7 @@
 // Note: This example requires std feature and external crates
 // For now, we'll simulate what the integration would look like
 
-use errat::{ResultExt, Traceable, Traced};
+use errat::{At, ResultExt, Traceable};
 
 // ============================================================================
 // Simulating thiserror-style errors
@@ -43,7 +43,7 @@ impl std::error::Error for AppError {
 // Example 1: Wrapping thiserror-style error with errat
 // ============================================================================
 
-fn read_config_file(path: &str) -> Result<String, Traced<AppError>> {
+fn read_config_file(path: &str) -> Result<String, At<AppError>> {
     // Simulate file not found
     Err(AppError::NotFound {
         resource: path.to_string(),
@@ -51,11 +51,11 @@ fn read_config_file(path: &str) -> Result<String, Traced<AppError>> {
     .start_at())
 }
 
-fn load_config() -> Result<String, Traced<AppError>> {
+fn load_config() -> Result<String, At<AppError>> {
     read_config_file("/etc/app.conf").at_message("loading application config")
 }
 
-fn init_app() -> Result<(), Traced<AppError>> {
+fn init_app() -> Result<(), At<AppError>> {
     let _config = load_config().at_message("during initialization")?;
     Ok(())
 }
@@ -67,13 +67,13 @@ fn init_app() -> Result<(), Traced<AppError>> {
 /// Simulating anyhow::Error (boxed trait object)
 type AnyError = Box<dyn std::error::Error + Send + Sync>;
 
-/// Convert Traced<E> to boxed error (like anyhow would store it)
-fn traced_to_any<E: std::error::Error + Send + Sync + 'static>(err: Traced<E>) -> AnyError {
+/// Convert At<E> to boxed error (like anyhow would store it)
+fn traced_to_any<E: std::error::Error + Send + Sync + 'static>(err: At<E>) -> AnyError {
     Box::new(err)
 }
 
 /// Wrap an anyhow-style error with errat tracing
-fn any_to_traced(err: AnyError) -> Traced<AnyError> {
+fn any_to_traced(err: AnyError) -> At<AnyError> {
     err.start_at()
 }
 
@@ -88,14 +88,14 @@ fn inner_operation() -> Result<(), std::io::Error> {
     ))
 }
 
-fn middle_layer() -> Result<(), Traced<AppError>> {
+fn middle_layer() -> Result<(), At<AppError>> {
     inner_operation()
         .map_err(AppError::Io)
         .map_err(|e| e.start_at())
         .at_message("connecting to database")
 }
 
-fn outer_layer() -> Result<(), Traced<AppError>> {
+fn outer_layer() -> Result<(), At<AppError>> {
     middle_layer().at_message("in business logic")
 }
 
@@ -139,8 +139,8 @@ fn main() {
 errat works well with thiserror-style errors:
 - Wrap any error with .start_at() to start collecting locations
 - Use .at_message() to add context as errors propagate
-- Traced<E> implements Error, so it can be boxed like anyhow
-- The error source chain is preserved through Traced<E>
+- At<E> implements Error, so it can be boxed like anyhow
+- The error source chain is preserved through At<E>
 
 Key patterns:
 - thiserror defines the error types
