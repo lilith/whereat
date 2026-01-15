@@ -21,9 +21,9 @@ test:
 # Run tests with all feature combinations
 test-all:
     cargo test
-    cargo test --features tinyvec-64
-    cargo test --features tinyvec-128
-    cargo test --features tinyvec-256
+    cargo test --features tinyvec-64-bytes
+    cargo test --features tinyvec-128-bytes
+    cargo test --features tinyvec-256-bytes
 
 # Check for outdated dependencies
 outdated:
