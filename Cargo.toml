@@ -11,8 +11,13 @@ categories = ["rust-patterns", "no-std"]
 [features]
 default = []
 std = []
+# Use tinyvec for stack-allocated location storage (3 inline slots, spills to heap)
+tinyvec = ["dep:tinyvec"]
+# Use tinyvec with 30 inline slots (keeps Trace struct under 256 bytes, spills to heap)
+tinyvec-256 = ["dep:tinyvec"]
 
 [dependencies]
+tinyvec = { version = "1.9", optional = true, default-features = false, features = ["alloc"] }
 
 [dev-dependencies]
 static_assertions = "1.1"

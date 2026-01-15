@@ -59,18 +59,48 @@ use core::fmt;
 use core::panic::Location;
 
 // ============================================================================
+// LocationVec - configurable storage for trace locations
+// ============================================================================
+//
+// When tinyvec features are enabled, we use TinyVec which starts with inline
+// storage and spills to heap when capacity is exceeded. We use Option<&Location>
+// as the element type because tinyvec requires Default, and Option<&T> has the
+// same size as &T due to null pointer optimization.
+
+/// Stack-first location storage with 3 inline slots, spills to heap (tinyvec feature).
+#[cfg(all(feature = "tinyvec", not(feature = "tinyvec-256")))]
+type LocationVec = tinyvec::TinyVec<[Option<&'static Location<'static>>; 3]>;
+
+/// Stack-first location storage with 30 inline slots, spills to heap (tinyvec-256 feature).
+/// Keeps Trace struct under 256 bytes while maximizing inline capacity.
+#[cfg(feature = "tinyvec-256")]
+type LocationVec = tinyvec::TinyVec<[Option<&'static Location<'static>>; 30]>;
+
+/// Heap-allocated location storage (default, no tinyvec feature).
+#[cfg(not(any(feature = "tinyvec", feature = "tinyvec-256")))]
+type LocationVec = Vec<&'static Location<'static>>;
+
+/// Element type stored in LocationVec (Option-wrapped for tinyvec).
+#[cfg(any(feature = "tinyvec", feature = "tinyvec-256"))]
+type LocationElem = Option<&'static Location<'static>>;
+
+/// Element type stored in LocationVec (direct reference for Vec).
+#[cfg(not(any(feature = "tinyvec", feature = "tinyvec-256")))]
+type LocationElem = &'static Location<'static>;
+
+// ============================================================================
 // ErrorMeta Trait - optional metadata for enhanced trace display
 // ============================================================================
 
 /// Optional trait for error types to provide metadata for enhanced trace display.
 ///
 /// Implement this trait on your error types to get:
-/// - Clickable GitHub links in stack traces
+/// - Clickable GitHub links in stack traces (requires `repo_url` and `git_commit`)
 /// - Custom error summaries
 /// - Documentation links
 ///
-/// All methods have default implementations returning `None`, so you only need
-/// to override what you want.
+/// **Required:** `git_commit()` must be implemented. Use `option_env!("GIT_COMMIT")`
+/// or a build script to capture the commit at build time.
 ///
 /// ## Example
 ///
@@ -84,33 +114,33 @@ use core::panic::Location;
 /// }
 ///
 /// impl ErrorMeta for MyError {
-///     fn crate_name(&self) -> Option<&'static str> {
-///         Some("my_app")
+///     fn git_commit(&self) -> Option<&'static str> {
+///         option_env!("GIT_COMMIT")
 ///     }
 ///
 ///     fn repo_url(&self) -> Option<&'static str> {
 ///         Some("https://github.com/user/my_app")
 ///     }
 ///
-///     fn git_commit(&self) -> Option<&'static str> {
-///         option_env!("GIT_COMMIT")
+///     fn crate_name(&self) -> Option<&'static str> {
+///         Some("my_app")
 ///     }
 /// }
 /// ```
 pub trait ErrorMeta {
-    /// Crate name where this error type is defined (e.g., "my_app").
-    fn crate_name(&self) -> Option<&'static str> {
-        None
-    }
+    /// Git commit hash, tag, or branch for permalink generation.
+    ///
+    /// **Required.** Use `option_env!("GIT_COMMIT")` or a build script to capture
+    /// the commit at build time. Return `None` if unavailable (links won't be generated).
+    fn git_commit(&self) -> Option<&'static str>;
 
     /// Repository URL for generating source links (e.g., "https://github.com/user/repo").
     fn repo_url(&self) -> Option<&'static str> {
         None
     }
 
-    /// Git commit hash or tag for permalink generation.
-    /// Use `option_env!("GIT_COMMIT")` or similar build-time capture.
-    fn git_commit(&self) -> Option<&'static str> {
+    /// Crate name where this error type is defined (e.g., "my_app").
+    fn crate_name(&self) -> Option<&'static str> {
         None
     }
 
@@ -149,9 +179,11 @@ fn try_box<T>(value: T) -> Option<Box<T>> {
     Some(Box::new(value))
 }
 
-/// Try to push a value onto a Vec, returning false on allocation failure.
+/// Try to push a location onto a LocationVec, returning false on failure.
+/// For Vec: fails on allocation error.
+#[cfg(not(any(feature = "tinyvec", feature = "tinyvec-256")))]
 #[inline]
-fn try_push<T>(vec: &mut Vec<T>, value: T) -> bool {
+fn try_push_location(vec: &mut LocationVec, value: &'static Location<'static>) -> bool {
     if vec.try_reserve(1).is_err() {
         return false;
     }
@@ -159,14 +191,49 @@ fn try_push<T>(vec: &mut Vec<T>, value: T) -> bool {
     true
 }
 
-/// Try to create a Vec with the given capacity, returning None on failure.
+/// Try to push a location onto a LocationVec, returning false on allocation failure.
+/// For TinyVec: wraps in Some(), spills to heap if inline capacity exceeded.
+#[cfg(any(feature = "tinyvec", feature = "tinyvec-256"))]
 #[inline]
-fn try_vec_with_capacity<T>(capacity: usize) -> Option<Vec<T>> {
-    let mut vec = Vec::new();
+fn try_push_location(vec: &mut LocationVec, value: &'static Location<'static>) -> bool {
+    // TinyVec will spill to heap if needed, so this always succeeds
+    // (unless we're truly out of memory, but then we'd panic anyway)
+    vec.push(Some(value));
+    true
+}
+
+/// Try to create a LocationVec with the given capacity hint, returning None on failure.
+/// For Vec: allocates capacity.
+#[cfg(not(any(feature = "tinyvec", feature = "tinyvec-256")))]
+#[inline]
+fn try_location_vec_with_capacity(capacity: usize) -> Option<LocationVec> {
+    let mut vec = LocationVec::new();
     if vec.try_reserve(capacity).is_err() {
         return None;
     }
     Some(vec)
+}
+
+/// Try to create a LocationVec. For TinyVec, always succeeds (starts on stack).
+#[cfg(any(feature = "tinyvec", feature = "tinyvec-256"))]
+#[inline]
+fn try_location_vec_with_capacity(_capacity: usize) -> Option<LocationVec> {
+    Some(LocationVec::new())
+}
+
+/// Get location from LocationVec element reference (identity for Vec, unwrap for TinyVec).
+#[cfg(not(any(feature = "tinyvec", feature = "tinyvec-256")))]
+#[inline]
+fn unwrap_location(loc: &LocationElem) -> &'static Location<'static> {
+    loc
+}
+
+/// Get location from LocationVec element reference (identity for Vec, unwrap for TinyVec).
+#[cfg(any(feature = "tinyvec", feature = "tinyvec-256"))]
+#[inline]
+fn unwrap_location(loc: &LocationElem) -> &'static Location<'static> {
+    // Safe because we only ever push Some values
+    loc.expect("LocationVec should only contain Some values")
 }
 
 /// Try to convert a &str to String, returning None on allocation failure.
@@ -339,7 +406,7 @@ struct Segment {
     location: &'static Location<'static>,
     context: Option<Context>,
     /// Locations accumulated between this segment and the next one.
-    locations_after: Vec<&'static Location<'static>>,
+    locations_after: LocationVec,
     /// Link to previous segment (older context).
     prev: Option<Box<Segment>>,
 }
@@ -351,30 +418,30 @@ struct Trace {
     /// Most recent segment (head of linked list).
     head: Option<Box<Segment>>,
     /// Locations accumulated since the last context was added.
-    recent: Vec<&'static Location<'static>>,
+    recent: LocationVec,
 }
 
 impl Trace {
     fn new() -> Self {
         Self {
             head: None,
-            recent: Vec::new(),
+            recent: LocationVec::new(),
         }
     }
 
     /// Try to create a Trace with pre-allocated capacity.
-    /// Returns None if allocation fails.
+    /// Returns None if allocation fails (Vec) or always succeeds (ArrayVec).
     fn try_with_capacity(cap: usize) -> Option<Self> {
         Some(Self {
             head: None,
-            recent: try_vec_with_capacity(cap)?,
+            recent: try_location_vec_with_capacity(cap)?,
         })
     }
 
-    /// Try to push a location. Returns false if allocation fails.
+    /// Try to push a location. Returns false if allocation fails (Vec) or full (ArrayVec).
     #[inline]
     fn try_push(&mut self, loc: &'static Location<'static>) -> bool {
-        try_push(&mut self.recent, loc)
+        try_push_location(&mut self.recent, loc)
     }
 
     /// Try to push a location with context, creating a new segment.
@@ -444,7 +511,7 @@ impl Trace {
         Item = (
             Option<&'static Location<'static>>,
             Option<&Context>,
-            &[&'static Location<'static>],
+            &[LocationElem],
         ),
     > {
         SegmentIter::new(self)
@@ -458,7 +525,7 @@ struct SegmentIter<'a> {
     /// Index into segments.
     idx: usize,
     /// Recent locations (yielded last).
-    recent: &'a [&'static Location<'static>],
+    recent: &'a [LocationElem],
     /// Have we yielded recent yet?
     done_segments: bool,
 }
@@ -487,7 +554,7 @@ impl<'a> Iterator for SegmentIter<'a> {
     type Item = (
         Option<&'static Location<'static>>,
         Option<&'a Context>,
-        &'a [&'static Location<'static>],
+        &'a [LocationElem],
     );
 
     fn next(&mut self) -> Option<Self::Item> {
@@ -518,7 +585,7 @@ struct TraceIter<'a> {
     /// Current phase within a segment.
     phase: TraceIterPhase<'a>,
     /// Recent locations (processed last).
-    recent: &'a [&'static Location<'static>],
+    recent: &'a [LocationElem],
     recent_idx: usize,
 }
 
@@ -526,7 +593,7 @@ enum TraceIterPhase<'a> {
     /// About to yield the segment's main location.
     SegmentLocation(&'a Segment),
     /// Yielding locations_after.
-    LocationsAfter(&'a [&'static Location<'static>], usize),
+    LocationsAfter(&'a [LocationElem], usize),
     /// Done with segments, now yielding recent.
     Recent,
 }
@@ -571,7 +638,7 @@ impl<'a> Iterator for TraceIter<'a> {
                 }
                 TraceIterPhase::LocationsAfter(locs, idx) => {
                     if *idx < locs.len() {
-                        let loc = locs[*idx];
+                        let loc = unwrap_location(&locs[*idx]);
                         *idx += 1;
                         return Some(loc);
                     }
@@ -584,7 +651,7 @@ impl<'a> Iterator for TraceIter<'a> {
                 }
                 TraceIterPhase::Recent => {
                     if self.recent_idx < self.recent.len() {
-                        let loc = self.recent[self.recent_idx];
+                        let loc = unwrap_location(&self.recent[self.recent_idx]);
                         self.recent_idx += 1;
                         return Some(loc);
                     }
@@ -907,7 +974,8 @@ impl<E: fmt::Debug> fmt::Debug for Traced<E> {
         // Show segments oldest first, with context associated to its location
         for (loc, ctx, locations_before) in trace.segments_oldest_first() {
             // Show locations that came before this context (from .at() calls)
-            for location in locations_before {
+            for loc_elem in locations_before {
+                let location = unwrap_location(loc_elem);
                 writeln!(f, "    at {}:{}", location.file(), location.line())?;
             }
 
@@ -1011,7 +1079,8 @@ impl<E: fmt::Debug + ErrorMeta> fmt::Display for DisplayWithMeta<'_, E> {
         // Show segments oldest first, with context associated to its location
         for (loc, ctx, locations_before) in trace.segments_oldest_first() {
             // Show locations that came before this context (from .at() calls)
-            for location in locations_before {
+            for loc_elem in locations_before {
+                let location = unwrap_location(loc_elem);
                 write_location_meta(f, location, github_base.as_deref())?;
             }
 
