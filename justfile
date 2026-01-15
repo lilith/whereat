@@ -21,3 +21,11 @@ test:
 # Check for outdated dependencies
 outdated:
     cargo outdated
+
+# Run stack trace example
+example-trace:
+    cargo run --example stack_trace
+
+# Run anyhow/thiserror integration example
+example-anyhow:
+    cargo run --example anyhow_thiserror --features std

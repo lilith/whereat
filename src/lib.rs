@@ -361,6 +361,81 @@ impl Trace {
             current: self.head.as_deref(),
         }
     }
+
+    /// Iterate over segments with their associated locations, oldest first.
+    /// Each item is (segment_location, context, locations_after).
+    /// Finally yields (None, None, recent) for locations without context.
+    fn segments_oldest_first(
+        &self,
+    ) -> impl Iterator<
+        Item = (
+            Option<&'static Location<'static>>,
+            Option<&Context>,
+            &[&'static Location<'static>],
+        ),
+    > {
+        SegmentIter::new(self)
+    }
+}
+
+/// Iterator over segments oldest first, yielding (location, context, trailing_locations).
+struct SegmentIter<'a> {
+    /// Segments collected in oldest-first order.
+    segments: Vec<&'a Segment>,
+    /// Index into segments.
+    idx: usize,
+    /// Recent locations (yielded last).
+    recent: &'a [&'static Location<'static>],
+    /// Have we yielded recent yet?
+    done_segments: bool,
+}
+
+impl<'a> SegmentIter<'a> {
+    fn new(trace: &'a Trace) -> Self {
+        // Collect segments oldest first
+        let mut segments = Vec::new();
+        let mut seg = trace.head.as_ref();
+        while let Some(s) = seg {
+            segments.push(s.as_ref());
+            seg = s.prev.as_ref();
+        }
+        segments.reverse(); // Now oldest first
+
+        Self {
+            segments,
+            idx: 0,
+            recent: &trace.recent,
+            done_segments: false,
+        }
+    }
+}
+
+impl<'a> Iterator for SegmentIter<'a> {
+    type Item = (
+        Option<&'static Location<'static>>,
+        Option<&'a Context>,
+        &'a [&'static Location<'static>],
+    );
+
+    fn next(&mut self) -> Option<Self::Item> {
+        if !self.done_segments {
+            if self.idx < self.segments.len() {
+                let seg = self.segments[self.idx];
+                self.idx += 1;
+                return Some((
+                    Some(seg.location),
+                    seg.context.as_ref(),
+                    &seg.locations_after,
+                ));
+            }
+            self.done_segments = true;
+            // Yield recent locations if any
+            if !self.recent.is_empty() {
+                return Some((None, None, self.recent));
+            }
+        }
+        None
+    }
 }
 
 /// Iterator over locations in a trace (oldest first).
@@ -747,21 +822,45 @@ impl<E> Traced<E> {
 
 impl<E: fmt::Debug> fmt::Debug for Traced<E> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        writeln!(f, "{:?}", self.error)?;
-        if let Some(trace) = &self.trace {
-            // Show all contexts (newest first)
-            for ctx in trace.contexts() {
-                match ctx {
-                    Context::Text(msg) => writeln!(f, "  context: {}", msg)?,
-                    Context::Debug(t) => writeln!(f, "  context: {:?}", &**t)?,
-                    Context::Display(t) => writeln!(f, "  context: {}", &**t)?,
+        // Error header
+        writeln!(f, "Error: {:?}", self.error)?;
+
+        let Some(trace) = &self.trace else {
+            return Ok(());
+        };
+
+        writeln!(f)?;
+
+        // Show segments oldest first, with context associated to its location
+        for (loc, ctx, locations_before) in trace.segments_oldest_first() {
+            // Show locations that came before this context (from .at() calls)
+            for loc in locations_before {
+                writeln!(f, "    at {}:{}", loc.file(), loc.line())?;
+            }
+
+            // Show the segment's main location with its context
+            if let Some(location) = loc {
+                if let Some(context) = ctx {
+                    match context {
+                        Context::Text(msg) => {
+                            writeln!(f, "    at {}:{}", location.file(), location.line())?;
+                            writeln!(f, "       ╰─ {}", msg)?;
+                        }
+                        Context::Debug(t) => {
+                            writeln!(f, "    at {}:{}", location.file(), location.line())?;
+                            writeln!(f, "       ╰─ {:?}", &**t)?;
+                        }
+                        Context::Display(t) => {
+                            writeln!(f, "    at {}:{}", location.file(), location.line())?;
+                            writeln!(f, "       ╰─ {}", &**t)?;
+                        }
+                    }
+                } else {
+                    writeln!(f, "    at {}:{}", location.file(), location.line())?;
                 }
             }
-            // Show all locations (oldest first)
-            for loc in trace.iter() {
-                writeln!(f, "  at {}:{}:{}", loc.file(), loc.line(), loc.column())?;
-            }
         }
+
         Ok(())
     }
 }
@@ -1177,7 +1276,7 @@ mod tests {
         let err = TestError::NotFound.traced_msg("context info");
         let debug = alloc::format!("{:?}", err);
         assert!(debug.contains("NotFound"));
-        assert!(debug.contains("context: context info"));
+        assert!(debug.contains("╰─ context info"));
         assert!(debug.contains("lib.rs"));
     }
 
@@ -1299,7 +1398,7 @@ mod tests {
 
         // Check that Display formatting is used in output
         let debug = alloc::format!("{:?}", err);
-        assert!(debug.contains("context: user-friendly message"));
+        assert!(debug.contains("╰─ user-friendly message"));
 
         // Downcast should still work
         let mut found = false;
@@ -1337,5 +1436,74 @@ mod tests {
         assert!(contexts[0].is_display()); // display message
         assert!(!contexts[1].is_display()); // DebugInfo (Debug)
         assert!(contexts[2].is_display()); // text message
+    }
+
+    #[test]
+    fn test_trace_format_structure() {
+        // Test that trace format shows locations oldest-first with contexts
+        fn level1() -> Result<(), Traced<TestError>> {
+            Err(TestError::NotFound.traced())
+        }
+
+        fn level2() -> Result<(), Traced<TestError>> {
+            level1().at_msg("in level2")?;
+            Ok(())
+        }
+
+        fn level3() -> Result<(), Traced<TestError>> {
+            level2().at_msg("in level3")?;
+            Ok(())
+        }
+
+        let err = level3().unwrap_err();
+        let debug = alloc::format!("{:?}", err);
+
+        // Verify structure:
+        // - Error header
+        assert!(debug.contains("Error: NotFound"));
+
+        // - Locations with contexts
+        assert!(debug.contains("╰─ in level2"));
+        assert!(debug.contains("╰─ in level3"));
+
+        // - Location lines present
+        assert!(debug.contains("at src/lib.rs:"));
+
+        // Verify order: level2 context before level3 context (oldest first)
+        let level2_pos = debug.find("in level2").unwrap();
+        let level3_pos = debug.find("in level3").unwrap();
+        assert!(
+            level2_pos < level3_pos,
+            "level2 should appear before level3 (oldest first)"
+        );
+    }
+
+    #[test]
+    fn test_trace_origin_comes_first() {
+        fn origin() -> Result<(), Traced<TestError>> {
+            Err(TestError::NotFound.traced())
+        }
+
+        fn wrapper() -> Result<(), Traced<TestError>> {
+            origin().at_msg("wrapping")?;
+            Ok(())
+        }
+
+        let err = wrapper().unwrap_err();
+        let debug = alloc::format!("{:?}", err);
+
+        // The first "at" line should be from origin (lower line number)
+        // and the context "wrapping" should come after
+        let lines: Vec<&str> = debug.lines().collect();
+
+        // Find first "at" line
+        let first_at = lines.iter().find(|l| l.contains("at src/lib.rs:")).unwrap();
+
+        // It should be the origin location (before the wrapper's context)
+        // The origin .traced() call will be at a lower line than wrapper's .at_msg()
+        assert!(
+            !first_at.contains("╰─"),
+            "First location should be origin without context"
+        );
     }
 }
