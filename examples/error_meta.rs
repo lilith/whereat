@@ -2,6 +2,9 @@
 
 use errat::{At, ResultAtExt, at, crate_info};
 
+// Required for at!() macro
+errat::crate_info_static!();
+
 #[derive(Debug)]
 #[allow(dead_code)]
 enum AppError {

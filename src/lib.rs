@@ -424,6 +424,31 @@ impl CrateInfo {
     }
 }
 
+// ============================================================================
+// Crate-level error tracking info (for errat's own at!() / at_crate!() usage)
+// ============================================================================
+//
+// This is what `crate_info_static!()` generates. We define it manually here
+// because the macro isn't defined yet at this point in the file.
+
+#[doc(hidden)]
+pub(crate) static __ERRAT_CRATE_INFO: CrateInfo = CrateInfo::with_path(
+    "errat",
+    option_env!("CARGO_PKG_REPOSITORY"),
+    match option_env!("GIT_COMMIT") {
+        Some(c) => Some(c),
+        None => match option_env!("GITHUB_SHA") {
+            Some(c) => Some(c),
+            None => match option_env!("CI_COMMIT_SHA") {
+                Some(c) => Some(c),
+                None => Some(concat!("v", env!("CARGO_PKG_VERSION"))),
+            },
+        },
+    },
+    None, // errat is at repo root
+    "errat",
+);
+
 /// Captures crate metadata at the call site.
 ///
 /// Returns a `&'static CrateInfo` reference that can be used with
@@ -494,36 +519,13 @@ impl CrateInfo {
 ///
 /// let info: &'static CrateInfo = crate_info!();
 /// assert_eq!(info.name, "errat");
-/// // info.commit is Some("v0.1.0") if no GIT_COMMIT env var
 /// ```
 #[macro_export]
 macro_rules! crate_info {
-    // With explicit crate path for workspace crates
-    ($crate_path:literal) => {{
-        static INFO: $crate::CrateInfo = $crate::CrateInfo::with_path(
-            env!("CARGO_PKG_NAME"),
-            option_env!("CARGO_PKG_REPOSITORY"),
-            match option_env!("GIT_COMMIT") {
-                Some(c) => Some(c),
-                None => match option_env!("GITHUB_SHA") {
-                    Some(c) => Some(c),
-                    None => match option_env!("CI_COMMIT_SHA") {
-                        Some(c) => Some(c),
-                        None => Some(concat!("v", env!("CARGO_PKG_VERSION"))),
-                    },
-                },
-            },
-            Some($crate_path),
-            module_path!(),
-        );
-        &INFO
-    }};
-    // Auto-detect (works for root crates, or with CRATE_PATH env var)
     () => {{
         static INFO: $crate::CrateInfo = $crate::CrateInfo::with_path(
             env!("CARGO_PKG_NAME"),
             option_env!("CARGO_PKG_REPOSITORY"),
-            // Try env vars first, fall back to version tag for crates.io compatibility
             match option_env!("GIT_COMMIT") {
                 Some(c) => Some(c),
                 None => match option_env!("GITHUB_SHA") {
@@ -541,18 +543,102 @@ macro_rules! crate_info {
     }};
 }
 
+/// Define crate-level error tracking info. Call once in your crate root (lib.rs or main.rs).
+///
+/// This creates a `pub(crate) static __ERRAT_CRATE_INFO` that `at!()` and `at_crate!()`
+/// reference. Defining it once avoids creating duplicate statics at each macro call site.
+///
+/// ## Basic Usage
+///
+/// ```rust,ignore
+/// // In lib.rs or main.rs
+/// errat::crate_info_static!();
+/// ```
+///
+/// ## With Workspace Path
+///
+/// For crates in a subdirectory of the repository (e.g., `crates/mylib/`):
+///
+/// ```rust,ignore
+/// errat::crate_info_static!(path = "crates/mylib/");
+/// ```
+///
+/// ## Multiple Options
+///
+/// ```rust,ignore
+/// errat::crate_info_static!(
+///     path = "crates/mylib/",
+///     // Future: more options can be added here
+/// );
+/// ```
+///
+/// ## How It Works
+///
+/// The macro captures at compile time:
+/// - `CARGO_PKG_NAME` - crate name
+/// - `CARGO_PKG_REPOSITORY` - repository URL from Cargo.toml
+/// - `GIT_COMMIT` / `GITHUB_SHA` / `CI_COMMIT_SHA` - commit hash (or `v{VERSION}` fallback)
+/// - `path` option - subdirectory path for workspace crates
+#[macro_export]
+macro_rules! crate_info_static {
+    () => {
+        #[doc(hidden)]
+        pub(crate) static __ERRAT_CRATE_INFO: $crate::CrateInfo = $crate::CrateInfo::with_path(
+            env!("CARGO_PKG_NAME"),
+            option_env!("CARGO_PKG_REPOSITORY"),
+            match option_env!("GIT_COMMIT") {
+                Some(c) => Some(c),
+                None => match option_env!("GITHUB_SHA") {
+                    Some(c) => Some(c),
+                    None => match option_env!("CI_COMMIT_SHA") {
+                        Some(c) => Some(c),
+                        None => Some(concat!("v", env!("CARGO_PKG_VERSION"))),
+                    },
+                },
+            },
+            None,
+            module_path!(),
+        );
+    };
+    (path = $path:literal) => {
+        #[doc(hidden)]
+        pub(crate) static __ERRAT_CRATE_INFO: $crate::CrateInfo = $crate::CrateInfo::with_path(
+            env!("CARGO_PKG_NAME"),
+            option_env!("CARGO_PKG_REPOSITORY"),
+            match option_env!("GIT_COMMIT") {
+                Some(c) => Some(c),
+                None => match option_env!("GITHUB_SHA") {
+                    Some(c) => Some(c),
+                    None => match option_env!("CI_COMMIT_SHA") {
+                        Some(c) => Some(c),
+                        None => Some(concat!("v", env!("CARGO_PKG_VERSION"))),
+                    },
+                },
+            },
+            Some($path),
+            module_path!(),
+        );
+    };
+    (path = $path:literal, $($rest:tt)*) => {
+        $crate::crate_info_static!(path = $path);
+    };
+}
+
 /// Start tracing an error with crate metadata for repository links.
 ///
-/// This is equivalent to `err.start_at().at_crate(crate_info!())` but more concise.
-/// Use this when creating new traced errors in your crate.
+/// Requires `crate_info_static!()` to be called in your crate root.
+/// References the single `__ERRAT_CRATE_INFO` static - no duplicate statics created.
 ///
-/// ## Example
+/// ## Setup (once in lib.rs)
 ///
-/// ```rust
+/// ```rust,ignore
+/// errat::crate_info_static!();
+/// ```
+///
+/// ## Usage
+///
+/// ```rust,ignore
 /// use errat::{at, At};
-///
-/// #[derive(Debug)]
-/// enum MyError { NotFound }
 ///
 /// fn find_user(id: u64) -> Result<String, At<MyError>> {
 ///     if id == 0 {
@@ -561,36 +647,54 @@ macro_rules! crate_info {
 ///     Ok(format!("User {}", id))
 /// }
 /// ```
+///
+/// ## Without Crate Info
+///
+/// If you don't need GitHub links, use the `at()` function instead:
+///
+/// ```rust
+/// use errat::{at, At};
+///
+/// #[derive(Debug)]
+/// struct MyError;
+///
+/// let err: At<MyError> = at(MyError);  // No crate info, no static needed
+/// ```
 #[macro_export]
+#[allow(clippy::crate_in_macro_def)] // Intentional: references caller's crate static
 macro_rules! at {
-    ($err:expr) => {{ $crate::At::new($err).at().at_crate($crate::crate_info!()) }};
+    ($err:expr) => {{
+        $crate::At::new($err)
+            .at()
+            .at_crate(&crate::__ERRAT_CRATE_INFO)
+    }};
 }
 
 /// Add crate boundary marker to a Result with an At<E> error.
 ///
-/// This is syntactic sugar for `result.at_crate(crate_info!())`.
+/// Requires `crate_info_static!()` to be called in your crate root.
 /// Use at crate boundaries when consuming errors from dependencies.
 ///
-/// ## Example
+/// ## Setup (once in lib.rs)
 ///
-/// ```rust
-/// use errat::{at, at_crate, At, ResultAtExt};
+/// ```rust,ignore
+/// errat::crate_info_static!();
+/// ```
 ///
-/// #[derive(Debug)]
-/// enum MyError { External(String) }
+/// ## Usage
 ///
-/// fn external_call() -> Result<(), At<MyError>> {
-///     Err(at(MyError::External("dependency failed".into())))
-/// }
+/// ```rust,ignore
+/// use errat::{at_crate, At, ResultAtExt};
 ///
-/// fn my_function() -> Result<(), At<MyError>> {
-///     at_crate!(external_call())?;  // Mark crate boundary
+/// fn my_function() -> Result<(), At<DepError>> {
+///     at_crate!(dependency::call())?;  // Mark crate boundary
 ///     Ok(())
 /// }
 /// ```
 #[macro_export]
+#[allow(clippy::crate_in_macro_def)] // Intentional: references caller's crate static
 macro_rules! at_crate {
-    ($result:expr) => {{ $crate::ResultAtExt::at_crate($result, $crate::crate_info!()) }};
+    ($result:expr) => {{ $crate::ResultAtExt::at_crate($result, &crate::__ERRAT_CRATE_INFO) }};
 }
 
 /// Start tracing an error with a skip marker indicating late entry.
@@ -1285,13 +1389,13 @@ impl<E: fmt::Debug> At<E> {
     /// ## Example
     ///
     /// ```rust
-    /// use errat::{at, At};
+    /// use errat::{at, crate_info, At};
     ///
     /// #[derive(Debug)]
     /// struct MyError;
     ///
-    /// // at!() captures crate info automatically
-    /// let err = at!(MyError);
+    /// // Use at() function with manual crate info
+    /// let err = at(MyError).at_crate(crate_info!());
     /// println!("{}", err.display_with_meta());
     /// ```
     pub fn display_with_meta(&self) -> impl fmt::Display + '_ {

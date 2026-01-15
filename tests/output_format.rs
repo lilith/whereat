@@ -3,6 +3,9 @@
 use core::error::Error;
 use errat::{At, ErrorAtExt, ResultAtExt, ResultTraceExt, at, start_at_late};
 
+// Define the crate-level static for at!() to reference
+errat::crate_info_static!();
+
 #[derive(Debug)]
 enum TestError {
     NotFound,

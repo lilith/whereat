@@ -5,6 +5,9 @@
 use core::mem::size_of;
 use errat::{At, Context, CrateInfo, at, at_crate, crate_info};
 
+// Define the crate-level static for at!() and at_crate!() to reference
+errat::crate_info_static!();
+
 #[derive(Debug)]
 struct TestError;
 
@@ -850,80 +853,63 @@ fn crate_path_without_trailing_slash() {
 }
 
 // ============================================================================
-// Explicit Path Macro Variant
+// crate_info_static!() Macro Tests
 // ============================================================================
 
 #[test]
-fn crate_info_explicit_path_macro() {
-    // crate_info!("path/") variant for workspace crates
-    let info = crate_info!("crates/mylib/");
+fn crate_info_static_defines_hidden_static() {
+    // __ERRAT_CRATE_INFO is defined by crate_info_static!() at top of file
+    // at!() references it
+    let err = at!(TestError);
 
-    assert_eq!(info.name, "errat", "Should still capture CARGO_PKG_NAME");
-    assert_eq!(
-        info.crate_path,
-        Some("crates/mylib/"),
-        "Should use the explicit path"
-    );
+    // Should have crate info in contexts
+    let has_crate_ctx = err.contexts().any(|ctx| ctx.is_crate_boundary());
+    assert!(has_crate_ctx, "at!() should reference crate static");
 }
 
 #[test]
-fn crate_info_explicit_path_overrides_env() {
-    // Explicit path should be used even if CRATE_PATH env var is set
-    // (the macro variant ignores the env var and uses the literal)
-    let info = crate_info!("explicit/path/");
+fn crate_info_static_has_correct_name() {
+    // The static should have captured CARGO_PKG_NAME
+    let err = at!(TestError);
 
-    assert_eq!(info.crate_path, Some("explicit/path/"));
+    for ctx in err.contexts() {
+        if let Some(info) = ctx.as_crate_info() {
+            assert_eq!(info.name, "errat", "Should have crate name from env");
+            return;
+        }
+    }
+    panic!("Should find CrateInfo in at!() error");
 }
 
-#[test]
-fn crate_info_explicit_path_in_github_url() {
-    // Use crate_info!("path/") in an actual trace
-    let info = crate_info!("workspace/subcrate/");
+// Test that crate_info_static!(path = "...") variant works
+mod with_path {
+    use super::*;
 
-    let err = errat::At::new(TestError).at().at_crate(info);
-    let output = format!("{}", err.display_with_meta());
+    // This would be in a workspace crate's lib.rs
+    // errat::crate_info_static!(path = "crates/mylib/");
 
-    // URL should include the explicit crate_path
-    // Note: commit is version tag fallback (v{VERSION})
-    assert!(
-        output.contains("workspace/subcrate/"),
-        "URL should include explicit crate_path. Got:\n{}",
-        output
-    );
-}
+    #[test]
+    fn path_option_sets_crate_path() {
+        // We can't easily test crate_info_static!(path = ...) here because
+        // we already called crate_info_static!() at the top of this file.
+        // Instead, test that CrateInfo::with_path works correctly.
+        static INFO: CrateInfo = CrateInfo::with_path(
+            "test",
+            Some("https://github.com/org/repo"),
+            Some("abc123"),
+            Some("crates/mylib/"),
+            "test",
+        );
 
-#[test]
-fn crate_info_explicit_empty_path() {
-    // Explicit empty path (crate at repo root)
-    let info = crate_info!("");
+        assert_eq!(INFO.crate_path, Some("crates/mylib/"));
 
-    assert_eq!(
-        info.crate_path,
-        Some(""),
-        "Empty string is valid for root crate"
-    );
-}
+        let err = errat::At::new(TestError).at().at_crate(&INFO);
+        let output = format!("{}", err.display_with_meta());
 
-#[test]
-fn crate_info_explicit_path_has_commit() {
-    // Explicit path variant should still capture commit (version fallback)
-    let info = crate_info!("mypath/");
-
-    // Should have commit from env var or version tag fallback
-    assert!(
-        info.commit.is_some(),
-        "Should have commit (version fallback)"
-    );
-}
-
-#[test]
-fn crate_info_both_variants_same_other_fields() {
-    let auto_info = crate_info!();
-    let explicit_info = crate_info!("some/path/");
-
-    // All fields except crate_path should be the same
-    assert_eq!(auto_info.name, explicit_info.name);
-    assert_eq!(auto_info.repo, explicit_info.repo);
-    // commit may differ if one env var vs version fallback, but format is same
-    // module differs because they're different call sites
+        assert!(
+            output.contains("crates/mylib/"),
+            "URL should include crate_path. Got:\n{}",
+            output
+        );
+    }
 }
