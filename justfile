@@ -18,6 +18,12 @@ clippy:
 test:
     cargo test
 
+# Run tests with all feature combinations
+test-all:
+    cargo test
+    cargo test --features tinyvec
+    cargo test --features tinyvec-256
+
 # Check for outdated dependencies
 outdated:
     cargo outdated
