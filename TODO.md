@@ -6,34 +6,33 @@
 
 - [x] `at(err)` - function to wrap any type in `At<E>` (no Error trait required)
 - [x] `at!(err)` - macro with crate info for GitHub links
-- [x] `.start_at()` - method on `E: Error` types only (via Traceable trait)
-- [x] `.at()` - add location to existing `At<E>` via ResultExt
+- [x] `.start_at()` - method on `E: Error` types only (via ErrorAtExt trait)
+- [x] `.at()` - add location to existing `At<E>` via ResultAtExt
 - [x] `.at_crate(crate_info!())` - mark crate boundary
 - [x] `source()` delegation - `At<E>` delegates to `E::source()` for error chains
 
-### Context Methods (rename in progress)
+### Context Methods
 
-- [ ] Rename `at_message()` → `at_str(&'static str)` + `at_string(|| String)`
-  - `at_str` for static strings (zero-cost)
-  - `at_string` for lazy computed strings (avoids alloc on Ok path)
-- [ ] Rename `at_display()` → `at_data(|| impl Display)`
-  - Preserves type info for downcasting
+- [x] `at_str(&'static str)` - static strings (zero-cost)
+- [x] `at_string(|| String)` - lazy computed strings (avoids alloc on Ok path)
+- [x] `at_data(|| impl Display)` - typed context with Display, preserves type for downcast
 - [x] `at_debug(|| impl Debug)` - typed context with Debug formatting
 
-### New Features
+### Skip Markers
 
-- [ ] `at_crate!(result)` - macro sugar for `result.at_crate(crate_info!())`
-- [ ] `at_skipped()` - adds `[...]` marker for skipped frames
-- [ ] `start_at_late!()` - starts trace with `[...]` marker for delayed tracing
+- [x] `at_skipped()` - adds `[...]` marker for skipped frames
+- [x] `start_at_late!(err)` - starts trace with `[...]` marker for delayed tracing
+- [x] `at_crate!(result)` - macro sugar for `result.at_crate(crate_info!())`
 
 ### Cleanup
 
 - [x] Remove `ErrorMeta` trait (replaced by `CrateInfo` in trace)
 - [x] Remove `errat-derive` crate (no longer needed)
 - [x] Remove unused `std` feature
-- [x] Require `E: Error` for `Traceable` blanket impl
-- [ ] Fix all doctests for new API
-- [ ] Update examples for new method names
+- [x] Require `E: Error` for `ErrorAtExt` blanket impl
+- [x] Fix all doctests for new API
+- [x] Update examples for new method names
+- [x] Rename `ResultExt` → `ResultAtExt`, `Traceable` → `ErrorAtExt`
 
 ## Future Considerations
 
@@ -77,6 +76,5 @@ result.at_str("loading config")?;  // GOOD: just a pointer
 
 ### Why require `Error` for `.start_at()` method?
 
-Blanket `impl<E> Traceable for E` pollutes all types with `.start_at()`.
-Requiring `E: Error` limits it to actual error types. Use `at(err)` function
-for non-Error types.
+Blanket `impl<E: Error> ErrorAtExt for E` limits `.start_at()` to actual error types.
+Use `at(err)` function for non-Error types.
