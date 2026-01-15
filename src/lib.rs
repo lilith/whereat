@@ -437,6 +437,61 @@ macro_rules! at {
     ($err:expr) => {{ $crate::At::new($err).at().at_crate($crate::crate_info!()) }};
 }
 
+/// Add crate boundary marker to a Result with an At<E> error.
+///
+/// This is syntactic sugar for `result.at_crate(crate_info!())`.
+/// Use at crate boundaries when consuming errors from dependencies.
+///
+/// ## Example
+///
+/// ```rust
+/// use errat::{at, at_crate, At, ResultAtExt};
+///
+/// #[derive(Debug)]
+/// enum MyError { External(String) }
+///
+/// fn external_call() -> Result<(), At<MyError>> {
+///     Err(at(MyError::External("dependency failed".into())))
+/// }
+///
+/// fn my_function() -> Result<(), At<MyError>> {
+///     at_crate!(external_call())?;  // Mark crate boundary
+///     Ok(())
+/// }
+/// ```
+#[macro_export]
+macro_rules! at_crate {
+    ($result:expr) => {{ $crate::ResultAtExt::at_crate($result, $crate::crate_info!()) }};
+}
+
+/// Start tracing an error with a skip marker indicating late entry.
+///
+/// Use this when wrapping an error that originated elsewhere and you want
+/// to indicate that the trace doesn't show the full call stack.
+///
+/// ## Example
+///
+/// ```rust
+/// use errat::{start_at_late, At};
+///
+/// #[derive(Debug)]
+/// enum MyError { Legacy(String) }
+///
+/// // Wrapping an error from code that doesn't use errat
+/// fn wrap_legacy_error(msg: &str) -> At<MyError> {
+///     start_at_late!(MyError::Legacy(msg.into()))
+/// }
+///
+/// let err = wrap_legacy_error("old system failed");
+/// // Debug output will show [...] to indicate skipped frames
+/// let output = format!("{:?}", err);
+/// assert!(output.contains("[...]"));
+/// ```
+#[macro_export]
+macro_rules! start_at_late {
+    ($err:expr) => {{ $crate::At::new($err).at_skipped() }};
+}
+
 /// Wrap any value in `At<E>` and capture the caller's location.
 ///
 /// This function works with any type, not just `Error` types.
@@ -480,6 +535,10 @@ pub enum Context {
     /// Crate boundary marker - changes the assumed crate for subsequent locations.
     /// Used for generating correct repository links in cross-crate traces.
     Crate(&'static CrateInfo),
+    /// Marker indicating that some frames were skipped.
+    /// Used when starting tracing late or skipping intermediate frames.
+    /// Displayed as `[...]` in trace output.
+    Skipped,
 }
 
 impl Context {
@@ -502,7 +561,7 @@ impl Context {
     /// Try to downcast to a specific type, if this is a typed variant.
     pub fn downcast_ref<T: 'static>(&self) -> Option<&T> {
         match self {
-            Context::Text(_) | Context::Crate(_) => None,
+            Context::Text(_) | Context::Crate(_) | Context::Skipped => None,
             // Must use (**b) to call as_any on the trait object, not the Box
             // (Box<dyn DebugAny> itself implements DebugAny through the blanket impl)
             Context::Debug(b) => (**b).as_any().downcast_ref(),
@@ -513,7 +572,7 @@ impl Context {
     /// Get the type name if this is a typed variant.
     pub fn type_name(&self) -> Option<&'static str> {
         match self {
-            Context::Text(_) | Context::Crate(_) => None,
+            Context::Text(_) | Context::Crate(_) | Context::Skipped => None,
             Context::Debug(b) => Some((**b).type_name()),
             Context::Display(b) => Some((**b).type_name()),
         }
@@ -528,6 +587,11 @@ impl Context {
     pub fn is_crate_boundary(&self) -> bool {
         matches!(self, Context::Crate(_))
     }
+
+    /// Check if this is a skip marker.
+    pub fn is_skipped(&self) -> bool {
+        matches!(self, Context::Skipped)
+    }
 }
 
 impl fmt::Debug for Context {
@@ -537,6 +601,7 @@ impl fmt::Debug for Context {
             Context::Debug(t) => write!(f, "{:?}", &**t),
             Context::Display(t) => write!(f, "{}", &**t), // Display types use Display even in Debug
             Context::Crate(info) => write!(f, "[crate: {}]", info.name),
+            Context::Skipped => write!(f, "[...]"),
         }
     }
 }
@@ -548,6 +613,7 @@ impl fmt::Display for Context {
             Context::Debug(t) => write!(f, "{:?}", &**t), // Debug types use Debug in Display
             Context::Display(t) => write!(f, "{}", &**t),
             Context::Crate(info) => write!(f, "[crate: {}]", info.name),
+            Context::Skipped => write!(f, "[...]"),
         }
     }
 }
@@ -942,6 +1008,46 @@ impl<E> At<E> {
         self
     }
 
+    /// Add a skip marker (`[...]`) to the trace.
+    ///
+    /// Use this to indicate that some frames were skipped, either because
+    /// tracing started late in the call stack or because intermediate frames
+    /// are not meaningful.
+    ///
+    /// ## Example
+    ///
+    /// ```rust
+    /// use errat::{at, At};
+    ///
+    /// #[derive(Debug)]
+    /// enum MyError { NotFound }
+    ///
+    /// // When you receive an error but want to indicate the origin is elsewhere
+    /// fn handle_legacy_error() -> At<MyError> {
+    ///     at(MyError::NotFound).at_skipped()
+    /// }
+    /// ```
+    #[track_caller]
+    #[inline]
+    pub fn at_skipped(mut self) -> Self {
+        let loc = Location::caller();
+        let context = Context::Skipped;
+
+        match &mut self.trace {
+            Some(trace) => {
+                trace.try_push_with_context(loc, context);
+            }
+            None => {
+                let mut trace = Trace::new();
+                trace.try_push_with_context(loc, context);
+                if let Some(boxed) = try_box(trace) {
+                    self.trace = Some(boxed);
+                }
+            }
+        }
+        self
+    }
+
     /// Get a reference to the inner error.
     #[inline]
     pub fn error(&self) -> &E {
@@ -1024,6 +1130,7 @@ impl<E: fmt::Debug> fmt::Debug for At<E> {
                     Context::Debug(t) => writeln!(f, "       ╰─ {:?}", &**t)?,
                     Context::Display(t) => writeln!(f, "       ╰─ {}", &**t)?,
                     Context::Crate(_) => {} // Crate boundaries don't display in basic Debug
+                    Context::Skipped => writeln!(f, "       [...]")?,
                 }
             }
         }
@@ -1119,6 +1226,7 @@ impl<E: fmt::Debug> fmt::Display for DisplayWithMeta<'_, E> {
                     Context::Debug(t) => writeln!(f, "       ╰─ {:?}", &**t)?,
                     Context::Display(t) => writeln!(f, "       ╰─ {}", &**t)?,
                     Context::Crate(_) => {} // Already handled above
+                    Context::Skipped => writeln!(f, "       [...]")?,
                 }
             }
         }
@@ -1264,6 +1372,10 @@ pub trait ResultAtExt<T, E> {
     /// Add a crate boundary marker. Use with `crate_info!()` for cross-crate tracing.
     #[track_caller]
     fn at_crate(self, info: &'static CrateInfo) -> Result<T, At<E>>;
+
+    /// Add a skip marker to indicate skipped frames.
+    #[track_caller]
+    fn at_skipped(self) -> Result<T, At<E>>;
 }
 
 impl<T, E> ResultAtExt<T, E> for Result<T, At<E>> {
@@ -1326,6 +1438,15 @@ impl<T, E> ResultAtExt<T, E> for Result<T, At<E>> {
             Err(e) => Err(e.at_crate(info)),
         }
     }
+
+    #[track_caller]
+    #[inline]
+    fn at_skipped(self) -> Result<T, At<E>> {
+        match self {
+            Ok(v) => Ok(v),
+            Err(e) => Err(e.at_skipped()),
+        }
+    }
 }
 
 /// Extension trait for converting non-traced errors to traced errors.
@@ -1373,6 +1494,10 @@ pub trait ResultTraceExt<T, E> {
         self,
         f: impl FnOnce() -> C,
     ) -> Result<T, At<E>>;
+
+    /// Convert to `At<E>` with a skip marker indicating late tracing.
+    #[track_caller]
+    fn trace_skipped(self) -> Result<T, At<E>>;
 }
 
 impl<T, E> ResultTraceExt<T, E> for Result<T, E> {
@@ -1424,6 +1549,15 @@ impl<T, E> ResultTraceExt<T, E> for Result<T, E> {
         match self {
             Ok(v) => Ok(v),
             Err(e) => Err(At::new(e).at_debug(f)),
+        }
+    }
+
+    #[track_caller]
+    #[inline]
+    fn trace_skipped(self) -> Result<T, At<E>> {
+        match self {
+            Ok(v) => Ok(v),
+            Err(e) => Err(At::new(e).at_skipped()),
         }
     }
 }
