@@ -406,3 +406,142 @@ fn trailing_slash_stripped_from_repo() {
         output
     );
 }
+
+// ============================================================================
+// Crate Boundary Switching
+// ============================================================================
+
+#[test]
+fn crate_boundary_switches_github_links() {
+    static CRATE_A: CrateInfo = CrateInfo::new(
+        "crate-a",
+        Some("https://github.com/org/crate-a"),
+        Some("aaa111"),
+        "crate_a",
+    );
+
+    static CRATE_B: CrateInfo = CrateInfo::new(
+        "crate-b",
+        Some("https://github.com/org/crate-b"),
+        Some("bbb222"),
+        "crate_b",
+    );
+
+    // Simulate: error in crate-a, crosses to crate-b
+    let err = errat::At::new(TestError)
+        .at()
+        .at_crate(&CRATE_A)
+        .at()
+        .at_crate(&CRATE_B)
+        .at();
+
+    let output = format!("{}", err.display_with_meta());
+
+    // Should have links for both crates
+    assert!(
+        output.contains("crate-a/blob/aaa111"),
+        "Should have crate-a GitHub link. Got:\n{}",
+        output
+    );
+    assert!(
+        output.contains("crate-b/blob/bbb222"),
+        "Should have crate-b GitHub link. Got:\n{}",
+        output
+    );
+}
+
+#[test]
+fn crate_boundary_affects_subsequent_locations() {
+    static CRATE_X: CrateInfo = CrateInfo::new(
+        "crate-x",
+        Some("https://github.com/org/crate-x"),
+        Some("xxx"),
+        "crate_x",
+    );
+
+    // Locations after boundary should use that crate's info
+    let err = errat::At::new(TestError)
+        .at_crate(&CRATE_X)  // Boundary
+        .at()                // Should use CRATE_X
+        .at();               // Should use CRATE_X
+
+    let output = format!("{}", err.display_with_meta());
+
+    // Count occurrences of crate-x links
+    let link_count = output.matches("crate-x/blob/xxx").count();
+    assert!(
+        link_count >= 2,
+        "Multiple locations should use CRATE_X info. Found {} links. Got:\n{}",
+        link_count,
+        output
+    );
+}
+
+#[test]
+fn multiple_boundary_switches() {
+    static C1: CrateInfo = CrateInfo::new("c1", Some("https://gh.com/c1"), Some("111"), "c1");
+    static C2: CrateInfo = CrateInfo::new("c2", Some("https://gh.com/c2"), Some("222"), "c2");
+    static C3: CrateInfo = CrateInfo::new("c3", Some("https://gh.com/c3"), Some("333"), "c3");
+
+    let err = errat::At::new(TestError)
+        .at_crate(&C1)
+        .at()
+        .at_crate(&C2)
+        .at()
+        .at_crate(&C3)
+        .at();
+
+    let output = format!("{}", err.display_with_meta());
+
+    assert!(output.contains("c1/blob/111"), "Should have c1 link");
+    assert!(output.contains("c2/blob/222"), "Should have c2 link");
+    assert!(output.contains("c3/blob/333"), "Should have c3 link");
+}
+
+// ============================================================================
+// At<At<E>> Anti-pattern
+// ============================================================================
+
+#[test]
+fn nested_at_is_wasteful() {
+    // At<At<E>> works but wastes memory - two separate traces
+    // This test documents the behavior, not endorses it
+
+    #[derive(Debug)]
+    struct Inner;
+
+    let inner: At<Inner> = errat::at(Inner);
+    let outer: At<At<Inner>> = errat::at(inner);
+
+    // Both have their own traces - wasteful!
+    assert_eq!(outer.trace_len(), 1, "Outer has its own trace");
+    assert_eq!(outer.error().trace_len(), 1, "Inner has its own trace");
+
+    // Total overhead: 2 Box<Trace> allocations instead of 1
+    // This is why you should use .at() on Result, not wrap At<At<E>>
+}
+
+#[test]
+fn prefer_result_at_over_nested_at() {
+    // GOOD: Use ResultAtExt to extend existing trace
+    fn good_inner() -> Result<(), At<TestError>> {
+        Err(errat::at(TestError))
+    }
+
+    fn good_outer() -> Result<(), At<TestError>> {
+        good_inner().map_err(|e| e.at()) // Extends same trace
+    }
+
+    let good_err = good_outer().unwrap_err();
+    assert_eq!(good_err.trace_len(), 2, "Single trace with 2 locations");
+
+    // BAD: Wrapping At in At
+    fn bad_outer() -> At<At<TestError>> {
+        errat::at(errat::at(TestError)) // Creates nested traces
+    }
+
+    let bad_err = bad_outer();
+    // Two separate traces - wasteful
+    assert_eq!(bad_err.trace_len(), 1);
+    assert_eq!(bad_err.error().trace_len(), 1);
+}
