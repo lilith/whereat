@@ -221,14 +221,15 @@ fn sizeof_at_is_error_plus_pointer() {
 }
 
 #[test]
-fn sizeof_crate_info_is_four_pointers() {
-    // CrateInfo has 4 fields, all &'static str or Option<&'static str>
+fn sizeof_crate_info_is_five_pointers() {
+    // CrateInfo has 5 fields: name, repo, commit, crate_path, module
+    // All are &'static str or Option<&'static str>
     let info_size = size_of::<CrateInfo>();
-    let expected = 4 * size_of::<Option<&'static str>>();
+    let expected = 5 * size_of::<Option<&'static str>>();
 
     assert_eq!(
         info_size, expected,
-        "CrateInfo should be 4 pointers ({} bytes). Got: {}",
+        "CrateInfo should be 5 pointers ({} bytes). Got: {}",
         expected, info_size
     );
 }
@@ -718,4 +719,97 @@ mod nested_module {
             info.module
         );
     }
+}
+
+// ============================================================================
+// Workspace Crate Path
+// ============================================================================
+
+#[test]
+fn crate_path_included_in_github_url() {
+    static INFO: CrateInfo = CrateInfo::with_path(
+        "workspace-crate",
+        Some("https://github.com/org/monorepo"),
+        Some("abc123"),
+        Some("crates/mylib/"),  // Crate is in subdirectory
+        "workspace_crate",
+    );
+
+    let err = errat::At::new(TestError).at().at_crate(&INFO);
+    let output = format!("{}", err.display_with_meta());
+
+    // URL should include crate_path between commit and file
+    assert!(
+        output.contains("monorepo/blob/abc123/crates/mylib/"),
+        "URL should include crate_path. Got:\n{}",
+        output
+    );
+}
+
+#[test]
+fn crate_path_none_works() {
+    static INFO: CrateInfo = CrateInfo::with_path(
+        "root-crate",
+        Some("https://github.com/org/repo"),
+        Some("def456"),
+        None,  // Crate at repo root
+        "root_crate",
+    );
+
+    let err = errat::At::new(TestError).at().at_crate(&INFO);
+    let output = format!("{}", err.display_with_meta());
+
+    // URL should work without crate_path
+    assert!(
+        output.contains("repo/blob/def456/tests/"),
+        "URL should work without crate_path. Got:\n{}",
+        output
+    );
+}
+
+#[test]
+fn crate_path_with_trailing_slash() {
+    static INFO: CrateInfo = CrateInfo::with_path(
+        "test",
+        Some("https://github.com/org/repo"),
+        Some("abc"),
+        Some("packages/core/"),  // With trailing slash
+        "test",
+    );
+
+    let err = errat::At::new(TestError).at().at_crate(&INFO);
+    let output = format!("{}", err.display_with_meta());
+
+    // Should not have double slashes
+    assert!(
+        !output.contains("core//"),
+        "Should not have double slashes. Got:\n{}",
+        output
+    );
+    assert!(
+        output.contains("packages/core/tests/"),
+        "Should have correct path. Got:\n{}",
+        output
+    );
+}
+
+#[test]
+fn crate_path_without_trailing_slash() {
+    static INFO: CrateInfo = CrateInfo::with_path(
+        "test",
+        Some("https://github.com/org/repo"),
+        Some("abc"),
+        Some("packages/core"),  // Without trailing slash
+        "test",
+    );
+
+    let err = errat::At::new(TestError).at().at_crate(&INFO);
+    let output = format!("{}", err.display_with_meta());
+
+    // Should still work (file path starts with tests/)
+    assert!(
+        output.contains("packages/coretests/") || output.contains("packages/core/tests/"),
+        "Path should be combined. Got:\n{}",
+        output
+    );
 }

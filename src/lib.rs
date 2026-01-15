@@ -382,6 +382,9 @@ pub struct CrateInfo {
     pub repo: Option<&'static str>,
     /// Git commit hash or tag for generating permalinks
     pub commit: Option<&'static str>,
+    /// Path from repository root to crate (e.g., "crates/mylib/")
+    /// Set via CRATE_PATH env var for workspace crates not at repo root.
+    pub crate_path: Option<&'static str>,
     /// Module path where this info was captured
     pub module: &'static str,
 }
@@ -398,6 +401,24 @@ impl CrateInfo {
             name,
             repo,
             commit,
+            crate_path: None,
+            module,
+        }
+    }
+
+    /// Create a new CrateInfo with crate_path for workspace crates.
+    pub const fn with_path(
+        name: &'static str,
+        repo: Option<&'static str>,
+        commit: Option<&'static str>,
+        crate_path: Option<&'static str>,
+        module: &'static str,
+    ) -> Self {
+        Self {
+            name,
+            repo,
+            commit,
+            crate_path,
             module,
         }
     }
@@ -408,18 +429,26 @@ impl CrateInfo {
 /// Returns a `&'static CrateInfo` reference that can be used with
 /// `.at_crate()` to mark crate boundaries in traces.
 ///
-/// ## Commit Hash Capture
+/// ## Environment Variables
 ///
-/// For GitHub permalink generation, set one of these env vars at build time:
-/// - `GIT_COMMIT` - explicit commit hash
-/// - `GITHUB_SHA` - set automatically by GitHub Actions
-/// - `CI_COMMIT_SHA` - set automatically by GitLab CI
+/// For GitHub permalink generation, set these env vars at build time:
 ///
-/// ### Option 1: build.rs (recommended)
+/// | Variable | Purpose | Set by |
+/// |----------|---------|--------|
+/// | `GIT_COMMIT` | Commit hash for permalinks | build.rs or manual |
+/// | `GITHUB_SHA` | Commit hash | GitHub Actions (automatic) |
+/// | `CI_COMMIT_SHA` | Commit hash | GitLab CI (automatic) |
+/// | `CRATE_PATH` | Path from repo root to crate | build.rs (for workspaces) |
+///
+/// ## Workspace Crates (CRATE_PATH)
+///
+/// If your crate is in a subdirectory (e.g., `crates/mylib/`), set `CRATE_PATH`
+/// so GitHub links point to the correct location:
 ///
 /// ```ignore
 /// // build.rs
 /// fn main() {
+///     // Get commit hash
 ///     if let Ok(output) = std::process::Command::new("git")
 ///         .args(["rev-parse", "HEAD"])
 ///         .output()
@@ -428,20 +457,29 @@ impl CrateInfo {
 ///             println!("cargo:rustc-env=GIT_COMMIT={}", hash.trim());
 ///         }
 ///     }
+///
+///     // For workspace crates: compute path from repo root
+///     // Option A: Hardcode if known
+///     println!("cargo:rustc-env=CRATE_PATH=crates/mylib/");
+///
+///     // Option B: Compute from CARGO_MANIFEST_DIR relative to git root
+///     if let Ok(manifest_dir) = std::env::var("CARGO_MANIFEST_DIR") {
+///         if let Ok(output) = std::process::Command::new("git")
+///             .args(["rev-parse", "--show-toplevel"])
+///             .output()
+///         {
+///             if let Ok(root) = String::from_utf8(output.stdout) {
+///                 let root = root.trim();
+///                 if let Some(rel) = manifest_dir.strip_prefix(root) {
+///                     let rel = rel.trim_start_matches(['/', '\\']);
+///                     if !rel.is_empty() {
+///                         println!("cargo:rustc-env=CRATE_PATH={}/", rel);
+///                     }
+///                 }
+///             }
+///         }
+///     }
 /// }
-/// ```
-///
-/// ### Option 2: .cargo/config.toml
-///
-/// ```ignore
-/// [env]
-/// GIT_COMMIT = "abc123..."  # manual, or use script to update
-/// ```
-///
-/// ### Option 3: Command line
-///
-/// ```ignore
-/// GIT_COMMIT=$(git rev-parse HEAD) cargo build --release
 /// ```
 ///
 /// ## Example
@@ -456,7 +494,7 @@ impl CrateInfo {
 macro_rules! crate_info {
     () => {{
         // Use match instead of .or() because Option::or isn't const on stable
-        static INFO: $crate::CrateInfo = $crate::CrateInfo::new(
+        static INFO: $crate::CrateInfo = $crate::CrateInfo::with_path(
             env!("CARGO_PKG_NAME"),
             option_env!("CARGO_PKG_REPOSITORY"),
             match option_env!("GIT_COMMIT") {
@@ -466,6 +504,7 @@ macro_rules! crate_info {
                     None => option_env!("CI_COMMIT_SHA"),
                 },
             },
+            option_env!("CRATE_PATH"),
             module_path!(),
         );
         &INFO
@@ -1272,7 +1311,9 @@ impl<E: fmt::Debug> fmt::Display for DisplayWithMeta<'_, E> {
                 current_crate.and_then(|info| match (info.repo, info.commit) {
                     (Some(repo), Some(commit)) => {
                         let repo = repo.trim_end_matches('/');
-                        Some(alloc::format!("{}/blob/{}/", repo, commit))
+                        // Include crate_path for workspace crates
+                        let crate_path = info.crate_path.unwrap_or("");
+                        Some(alloc::format!("{}/blob/{}/{}", repo, commit, crate_path))
                     }
                     _ => None,
                 });
