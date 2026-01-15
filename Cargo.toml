@@ -11,9 +11,11 @@ categories = ["rust-patterns", "no-std"]
 [features]
 default = []
 std = []
-# Use tinyvec for stack-allocated location storage (3 inline slots, spills to heap)
-tinyvec = ["dep:tinyvec"]
-# Use tinyvec with 30 inline slots (keeps Trace struct under 256 bytes, spills to heap)
+# Use tinyvec with 3 inline slots (sizeof(Trace) = 64 bytes, spills to heap)
+tinyvec-64 = ["dep:tinyvec"]
+# Use tinyvec with 11 inline slots (sizeof(Trace) = 128 bytes, spills to heap)
+tinyvec-128 = ["dep:tinyvec"]
+# Use tinyvec with 27 inline slots (sizeof(Trace) = 256 bytes, spills to heap)
 tinyvec-256 = ["dep:tinyvec"]
 
 [dependencies]

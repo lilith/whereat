@@ -67,25 +67,43 @@ use core::panic::Location;
 // as the element type because tinyvec requires Default, and Option<&T> has the
 // same size as &T due to null pointer optimization.
 
-/// Stack-first location storage with 3 inline slots, spills to heap (tinyvec feature).
-#[cfg(all(feature = "tinyvec", not(feature = "tinyvec-256")))]
+/// Stack-first location storage with 3 inline slots (tinyvec-64: sizeof(Trace) = 64).
+#[cfg(all(
+    feature = "tinyvec-64",
+    not(any(feature = "tinyvec-128", feature = "tinyvec-256"))
+))]
 type LocationVec = tinyvec::TinyVec<[Option<&'static Location<'static>>; 3]>;
 
-/// Stack-first location storage with 30 inline slots, spills to heap (tinyvec-256 feature).
-/// Keeps Trace struct under 256 bytes while maximizing inline capacity.
+/// Stack-first location storage with 11 inline slots (tinyvec-128: sizeof(Trace) = 128).
+#[cfg(all(feature = "tinyvec-128", not(feature = "tinyvec-256")))]
+type LocationVec = tinyvec::TinyVec<[Option<&'static Location<'static>>; 11]>;
+
+/// Stack-first location storage with 27 inline slots (tinyvec-256: sizeof(Trace) = 256).
 #[cfg(feature = "tinyvec-256")]
-type LocationVec = tinyvec::TinyVec<[Option<&'static Location<'static>>; 30]>;
+type LocationVec = tinyvec::TinyVec<[Option<&'static Location<'static>>; 27]>;
 
 /// Heap-allocated location storage (default, no tinyvec feature).
-#[cfg(not(any(feature = "tinyvec", feature = "tinyvec-256")))]
+#[cfg(not(any(
+    feature = "tinyvec-64",
+    feature = "tinyvec-128",
+    feature = "tinyvec-256"
+)))]
 type LocationVec = Vec<&'static Location<'static>>;
 
 /// Element type stored in LocationVec (Option-wrapped for tinyvec).
-#[cfg(any(feature = "tinyvec", feature = "tinyvec-256"))]
+#[cfg(any(
+    feature = "tinyvec-64",
+    feature = "tinyvec-128",
+    feature = "tinyvec-256"
+))]
 type LocationElem = Option<&'static Location<'static>>;
 
 /// Element type stored in LocationVec (direct reference for Vec).
-#[cfg(not(any(feature = "tinyvec", feature = "tinyvec-256")))]
+#[cfg(not(any(
+    feature = "tinyvec-64",
+    feature = "tinyvec-128",
+    feature = "tinyvec-256"
+)))]
 type LocationElem = &'static Location<'static>;
 
 // ============================================================================
@@ -181,7 +199,11 @@ fn try_box<T>(value: T) -> Option<Box<T>> {
 
 /// Try to push a location onto a LocationVec, returning false on failure.
 /// For Vec: fails on allocation error.
-#[cfg(not(any(feature = "tinyvec", feature = "tinyvec-256")))]
+#[cfg(not(any(
+    feature = "tinyvec-64",
+    feature = "tinyvec-128",
+    feature = "tinyvec-256"
+)))]
 #[inline]
 fn try_push_location(vec: &mut LocationVec, value: &'static Location<'static>) -> bool {
     if vec.try_reserve(1).is_err() {
@@ -193,7 +215,11 @@ fn try_push_location(vec: &mut LocationVec, value: &'static Location<'static>) -
 
 /// Try to push a location onto a LocationVec, returning false on allocation failure.
 /// For TinyVec: wraps in Some(), spills to heap if inline capacity exceeded.
-#[cfg(any(feature = "tinyvec", feature = "tinyvec-256"))]
+#[cfg(any(
+    feature = "tinyvec-64",
+    feature = "tinyvec-128",
+    feature = "tinyvec-256"
+))]
 #[inline]
 fn try_push_location(vec: &mut LocationVec, value: &'static Location<'static>) -> bool {
     // TinyVec will spill to heap if needed, so this always succeeds
@@ -204,7 +230,11 @@ fn try_push_location(vec: &mut LocationVec, value: &'static Location<'static>) -
 
 /// Try to create a LocationVec with the given capacity hint, returning None on failure.
 /// For Vec: allocates capacity.
-#[cfg(not(any(feature = "tinyvec", feature = "tinyvec-256")))]
+#[cfg(not(any(
+    feature = "tinyvec-64",
+    feature = "tinyvec-128",
+    feature = "tinyvec-256"
+)))]
 #[inline]
 fn try_location_vec_with_capacity(capacity: usize) -> Option<LocationVec> {
     let mut vec = LocationVec::new();
@@ -215,21 +245,33 @@ fn try_location_vec_with_capacity(capacity: usize) -> Option<LocationVec> {
 }
 
 /// Try to create a LocationVec. For TinyVec, always succeeds (starts on stack).
-#[cfg(any(feature = "tinyvec", feature = "tinyvec-256"))]
+#[cfg(any(
+    feature = "tinyvec-64",
+    feature = "tinyvec-128",
+    feature = "tinyvec-256"
+))]
 #[inline]
 fn try_location_vec_with_capacity(_capacity: usize) -> Option<LocationVec> {
     Some(LocationVec::new())
 }
 
 /// Get location from LocationVec element reference (identity for Vec, unwrap for TinyVec).
-#[cfg(not(any(feature = "tinyvec", feature = "tinyvec-256")))]
+#[cfg(not(any(
+    feature = "tinyvec-64",
+    feature = "tinyvec-128",
+    feature = "tinyvec-256"
+)))]
 #[inline]
 fn unwrap_location(loc: &LocationElem) -> &'static Location<'static> {
     loc
 }
 
 /// Get location from LocationVec element reference (identity for Vec, unwrap for TinyVec).
-#[cfg(any(feature = "tinyvec", feature = "tinyvec-256"))]
+#[cfg(any(
+    feature = "tinyvec-64",
+    feature = "tinyvec-128",
+    feature = "tinyvec-256"
+))]
 #[inline]
 fn unwrap_location(loc: &LocationElem) -> &'static Location<'static> {
     // Safe because we only ever push Some values
@@ -1133,7 +1175,11 @@ mod tests {
         // Trace = LocationVec + Vec<(u16, Context)>
 
         // Without tinyvec: LocationVec = Vec = 24, contexts = 24, Trace = 48
-        #[cfg(not(any(feature = "tinyvec", feature = "tinyvec-256")))]
+        #[cfg(not(any(
+            feature = "tinyvec-64",
+            feature = "tinyvec-128",
+            feature = "tinyvec-256"
+        )))]
         {
             let contexts_vec_size = size_of::<Vec<(u16, Context)>>();
             assert_eq!(location_vec_size, 24, "Vec<&Location> should be 24 bytes");
@@ -1144,38 +1190,45 @@ mod tests {
             assert_eq!(trace_size, 48, "Trace should be 48 bytes without tinyvec");
         }
 
-        // With tinyvec (3 slots): LocationVec = TinyVec<[Option<&Location>; 3]>
-        // 3 * 8 = 24 bytes inline + TinyVec overhead
-        #[cfg(all(feature = "tinyvec", not(feature = "tinyvec-256")))]
+        // With tinyvec-64 (3 slots): sizeof(Trace) = 64 bytes exactly
+        #[cfg(all(
+            feature = "tinyvec-64",
+            not(any(feature = "tinyvec-128", feature = "tinyvec-256"))
+        ))]
         {
-            // TinyVec<[T; 3]> where T = 8 bytes, should be around 32 bytes
-            assert!(
-                location_vec_size <= 40,
-                "TinyVec<[Option<&Location>; 3]> should be <= 40 bytes, got {}",
-                location_vec_size
+            assert_eq!(
+                location_vec_size, 40,
+                "TinyVec<[Option<&Location>; 3]> should be 40 bytes"
             );
-            assert!(
-                trace_size <= 64,
-                "Trace with tinyvec should be <= 64 bytes, got {}",
-                trace_size
+            assert_eq!(
+                trace_size, 64,
+                "Trace with tinyvec-64 should be exactly 64 bytes"
             );
         }
 
-        // With tinyvec-256 (30 slots): LocationVec = TinyVec<[Option<&Location>; 30]>
-        // 30 * 8 = 240 bytes inline + TinyVec overhead
+        // With tinyvec-128 (11 slots): sizeof(Trace) = 128 bytes exactly
+        #[cfg(all(feature = "tinyvec-128", not(feature = "tinyvec-256")))]
+        {
+            assert_eq!(
+                location_vec_size, 104,
+                "TinyVec<[Option<&Location>; 11]> should be 104 bytes"
+            );
+            assert_eq!(
+                trace_size, 128,
+                "Trace with tinyvec-128 should be exactly 128 bytes"
+            );
+        }
+
+        // With tinyvec-256 (27 slots): sizeof(Trace) = 256 bytes exactly
         #[cfg(feature = "tinyvec-256")]
         {
-            // Should keep Trace under 256 bytes as documented
-            assert!(
-                trace_size < 300,
-                "Trace with tinyvec-256 should be < 300 bytes, got {}",
-                trace_size
+            assert_eq!(
+                location_vec_size, 232,
+                "TinyVec<[Option<&Location>; 27]> should be 232 bytes"
             );
-            // The LocationVec itself should be around 248 bytes
-            assert!(
-                location_vec_size >= 240,
-                "TinyVec<[Option<&Location>; 30]> should be >= 240 bytes, got {}",
-                location_vec_size
+            assert_eq!(
+                trace_size, 256,
+                "Trace with tinyvec-256 should be exactly 256 bytes"
             );
         }
     }
