@@ -5,10 +5,18 @@ Lightweight error location tracking crate. See [FEEDBACK.md](FEEDBACK.md) for us
 ## Quick Commands
 
 ```bash
-cargo fmt
-cargo clippy --all-targets --all-features -- -D warnings
-cargo test
+just check   # fmt + clippy + test
+just fmt     # format only
+just clippy  # clippy only
+just test    # test only
+just outdated
 ```
+
+## CI
+
+GitHub Actions workflow at `.github/workflows/ci.yml`:
+- Tests on: ubuntu-latest, windows-latest, macos-latest, windows-11-arm, ubuntu-24.04-arm
+- Clippy, fmt check, code coverage (codecov)
 
 ## Design Notes
 

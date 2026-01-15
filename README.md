@@ -1,5 +1,11 @@
 # errat
 
+[![CI](https://github.com/imazen/errat/actions/workflows/ci.yml/badge.svg)](https://github.com/imazen/errat/actions/workflows/ci.yml)
+[![Crates.io](https://img.shields.io/crates/v/errat.svg)](https://crates.io/crates/errat)
+[![Documentation](https://docs.rs/errat/badge.svg)](https://docs.rs/errat)
+[![codecov](https://codecov.io/gh/imazen/errat/branch/main/graph/badge.svg)](https://codecov.io/gh/imazen/errat)
+[![License](https://img.shields.io/crates/l/errat.svg)](LICENSE)
+
 Lightweight error location tracking with small sizeof and no_std support.
 
 ## Features
@@ -58,6 +64,10 @@ println!("{:?}", err);
   ```
 
 - [ ] **Integration with `#[track_caller]` spans**: Explore capturing more semantic information about the call site.
+
+## AI-Generated Code Notice
+
+Developed with Claude (Anthropic). Not all code manually reviewed. Review critical paths before production use.
 
 ## License
 
