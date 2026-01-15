@@ -8,9 +8,9 @@
 //! - **Small sizeof**: `Traced<E>` is only `sizeof(E) + 8` bytes (one pointer for boxed trace)
 //! - **Zero allocation on Ok path**: No heap allocation until an error occurs
 //! - **Simple API**: `.traced()` on errors, `.at()` on Results
-//! - **Optional context messages**: Add context with `.at_msg("context")`
+//! - **Zero-copy static strings**: `.msg("literal")` uses `Cow<'static, str>`
+//! - **Lazy evaluation**: `.with_msg(|| ...)` defers computation to error path
 //! - **no_std compatible**: Works with just `core` + `alloc`, `std` is optional
-//! - **Fallible allocations**: Trace operations silently fail on OOM; error still propagates
 //!
 //! ## Quick Start
 //!
@@ -38,7 +38,7 @@
 //!
 //! ## Adding Context
 //!
-//! Use `.at_msg()` to add human-readable context:
+//! Use `.msg()` for string context, `.ctx()` for Display, `.dbg_ctx()` for Debug:
 //!
 //! ```rust
 //! use errat::{Traced, Traceable, ResultExt};
@@ -51,7 +51,25 @@
 //! }
 //!
 //! fn init() -> Result<(), Traced<MyError>> {
-//!     read_config().at_msg("while loading configuration")?;
+//!     read_config().msg("loading configuration")?;  // static str, no alloc
+//!     Ok(())
+//! }
+//! ```
+//!
+//! Use `with_*` variants for lazy evaluation (only runs on error):
+//!
+//! ```rust
+//! use errat::{Traced, Traceable, ResultExt};
+//!
+//! #[derive(Debug)]
+//! enum MyError { NotFound }
+//!
+//! fn load(path: &str) -> Result<(), Traced<MyError>> {
+//!     Err(MyError::NotFound.traced())
+//! }
+//!
+//! fn init(path: &str) -> Result<(), Traced<MyError>> {
+//!     load(path).with_msg(|| format!("loading {}", path))?;  // only allocates on error
 //!     Ok(())
 //! }
 //! ```
@@ -88,8 +106,9 @@
 
 extern crate alloc;
 
+use alloc::borrow::Cow;
 use alloc::boxed::Box;
-use alloc::string::String;
+use alloc::string::{String, ToString};
 use alloc::vec::Vec;
 use core::fmt;
 use core::panic::Location;
@@ -314,17 +333,6 @@ fn unwrap_location(loc: &LocationElem) -> &'static Location<'static> {
     loc.expect("LocationVec should only contain Some values")
 }
 
-/// Try to convert a &str to String, returning None on allocation failure.
-#[inline]
-fn try_string_from(s: &str) -> Option<String> {
-    let mut string = String::new();
-    if string.try_reserve(s.len()).is_err() {
-        return None;
-    }
-    string.push_str(s);
-    Some(string)
-}
-
 // ============================================================================
 // Core Types
 // ============================================================================
@@ -417,7 +425,8 @@ impl<T: core::any::Any + fmt::Display + Send + Sync> DisplayAny for T {
 /// Debug or Display formatting.
 pub enum Context {
     /// A text message describing what operation was being performed.
-    Text(String),
+    /// Uses `Cow<'static, str>` for zero-copy static strings.
+    Text(Cow<'static, str>),
     /// Typed context data formatted via Debug.
     Debug(Box<dyn DebugAny>),
     /// Typed context data formatted via Display.
@@ -626,10 +635,8 @@ impl<E> Traced<E> {
 
     /// Add the caller's location and a context message to the trace.
     ///
-    /// Each context message creates a new segment in the trace, preserving all
-    /// previous context. Use this to add human-readable context about what
-    /// operation was being performed.
-    /// If allocation fails, the context is silently skipped.
+    /// Accepts `&'static str` (zero-copy) or `String` (owned).
+    /// For computed messages, use `with_msg()` to defer allocation to error path.
     ///
     /// ## Example
     ///
@@ -644,19 +651,15 @@ impl<E> Traced<E> {
     /// }
     ///
     /// fn init() -> Result<(), Traced<MyError>> {
-    ///     read_config().at_msg("while loading configuration")?;
+    ///     read_config().msg("while loading configuration")?;
     ///     Ok(())
     /// }
     /// ```
     #[track_caller]
     #[inline]
-    pub fn at_msg(mut self, msg: &str) -> Self {
+    pub fn msg(mut self, msg: impl Into<Cow<'static, str>>) -> Self {
         let loc = Location::caller();
-        // Try to allocate the string first
-        let Some(text) = try_string_from(msg) else {
-            return self;
-        };
-        let context = Context::Text(text);
+        let context = Context::Text(msg.into());
 
         match &mut self.trace {
             Some(trace) => {
@@ -673,12 +676,87 @@ impl<E> Traced<E> {
         self
     }
 
-    /// Add the caller's location and arbitrary typed context to the trace (Debug formatted).
+    /// Add the caller's location and a lazily-computed context message.
     ///
-    /// This allows attaching any `Debug + Send + Sync + 'static` data to the error trace.
-    /// The context will be formatted using `Debug` when displayed.
-    /// Use `contexts()` to retrieve context entries and `downcast_ref` to access them.
-    /// If allocation fails, the context is silently skipped.
+    /// The closure is only called if this is an error, avoiding allocation on success.
+    ///
+    /// ## Example
+    ///
+    /// ```rust
+    /// use errat::{Traced, Traceable, ResultExt};
+    ///
+    /// #[derive(Debug)]
+    /// enum MyError { NotFound }
+    ///
+    /// fn load(path: &str) -> Result<(), Traced<MyError>> {
+    ///     Err(MyError::NotFound.traced())
+    /// }
+    ///
+    /// fn init(path: &str) -> Result<(), Traced<MyError>> {
+    ///     load(path).with_msg(|| format!("loading {}", path))?;
+    ///     Ok(())
+    /// }
+    /// ```
+    #[track_caller]
+    #[inline]
+    pub fn with_msg(self, f: impl FnOnce() -> String) -> Self {
+        self.msg(f())
+    }
+
+    /// Add the caller's location and typed context (Display formatted).
+    ///
+    /// Use for human-readable context. For debug output, use `dbg_ctx()`.
+    /// For lazy evaluation, use `with_ctx()`.
+    ///
+    /// ## Example
+    ///
+    /// ```rust
+    /// use errat::{Traced, Traceable};
+    ///
+    /// #[derive(Debug)]
+    /// enum MyError { NotFound }
+    ///
+    /// let err = MyError::NotFound
+    ///     .traced()
+    ///     .ctx("loading config file /etc/config.toml");
+    /// ```
+    #[track_caller]
+    #[inline]
+    pub fn ctx<T: fmt::Display + Send + Sync + 'static>(mut self, ctx: T) -> Self {
+        let loc = Location::caller();
+        let Some(boxed_ctx) = try_box(ctx) else {
+            return self;
+        };
+        let context = Context::Display(boxed_ctx);
+
+        match &mut self.trace {
+            Some(trace) => {
+                trace.try_push_with_context(loc, context);
+            }
+            None => {
+                let mut trace = Trace::new();
+                trace.try_push_with_context(loc, context);
+                if let Some(boxed) = try_box(trace) {
+                    self.trace = Some(boxed);
+                }
+            }
+        }
+        self
+    }
+
+    /// Add the caller's location and lazily-computed typed context (Display formatted).
+    ///
+    /// The closure is only called if this is an error.
+    #[track_caller]
+    #[inline]
+    pub fn with_ctx<T: fmt::Display + Send + Sync + 'static>(self, f: impl FnOnce() -> T) -> Self {
+        self.ctx(f())
+    }
+
+    /// Add the caller's location and typed context (Debug formatted).
+    ///
+    /// Use for developer-readable debug output. For human-readable, use `ctx()`.
+    /// Use `contexts()` to retrieve entries and `downcast_ref` to access typed data.
     ///
     /// ## Example
     ///
@@ -693,7 +771,7 @@ impl<E> Traced<E> {
     ///
     /// let err = MyError::Forbidden
     ///     .traced()
-    ///     .at_context(RequestInfo { user_id: 42, path: "/admin".into() });
+    ///     .dbg_ctx(RequestInfo { user_id: 42, path: "/admin".into() });
     ///
     /// // Later, retrieve the context
     /// for ctx in err.contexts() {
@@ -704,9 +782,8 @@ impl<E> Traced<E> {
     /// ```
     #[track_caller]
     #[inline]
-    pub fn at_context<T: fmt::Debug + Send + Sync + 'static>(mut self, ctx: T) -> Self {
+    pub fn dbg_ctx<T: fmt::Debug + Send + Sync + 'static>(mut self, ctx: T) -> Self {
         let loc = Location::caller();
-        // Try to box the context first
         let Some(boxed_ctx) = try_box(ctx) else {
             return self;
         };
@@ -727,47 +804,38 @@ impl<E> Traced<E> {
         self
     }
 
-    /// Add the caller's location and arbitrary typed context to the trace (Display formatted).
+    /// Add the caller's location and lazily-computed typed context (Debug formatted).
     ///
-    /// Similar to `at_context`, but the context will be formatted using `Display` instead of `Debug`.
-    /// Use this for more human-readable context output.
-    /// If allocation fails, the context is silently skipped.
-    ///
-    /// ## Example
-    ///
-    /// ```rust
-    /// use errat::{Traced, Traceable};
-    ///
-    /// #[derive(Debug)]
-    /// enum MyError { NotFound }
-    ///
-    /// let err = MyError::NotFound
-    ///     .traced()
-    ///     .at_context_display("loading config file /etc/config.toml");
-    /// ```
+    /// The closure is only called if this is an error.
     #[track_caller]
     #[inline]
-    pub fn at_context_display<T: fmt::Display + Send + Sync + 'static>(mut self, ctx: T) -> Self {
-        let loc = Location::caller();
-        // Try to box the context first
-        let Some(boxed_ctx) = try_box(ctx) else {
-            return self;
-        };
-        let context = Context::Display(boxed_ctx);
+    pub fn with_dbg_ctx<T: fmt::Debug + Send + Sync + 'static>(
+        self,
+        f: impl FnOnce() -> T,
+    ) -> Self {
+        self.dbg_ctx(f())
+    }
 
-        match &mut self.trace {
-            Some(trace) => {
-                trace.try_push_with_context(loc, context);
-            }
-            None => {
-                let mut trace = Trace::new();
-                trace.try_push_with_context(loc, context);
-                if let Some(boxed) = try_box(trace) {
-                    self.trace = Some(boxed);
-                }
-            }
-        }
-        self
+    // Legacy aliases for backwards compatibility
+    #[doc(hidden)]
+    #[track_caller]
+    #[inline]
+    pub fn at_msg(self, msg: &str) -> Self {
+        self.msg(msg.to_string())
+    }
+
+    #[doc(hidden)]
+    #[track_caller]
+    #[inline]
+    pub fn at_context<T: fmt::Debug + Send + Sync + 'static>(self, ctx: T) -> Self {
+        self.dbg_ctx(ctx)
+    }
+
+    #[doc(hidden)]
+    #[track_caller]
+    #[inline]
+    pub fn at_context_display<T: fmt::Display + Send + Sync + 'static>(self, ctx: T) -> Self {
+        self.ctx(ctx)
     }
 
     /// Get a reference to the inner error.
@@ -830,7 +898,6 @@ impl<E> Traced<E> {
     pub fn contexts(&self) -> impl Iterator<Item = &Context> {
         self.trace.iter().flat_map(|t| t.contexts())
     }
-
 }
 
 impl<E: fmt::Debug> fmt::Debug for Traced<E> {
@@ -1025,15 +1092,15 @@ impl<E> Traceable for E {
     #[track_caller]
     #[inline]
     fn traced_msg(self, msg: &str) -> Traced<Self> {
-        Traced::new(self).at_msg(msg)
+        Traced::new(self).msg(msg.to_string())
     }
 }
 
 // ============================================================================
-// ResultExt Trait - for calling .at() on Results
+// ResultExt Trait - for calling .at() on Results with Traced errors
 // ============================================================================
 
-/// Extension trait for adding location tracking to `Result` types.
+/// Extension trait for adding location tracking to `Result<T, Traced<E>>`.
 ///
 /// ## Example
 ///
@@ -1054,18 +1121,38 @@ impl<E> Traceable for E {
 /// ```
 pub trait ResultExt<T, E> {
     /// Add the caller's location to the error trace if this is `Err`.
-    ///
-    /// This is a no-op on the `Ok` path. If allocation fails, the error
-    /// still propagates but the location is silently skipped.
     #[track_caller]
     fn at(self) -> Result<T, Traced<E>>;
 
-    /// Add the caller's location and a context message if this is `Err`.
-    ///
-    /// This is a no-op on the `Ok` path. If allocation fails, the error
-    /// still propagates but the context is silently skipped.
+    /// Add location and message context. Use `with_msg` for lazy evaluation.
     #[track_caller]
-    fn at_msg(self, msg: &str) -> Result<T, Traced<E>>;
+    fn msg(self, msg: impl Into<Cow<'static, str>>) -> Result<T, Traced<E>>;
+
+    /// Add location and lazily-computed message context.
+    #[track_caller]
+    fn with_msg(self, f: impl FnOnce() -> String) -> Result<T, Traced<E>>;
+
+    /// Add location and typed context (Display). Use `with_ctx` for lazy evaluation.
+    #[track_caller]
+    fn ctx<C: fmt::Display + Send + Sync + 'static>(self, ctx: C) -> Result<T, Traced<E>>;
+
+    /// Add location and lazily-computed typed context (Display).
+    #[track_caller]
+    fn with_ctx<C: fmt::Display + Send + Sync + 'static>(
+        self,
+        f: impl FnOnce() -> C,
+    ) -> Result<T, Traced<E>>;
+
+    /// Add location and typed context (Debug). Use `with_dbg_ctx` for lazy evaluation.
+    #[track_caller]
+    fn dbg_ctx<C: fmt::Debug + Send + Sync + 'static>(self, ctx: C) -> Result<T, Traced<E>>;
+
+    /// Add location and lazily-computed typed context (Debug).
+    #[track_caller]
+    fn with_dbg_ctx<C: fmt::Debug + Send + Sync + 'static>(
+        self,
+        f: impl FnOnce() -> C,
+    ) -> Result<T, Traced<E>>;
 }
 
 impl<T, E> ResultExt<T, E> for Result<T, Traced<E>> {
@@ -1080,10 +1167,61 @@ impl<T, E> ResultExt<T, E> for Result<T, Traced<E>> {
 
     #[track_caller]
     #[inline]
-    fn at_msg(self, msg: &str) -> Result<T, Traced<E>> {
+    fn msg(self, msg: impl Into<Cow<'static, str>>) -> Result<T, Traced<E>> {
         match self {
             Ok(v) => Ok(v),
-            Err(e) => Err(e.at_msg(msg)),
+            Err(e) => Err(e.msg(msg)),
+        }
+    }
+
+    #[track_caller]
+    #[inline]
+    fn with_msg(self, f: impl FnOnce() -> String) -> Result<T, Traced<E>> {
+        match self {
+            Ok(v) => Ok(v),
+            Err(e) => Err(e.with_msg(f)),
+        }
+    }
+
+    #[track_caller]
+    #[inline]
+    fn ctx<C: fmt::Display + Send + Sync + 'static>(self, ctx: C) -> Result<T, Traced<E>> {
+        match self {
+            Ok(v) => Ok(v),
+            Err(e) => Err(e.ctx(ctx)),
+        }
+    }
+
+    #[track_caller]
+    #[inline]
+    fn with_ctx<C: fmt::Display + Send + Sync + 'static>(
+        self,
+        f: impl FnOnce() -> C,
+    ) -> Result<T, Traced<E>> {
+        match self {
+            Ok(v) => Ok(v),
+            Err(e) => Err(e.with_ctx(f)),
+        }
+    }
+
+    #[track_caller]
+    #[inline]
+    fn dbg_ctx<C: fmt::Debug + Send + Sync + 'static>(self, ctx: C) -> Result<T, Traced<E>> {
+        match self {
+            Ok(v) => Ok(v),
+            Err(e) => Err(e.dbg_ctx(ctx)),
+        }
+    }
+
+    #[track_caller]
+    #[inline]
+    fn with_dbg_ctx<C: fmt::Debug + Send + Sync + 'static>(
+        self,
+        f: impl FnOnce() -> C,
+    ) -> Result<T, Traced<E>> {
+        match self {
+            Ok(v) => Ok(v),
+            Err(e) => Err(e.with_dbg_ctx(f)),
         }
     }
 }
@@ -1109,14 +1247,38 @@ impl<T, E> ResultExt<T, E> for Result<T, Traced<E>> {
 /// ```
 pub trait ResultTraceExt<T, E> {
     /// Convert the error to a `Traced<E>` and add the caller's location.
-    /// If allocation fails, the error is still wrapped but trace may be empty.
     #[track_caller]
     fn trace(self) -> Result<T, Traced<E>>;
 
-    /// Convert the error to a `Traced<E>` and add the caller's location with a message.
-    /// If allocation fails, the error is still wrapped but trace may be empty.
+    /// Convert to `Traced<E>` with message context. Use `trace_with_msg` for lazy evaluation.
     #[track_caller]
-    fn trace_msg(self, msg: &str) -> Result<T, Traced<E>>;
+    fn trace_msg(self, msg: impl Into<Cow<'static, str>>) -> Result<T, Traced<E>>;
+
+    /// Convert to `Traced<E>` with lazily-computed message context.
+    #[track_caller]
+    fn trace_with_msg(self, f: impl FnOnce() -> String) -> Result<T, Traced<E>>;
+
+    /// Convert to `Traced<E>` with typed context (Display).
+    #[track_caller]
+    fn trace_ctx<C: fmt::Display + Send + Sync + 'static>(self, ctx: C) -> Result<T, Traced<E>>;
+
+    /// Convert to `Traced<E>` with lazily-computed typed context (Display).
+    #[track_caller]
+    fn trace_with_ctx<C: fmt::Display + Send + Sync + 'static>(
+        self,
+        f: impl FnOnce() -> C,
+    ) -> Result<T, Traced<E>>;
+
+    /// Convert to `Traced<E>` with typed context (Debug).
+    #[track_caller]
+    fn trace_dbg_ctx<C: fmt::Debug + Send + Sync + 'static>(self, ctx: C) -> Result<T, Traced<E>>;
+
+    /// Convert to `Traced<E>` with lazily-computed typed context (Debug).
+    #[track_caller]
+    fn trace_with_dbg_ctx<C: fmt::Debug + Send + Sync + 'static>(
+        self,
+        f: impl FnOnce() -> C,
+    ) -> Result<T, Traced<E>>;
 }
 
 impl<T, E> ResultTraceExt<T, E> for Result<T, E> {
@@ -1131,10 +1293,61 @@ impl<T, E> ResultTraceExt<T, E> for Result<T, E> {
 
     #[track_caller]
     #[inline]
-    fn trace_msg(self, msg: &str) -> Result<T, Traced<E>> {
+    fn trace_msg(self, msg: impl Into<Cow<'static, str>>) -> Result<T, Traced<E>> {
         match self {
             Ok(v) => Ok(v),
-            Err(e) => Err(Traced::new(e).at_msg(msg)),
+            Err(e) => Err(Traced::new(e).msg(msg)),
+        }
+    }
+
+    #[track_caller]
+    #[inline]
+    fn trace_with_msg(self, f: impl FnOnce() -> String) -> Result<T, Traced<E>> {
+        match self {
+            Ok(v) => Ok(v),
+            Err(e) => Err(Traced::new(e).with_msg(f)),
+        }
+    }
+
+    #[track_caller]
+    #[inline]
+    fn trace_ctx<C: fmt::Display + Send + Sync + 'static>(self, ctx: C) -> Result<T, Traced<E>> {
+        match self {
+            Ok(v) => Ok(v),
+            Err(e) => Err(Traced::new(e).ctx(ctx)),
+        }
+    }
+
+    #[track_caller]
+    #[inline]
+    fn trace_with_ctx<C: fmt::Display + Send + Sync + 'static>(
+        self,
+        f: impl FnOnce() -> C,
+    ) -> Result<T, Traced<E>> {
+        match self {
+            Ok(v) => Ok(v),
+            Err(e) => Err(Traced::new(e).with_ctx(f)),
+        }
+    }
+
+    #[track_caller]
+    #[inline]
+    fn trace_dbg_ctx<C: fmt::Debug + Send + Sync + 'static>(self, ctx: C) -> Result<T, Traced<E>> {
+        match self {
+            Ok(v) => Ok(v),
+            Err(e) => Err(Traced::new(e).dbg_ctx(ctx)),
+        }
+    }
+
+    #[track_caller]
+    #[inline]
+    fn trace_with_dbg_ctx<C: fmt::Debug + Send + Sync + 'static>(
+        self,
+        f: impl FnOnce() -> C,
+    ) -> Result<T, Traced<E>> {
+        match self {
+            Ok(v) => Ok(v),
+            Err(e) => Err(Traced::new(e).with_dbg_ctx(f)),
         }
     }
 }
@@ -1415,13 +1628,13 @@ mod tests {
     }
 
     #[test]
-    fn test_at_msg_propagation() {
+    fn test_msg_propagation() {
         fn inner() -> Result<(), Traced<TestError>> {
             Err(TestError::NotFound.traced())
         }
 
         fn outer() -> Result<(), Traced<TestError>> {
-            inner().at_msg("during initialization")?;
+            inner().msg("during initialization")?;
             Ok(())
         }
 
@@ -1456,7 +1669,7 @@ mod tests {
     }
 
     #[test]
-    fn test_at_context_typed() {
+    fn test_dbg_ctx_typed() {
         #[derive(Debug)]
         struct RequestInfo {
             user_id: u64,
@@ -1464,7 +1677,7 @@ mod tests {
 
         let err = TestError::NotFound
             .traced()
-            .at_context(RequestInfo { user_id: 42 });
+            .dbg_ctx(RequestInfo { user_id: 42 });
 
         assert_eq!(err.trace_len(), 2);
 
@@ -1486,12 +1699,12 @@ mod tests {
         }
 
         fn level2() -> Result<(), Traced<TestError>> {
-            level1().at_msg("in level2")?;
+            level1().msg("in level2")?;
             Ok(())
         }
 
         fn level3() -> Result<(), Traced<TestError>> {
-            level2().at_msg("in level3")?;
+            level2().msg("in level3")?;
             Ok(())
         }
 
@@ -1513,7 +1726,7 @@ mod tests {
     fn test_context_enum() {
         use super::Context;
 
-        let text_ctx = Context::Text(String::from("hello"));
+        let text_ctx = Context::Text(String::from("hello").into());
         assert_eq!(text_ctx.as_text(), Some("hello"));
         assert!(text_ctx.downcast_ref::<u32>().is_none());
 
@@ -1550,7 +1763,7 @@ mod tests {
             name: &'static str,
         }
 
-        let err = TestError::NotFound.traced().at_context(MyContext {
+        let err = TestError::NotFound.traced().dbg_ctx(MyContext {
             id: 123,
             name: "test",
         });
@@ -1563,11 +1776,9 @@ mod tests {
     }
 
     #[test]
-    fn test_at_context_display() {
+    fn test_ctx_display() {
         // Use a type that has both Display and Debug but we want Display formatting
-        let err = TestError::NotFound
-            .traced()
-            .at_context_display("user-friendly message");
+        let err = TestError::NotFound.traced().ctx("user-friendly message");
 
         assert_eq!(err.trace_len(), 2);
 
@@ -1596,9 +1807,9 @@ mod tests {
 
         let err = TestError::NotFound
             .traced()
-            .at_msg("text message")
-            .at_context(DebugInfo { code: 42 })
-            .at_context_display("display message");
+            .msg("text message")
+            .dbg_ctx(DebugInfo { code: 42 })
+            .ctx("display message");
 
         // Should have 4 locations (traced + 3 context methods)
         assert_eq!(err.trace_len(), 4);
@@ -1621,12 +1832,12 @@ mod tests {
         }
 
         fn level2() -> Result<(), Traced<TestError>> {
-            level1().at_msg("in level2")?;
+            level1().msg("in level2")?;
             Ok(())
         }
 
         fn level3() -> Result<(), Traced<TestError>> {
-            level2().at_msg("in level3")?;
+            level2().msg("in level3")?;
             Ok(())
         }
 
@@ -1660,7 +1871,7 @@ mod tests {
         }
 
         fn wrapper() -> Result<(), Traced<TestError>> {
-            origin().at_msg("wrapping")?;
+            origin().msg("wrapping")?;
             Ok(())
         }
 
@@ -1675,7 +1886,7 @@ mod tests {
         let first_at = lines.iter().find(|l| l.contains("at src/lib.rs:")).unwrap();
 
         // It should be the origin location (before the wrapper's context)
-        // The origin .traced() call will be at a lower line than wrapper's .at_msg()
+        // The origin .traced() call will be at a lower line than wrapper's .msg()
         assert!(
             !first_at.contains("╰─"),
             "First location should be origin without context"

@@ -37,11 +37,11 @@ mod service {
     use super::*;
 
     pub fn get_user(id: u64) -> Result<(), Traced<AppError>> {
-        db::query_user(id).at_msg("querying database")
+        db::query_user(id).msg("querying database")
     }
 
     pub fn validate_user_access(user_id: u64, _resource: &str) -> Result<(), Traced<AppError>> {
-        get_user(user_id).at_msg("checking user exists")?;
+        get_user(user_id).msg("checking user exists")?;
         // More validation...
         Ok(())
     }
@@ -52,7 +52,7 @@ mod handler {
     use super::*;
 
     pub fn handle_request(user_id: u64) -> Result<(), Traced<AppError>> {
-        service::validate_user_access(user_id, "/admin").at_msg("validating access")
+        service::validate_user_access(user_id, "/admin").msg("validating access")
     }
 }
 
@@ -75,7 +75,7 @@ fn main() {
 
     let err = handler::handle_request(42)
         .map_err(|e| {
-            e.at_context(RequestContext {
+            e.dbg_ctx(RequestContext {
                 user_id: 42,
                 endpoint: "/admin",
             })

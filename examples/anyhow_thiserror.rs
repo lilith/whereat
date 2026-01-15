@@ -52,11 +52,11 @@ fn read_config_file(path: &str) -> Result<String, Traced<AppError>> {
 }
 
 fn load_config() -> Result<String, Traced<AppError>> {
-    read_config_file("/etc/app.conf").at_msg("loading application config")
+    read_config_file("/etc/app.conf").msg("loading application config")
 }
 
 fn init_app() -> Result<(), Traced<AppError>> {
-    let _config = load_config().at_msg("during initialization")?;
+    let _config = load_config().msg("during initialization")?;
     Ok(())
 }
 
@@ -92,11 +92,11 @@ fn middle_layer() -> Result<(), Traced<AppError>> {
     inner_operation()
         .map_err(AppError::Io)
         .map_err(|e| e.traced())
-        .at_msg("connecting to database")
+        .msg("connecting to database")
 }
 
 fn outer_layer() -> Result<(), Traced<AppError>> {
-    middle_layer().at_msg("in business logic")
+    middle_layer().msg("in business logic")
 }
 
 // ============================================================================
@@ -138,7 +138,7 @@ fn main() {
         "
 errat works well with thiserror-style errors:
 - Wrap any error with .traced() to start collecting locations
-- Use .at_msg() to add context as errors propagate
+- Use .msg() to add context as errors propagate
 - Traced<E> implements Error, so it can be boxed like anyhow
 - The error source chain is preserved through Traced<E>
 

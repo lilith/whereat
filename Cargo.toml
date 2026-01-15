@@ -8,9 +8,13 @@ description = "Lightweight error location tracking with small sizeof and no_std 
 keywords = ["error", "trace", "stacktrace", "track_caller", "no_std"]
 categories = ["rust-patterns", "no-std"]
 
+[workspace]
+members = ["errat-derive"]
+
 [features]
 default = []
 std = []
+derive = ["dep:errat-derive"]
 # Use tinyvec with 3 inline slots (sizeof(Trace) = 64 bytes, spills to heap)
 tinyvec-64-bytes = ["dep:tinyvec"]
 # Use tinyvec with 11 inline slots (sizeof(Trace) = 128 bytes, spills to heap)
@@ -20,6 +24,7 @@ tinyvec-256-bytes = ["dep:tinyvec"]
 
 [dependencies]
 tinyvec = { version = "1.9", optional = true, default-features = false, features = ["alloc"] }
+errat-derive = { version = "0.1.0", path = "errat-derive", optional = true }
 
 [dev-dependencies]
 static_assertions = "1.1"

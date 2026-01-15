@@ -62,12 +62,12 @@ fn fetch_user(id: u64) -> Result<(), Traced<AppError>> {
 }
 
 fn process_request(user_id: u64) -> Result<(), Traced<AppError>> {
-    fetch_user(user_id).at_msg("fetching user data")?;
+    fetch_user(user_id).msg("fetching user data")?;
     Ok(())
 }
 
 fn handle_api_call() -> Result<(), Traced<AppError>> {
-    process_request(42).at_msg("processing API request")
+    process_request(42).msg("processing API request")
 }
 
 fn main() {
