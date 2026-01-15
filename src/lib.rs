@@ -59,6 +59,79 @@ use core::fmt;
 use core::panic::Location;
 
 // ============================================================================
+// ErrorMeta Trait - optional metadata for enhanced trace display
+// ============================================================================
+
+/// Optional trait for error types to provide metadata for enhanced trace display.
+///
+/// Implement this trait on your error types to get:
+/// - Clickable GitHub links in stack traces
+/// - Custom error summaries
+/// - Documentation links
+///
+/// All methods have default implementations returning `None`, so you only need
+/// to override what you want.
+///
+/// ## Example
+///
+/// ```rust
+/// use errat::ErrorMeta;
+///
+/// #[derive(Debug)]
+/// enum MyError {
+///     NotFound,
+///     DatabaseError(String),
+/// }
+///
+/// impl ErrorMeta for MyError {
+///     fn crate_name(&self) -> Option<&'static str> {
+///         Some("my_app")
+///     }
+///
+///     fn repo_url(&self) -> Option<&'static str> {
+///         Some("https://github.com/user/my_app")
+///     }
+///
+///     fn git_commit(&self) -> Option<&'static str> {
+///         option_env!("GIT_COMMIT")
+///     }
+/// }
+/// ```
+pub trait ErrorMeta {
+    /// Crate name where this error type is defined (e.g., "my_app").
+    fn crate_name(&self) -> Option<&'static str> {
+        None
+    }
+
+    /// Repository URL for generating source links (e.g., "https://github.com/user/repo").
+    fn repo_url(&self) -> Option<&'static str> {
+        None
+    }
+
+    /// Git commit hash or tag for permalink generation.
+    /// Use `option_env!("GIT_COMMIT")` or similar build-time capture.
+    fn git_commit(&self) -> Option<&'static str> {
+        None
+    }
+
+    /// Module path where this error is defined (e.g., "my_app::errors").
+    fn module_path(&self) -> Option<&'static str> {
+        None
+    }
+
+    /// Custom one-line summary for trace display (instead of Debug).
+    /// Return None to use default Debug formatting.
+    fn trace_summary(&self) -> Option<&str> {
+        None
+    }
+
+    /// Optional documentation URL for this error type.
+    fn docs_url(&self) -> Option<&'static str> {
+        None
+    }
+}
+
+// ============================================================================
 // Fallible Allocation Helpers
 // ============================================================================
 //
@@ -834,35 +907,144 @@ impl<E: fmt::Debug> fmt::Debug for Traced<E> {
         // Show segments oldest first, with context associated to its location
         for (loc, ctx, locations_before) in trace.segments_oldest_first() {
             // Show locations that came before this context (from .at() calls)
-            for loc in locations_before {
-                writeln!(f, "    at {}:{}", loc.file(), loc.line())?;
+            for location in locations_before {
+                writeln!(f, "    at {}:{}", location.file(), location.line())?;
             }
 
             // Show the segment's main location with its context
             if let Some(location) = loc {
+                writeln!(f, "    at {}:{}", location.file(), location.line())?;
                 if let Some(context) = ctx {
                     match context {
-                        Context::Text(msg) => {
-                            writeln!(f, "    at {}:{}", location.file(), location.line())?;
-                            writeln!(f, "       ╰─ {}", msg)?;
-                        }
-                        Context::Debug(t) => {
-                            writeln!(f, "    at {}:{}", location.file(), location.line())?;
-                            writeln!(f, "       ╰─ {:?}", &**t)?;
-                        }
-                        Context::Display(t) => {
-                            writeln!(f, "    at {}:{}", location.file(), location.line())?;
-                            writeln!(f, "       ╰─ {}", &**t)?;
-                        }
+                        Context::Text(msg) => writeln!(f, "       ╰─ {}", msg)?,
+                        Context::Debug(t) => writeln!(f, "       ╰─ {:?}", &**t)?,
+                        Context::Display(t) => writeln!(f, "       ╰─ {}", &**t)?,
                     }
-                } else {
-                    writeln!(f, "    at {}:{}", location.file(), location.line())?;
                 }
             }
         }
 
         Ok(())
     }
+}
+
+// ============================================================================
+// Enhanced display with ErrorMeta
+// ============================================================================
+
+impl<E: fmt::Debug + ErrorMeta> Traced<E> {
+    /// Format the error with enhanced metadata from ErrorMeta.
+    ///
+    /// This includes:
+    /// - Custom trace_summary if provided
+    /// - Crate name and docs URL if available
+    /// - Clickable GitHub links if repo_url and git_commit are set
+    ///
+    /// ## Example
+    ///
+    /// ```rust
+    /// use errat::{ErrorMeta, Traced, Traceable};
+    ///
+    /// #[derive(Debug)]
+    /// struct MyError;
+    ///
+    /// impl ErrorMeta for MyError {
+    ///     fn repo_url(&self) -> Option<&'static str> {
+    ///         Some("https://github.com/user/repo")
+    ///     }
+    ///     fn git_commit(&self) -> Option<&'static str> {
+    ///         Some("abc123")
+    ///     }
+    /// }
+    ///
+    /// let err = MyError.traced();
+    /// let formatted = err.display_with_meta();
+    /// println!("{}", formatted);
+    /// ```
+    pub fn display_with_meta(&self) -> impl fmt::Display + '_ {
+        DisplayWithMeta { traced: self }
+    }
+}
+
+/// Wrapper for displaying Traced<E> with ErrorMeta enhancements.
+struct DisplayWithMeta<'a, E> {
+    traced: &'a Traced<E>,
+}
+
+impl<E: fmt::Debug + ErrorMeta> fmt::Display for DisplayWithMeta<'_, E> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let error = &self.traced.error;
+
+        // Error header - use trace_summary if provided, else Debug
+        write!(f, "Error: ")?;
+        if let Some(summary) = error.trace_summary() {
+            writeln!(f, "{}", summary)?;
+        } else {
+            writeln!(f, "{:?}", error)?;
+        }
+
+        // Show crate info if available
+        if let Some(crate_name) = error.crate_name() {
+            writeln!(f, "  crate: {}", crate_name)?;
+        }
+
+        // Show docs URL if available
+        if let Some(docs) = error.docs_url() {
+            writeln!(f, "  docs: {}", docs)?;
+        }
+
+        let Some(trace) = &self.traced.trace else {
+            return Ok(());
+        };
+
+        writeln!(f)?;
+
+        // Build GitHub URL base if repo info is available
+        let github_base: Option<String> = match (error.repo_url(), error.git_commit()) {
+            (Some(repo), Some(commit)) => {
+                let repo = repo.trim_end_matches('/');
+                Some(alloc::format!("{}/blob/{}/", repo, commit))
+            }
+            _ => None,
+        };
+
+        // Show segments oldest first, with context associated to its location
+        for (loc, ctx, locations_before) in trace.segments_oldest_first() {
+            // Show locations that came before this context (from .at() calls)
+            for location in locations_before {
+                write_location_meta(f, location, github_base.as_deref())?;
+            }
+
+            // Show the segment's main location with its context
+            if let Some(location) = loc {
+                write_location_meta(f, location, github_base.as_deref())?;
+                if let Some(context) = ctx {
+                    match context {
+                        Context::Text(msg) => writeln!(f, "       ╰─ {}", msg)?,
+                        Context::Debug(t) => writeln!(f, "       ╰─ {:?}", &**t)?,
+                        Context::Display(t) => writeln!(f, "       ╰─ {}", &**t)?,
+                    }
+                }
+            }
+        }
+
+        Ok(())
+    }
+}
+
+/// Helper to write a location with optional GitHub link.
+fn write_location_meta(
+    f: &mut fmt::Formatter<'_>,
+    loc: &'static Location<'static>,
+    github_base: Option<&str>,
+) -> fmt::Result {
+    writeln!(f, "    at {}:{}", loc.file(), loc.line())?;
+    if let Some(base) = github_base {
+        // Convert backslashes to forward slashes for Windows paths
+        let file = loc.file().replace('\\', "/");
+        writeln!(f, "       {}{}#L{}", base, file, loc.line())?;
+    }
+    Ok(())
 }
 
 impl<E: fmt::Display> fmt::Display for Traced<E> {
