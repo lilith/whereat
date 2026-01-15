@@ -6,23 +6,13 @@
 //! ## Design Goals
 //!
 //! - **Small sizeof**: `Traced<E>` is only `sizeof(E) + 8` bytes (one pointer for boxed trace)
-//! - **Zero allocation on Ok path**: No heap allocation until `.traced()` is called on an error
-//! - **Ergonomic API**: `.traced()` on errors, `.at()` on `Result`s
+//! - **Zero allocation on Ok path**: No heap allocation until an error occurs
+//! - **Simple API**: `.traced()` on errors, `.at()` on Results
 //! - **Optional context messages**: Add context with `.at_msg("context")`
 //! - **no_std compatible**: Works with just `core` + `alloc`, `std` is optional
 //! - **Fallible allocations**: Trace operations silently fail on OOM; error still propagates
 //!
-//! ## Allocation Failure Behavior
-//!
-//! Vec and String allocations use stable `try_reserve` APIs and silently fail on OOM.
-//! Box allocations use `Box::new` (Box::try_new is not yet stable) which can panic on OOM.
-//!
-//! If memory allocation fails:
-//! - Vec/String trace entries are silently skipped
-//! - The error `E` itself always propagates (it's stored inline in `Traced<E>`)
-//! - Box allocation failure will panic (rare in practice)
-//!
-//! ## Example
+//! ## Quick Start
 //!
 //! ```rust
 //! use errat::{Traced, Traceable, ResultExt};
@@ -34,18 +24,64 @@
 //! }
 //!
 //! fn inner() -> Result<(), Traced<MyError>> {
-//!     Err(MyError::NotFound.traced())
+//!     Err(MyError::NotFound.traced())  // .traced() wraps and captures location
 //! }
 //!
 //! fn outer() -> Result<(), Traced<MyError>> {
-//!     inner().at_msg("while fetching user")?;
+//!     inner().at()?;  // .at() adds another location
 //!     Ok(())
 //! }
 //!
 //! let err = outer().unwrap_err();
-//! // Note: trace_len may be less than expected if allocations failed
-//! assert!(err.trace_len() <= 2);
+//! assert_eq!(err.trace_len(), 2);
 //! ```
+//!
+//! ## Adding Context
+//!
+//! Use `.at_msg()` to add human-readable context:
+//!
+//! ```rust
+//! use errat::{Traced, Traceable, ResultExt};
+//!
+//! #[derive(Debug)]
+//! enum MyError { IoError }
+//!
+//! fn read_config() -> Result<(), Traced<MyError>> {
+//!     Err(MyError::IoError.traced())
+//! }
+//!
+//! fn init() -> Result<(), Traced<MyError>> {
+//!     read_config().at_msg("while loading configuration")?;
+//!     Ok(())
+//! }
+//! ```
+//!
+//! ## Converting Non-Traced Errors
+//!
+//! Use `.trace()` on Results with non-traced errors:
+//!
+//! ```rust
+//! use errat::{Traced, ResultTraceExt, ResultExt};
+//!
+//! fn external_api() -> Result<(), &'static str> {
+//!     Err("external error")
+//! }
+//!
+//! fn wrapper() -> Result<(), Traced<&'static str>> {
+//!     external_api().trace()?;  // converts to Traced
+//!     Ok(())
+//! }
+//! ```
+//!
+//! ## Allocation Failure Behavior
+//!
+//! Vec and String allocations use stable `try_reserve` APIs and silently fail on OOM.
+//! Box allocations use `Box::new` (Box::try_new is not yet stable) which can panic on OOM.
+//!
+//! If memory allocation fails:
+//! - Vec/String trace entries are silently skipped
+//! - The error `E` itself always propagates (it's stored inline in `Traced<E>`)
+//! - Box allocation failure will panic (rare in practice)
 
 #![no_std]
 #![deny(unsafe_code)]
@@ -578,16 +614,10 @@ impl<E> Traced<E> {
             }
             None => {
                 // Try to create trace with capacity, fall back to no capacity
-                if let Some(mut trace) = Trace::try_with_capacity(6) {
-                    let _ = trace.try_push(loc);
-                    if let Some(boxed) = try_box(trace) {
-                        self.trace = Some(boxed);
-                    }
-                } else if let Some(mut trace) = Some(Trace::new()) {
-                    let _ = trace.try_push(loc);
-                    if let Some(boxed) = try_box(trace) {
-                        self.trace = Some(boxed);
-                    }
+                let mut trace = Trace::try_with_capacity(6).unwrap_or_else(Trace::new);
+                let _ = trace.try_push(loc);
+                if let Some(boxed) = try_box(trace) {
+                    self.trace = Some(boxed);
                 }
             }
         }
@@ -801,14 +831,6 @@ impl<E> Traced<E> {
         self.trace.iter().flat_map(|t| t.contexts())
     }
 
-    /// Add a context message without a location.
-    ///
-    /// Prefer `at_msg()` which also captures the caller's location.
-    #[inline]
-    #[track_caller]
-    pub fn with_message(self, msg: &str) -> Self {
-        self.at_msg(msg)
-    }
 }
 
 impl<E: fmt::Debug> fmt::Debug for Traced<E> {
@@ -961,19 +983,25 @@ impl<E: fmt::Debug + fmt::Display> core::error::Error for Traced<E> {}
 // Traceable Trait - for calling .at() directly on error values
 // ============================================================================
 
-/// Extension trait that allows calling `.traced()` directly on any error value.
+/// Extension trait that allows calling `.traced()` on any error value.
 ///
-/// This is implemented for all types, allowing ergonomic error creation:
+/// Use `.traced()` to wrap an error and capture the first location.
+/// Then use `.at()` on Results to add more locations as the error propagates.
 ///
 /// ```rust
-/// use errat::Traceable;
+/// use errat::{Traceable, ResultExt};
 ///
 /// #[derive(Debug)]
 /// enum MyError { NotFound }
 ///
-/// let err = MyError::NotFound.traced();
-/// // trace_len may be 0 if allocation failed, but error propagates
-/// assert!(err.trace_len() <= 1);
+/// fn inner() -> Result<(), errat::Traced<MyError>> {
+///     Err(MyError::NotFound.traced())  // .traced() wraps the error
+/// }
+///
+/// fn outer() -> Result<(), errat::Traced<MyError>> {
+///     inner().at()?;  // .at() adds another location
+///     Ok(())
+/// }
 /// ```
 pub trait Traceable: Sized {
     /// Wrap this value in a `Traced` and add the caller's location.
@@ -1062,7 +1090,8 @@ impl<T, E> ResultExt<T, E> for Result<T, Traced<E>> {
 
 /// Extension trait for converting non-traced errors to traced errors.
 ///
-/// This allows `.trace()` to be called on `Result<T, E>` where `E` is not yet `Traced`.
+/// Use `.trace()` on `Result<T, E>` to wrap the error in `Traced<E>` and capture
+/// the first location. For Results that already have `Traced<E>`, use `ResultExt::at()`.
 ///
 /// ## Example
 ///
@@ -1074,7 +1103,7 @@ impl<T, E> ResultExt<T, E> for Result<T, Traced<E>> {
 /// }
 ///
 /// fn wrapper() -> Result<(), errat::Traced<&'static str>> {
-///     fallible().trace()?;
+///     fallible().trace()?;  // converts to Traced and captures location
 ///     Ok(())
 /// }
 /// ```
@@ -1399,12 +1428,6 @@ mod tests {
         let err = outer().unwrap_err();
         assert_eq!(err.trace_len(), 2);
         assert_eq!(err.message(), Some("during initialization"));
-    }
-
-    #[test]
-    fn test_with_message() {
-        let err = TestError::NotFound.traced().with_message("custom context");
-        assert_eq!(err.message(), Some("custom context"));
     }
 
     #[test]
