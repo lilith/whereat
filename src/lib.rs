@@ -429,48 +429,53 @@ impl CrateInfo {
 /// Returns a `&'static CrateInfo` reference that can be used with
 /// `.at_crate()` to mark crate boundaries in traces.
 ///
-/// ## Environment Variables
+/// ## How Git References Work
 ///
-/// For GitHub permalink generation, set these env vars at build time:
+/// For GitHub permalink generation, the macro tries these in order:
 ///
-/// | Variable | Purpose | Set by |
-/// |----------|---------|--------|
-/// | `GIT_COMMIT` | Commit hash for permalinks | build.rs or manual |
-/// | `GITHUB_SHA` | Commit hash | GitHub Actions (automatic) |
-/// | `CI_COMMIT_SHA` | Commit hash | GitLab CI (automatic) |
-/// | `CRATE_PATH` | Path from repo root to crate | build.rs (for workspaces) |
+/// 1. `GIT_COMMIT` env var (set by build.rs or CI)
+/// 2. `GITHUB_SHA` env var (automatic in GitHub Actions)
+/// 3. `CI_COMMIT_SHA` env var (automatic in GitLab CI)
+/// 4. **`v{CARGO_PKG_VERSION}`** (automatic fallback - works for crates.io!)
+///
+/// The version tag fallback means **published crates work automatically**
+/// if you tag releases as `v1.2.3`. No build.rs needed for basic usage.
 ///
 /// ## Workspace Crates (CRATE_PATH)
 ///
-/// If your crate is in a subdirectory (e.g., `crates/mylib/`), set `CRATE_PATH`
-/// so GitHub links point to the correct location:
+/// If your crate is in a subdirectory (e.g., `crates/mylib/`), you need
+/// to set `CRATE_PATH` so GitHub links include the correct path prefix.
+///
+/// ### Option 1: Hardcode in build.rs (simplest)
 ///
 /// ```ignore
 /// // build.rs
 /// fn main() {
-///     // Get commit hash
+///     println!("cargo:rustc-env=CRATE_PATH=crates/mylib/");
+/// }
+/// ```
+///
+/// ### Option 2: Compute automatically in build.rs
+///
+/// ```ignore
+/// // build.rs
+/// fn main() {
+///     // Optional: capture exact commit (otherwise uses version tag)
 ///     if let Ok(output) = std::process::Command::new("git")
-///         .args(["rev-parse", "HEAD"])
-///         .output()
-///     {
-///         if let Ok(hash) = String::from_utf8(output.stdout) {
-///             println!("cargo:rustc-env=GIT_COMMIT={}", hash.trim());
+///         .args(["rev-parse", "HEAD"]).output() {
+///         if output.status.success() {
+///             println!("cargo:rustc-env=GIT_COMMIT={}",
+///                 String::from_utf8_lossy(&output.stdout).trim());
 ///         }
 ///     }
 ///
 ///     // For workspace crates: compute path from repo root
-///     // Option A: Hardcode if known
-///     println!("cargo:rustc-env=CRATE_PATH=crates/mylib/");
-///
-///     // Option B: Compute from CARGO_MANIFEST_DIR relative to git root
 ///     if let Ok(manifest_dir) = std::env::var("CARGO_MANIFEST_DIR") {
 ///         if let Ok(output) = std::process::Command::new("git")
-///             .args(["rev-parse", "--show-toplevel"])
-///             .output()
-///         {
-///             if let Ok(root) = String::from_utf8(output.stdout) {
-///                 let root = root.trim();
-///                 if let Some(rel) = manifest_dir.strip_prefix(root) {
+///             .args(["rev-parse", "--show-toplevel"]).output() {
+///             if output.status.success() {
+///                 let root = String::from_utf8_lossy(&output.stdout);
+///                 if let Some(rel) = manifest_dir.strip_prefix(root.trim()) {
 ///                     let rel = rel.trim_start_matches(['/', '\\']);
 ///                     if !rel.is_empty() {
 ///                         println!("cargo:rustc-env=CRATE_PATH={}/", rel);
@@ -489,6 +494,7 @@ impl CrateInfo {
 ///
 /// let info: &'static CrateInfo = crate_info!();
 /// assert_eq!(info.name, "errat");
+/// // info.commit is Some("v0.1.0") if no GIT_COMMIT env var
 /// ```
 #[macro_export]
 macro_rules! crate_info {
@@ -497,11 +503,15 @@ macro_rules! crate_info {
         static INFO: $crate::CrateInfo = $crate::CrateInfo::with_path(
             env!("CARGO_PKG_NAME"),
             option_env!("CARGO_PKG_REPOSITORY"),
+            // Try env vars first, fall back to version tag for crates.io compatibility
             match option_env!("GIT_COMMIT") {
                 Some(c) => Some(c),
                 None => match option_env!("GITHUB_SHA") {
                     Some(c) => Some(c),
-                    None => option_env!("CI_COMMIT_SHA"),
+                    None => match option_env!("CI_COMMIT_SHA") {
+                        Some(c) => Some(c),
+                        None => Some(concat!("v", env!("CARGO_PKG_VERSION"))),
+                    },
                 },
             },
             option_env!("CRATE_PATH"),

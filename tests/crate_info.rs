@@ -656,26 +656,45 @@ fn windows_paths_converted_to_forward_slashes() {
 #[test]
 fn crate_info_commit_is_compile_time() {
     // GIT_COMMIT etc are captured at compile time via option_env!()
-    // This means:
-    // 1. Set by CI when building releases
-    // 2. None when building locally without env vars
-    // 3. Does NOT change with incremental compilation unless env changes
+    // Falls back to version tag (v{VERSION}) for crates.io compatibility
 
     let info = crate_info!();
 
-    // Verify it's either None or a string (not dynamic)
-    match info.commit {
-        Some(commit) => {
-            // If set, should be a valid-looking commit (hex chars)
-            assert!(
-                commit.chars().all(|c| c.is_ascii_hexdigit()),
-                "Commit should be hex. Got: {}",
-                commit
-            );
-        }
-        None => {
-            // Expected when building without CI env vars
-        }
+    // Should always have a commit (either env var or version tag fallback)
+    let commit = info.commit.expect("commit should always be Some due to version fallback");
+
+    // Either a hex commit hash OR a version tag like "v0.1.0"
+    let is_hex = commit.chars().all(|c| c.is_ascii_hexdigit());
+    let is_version_tag = commit.starts_with('v') && commit.contains('.');
+
+    assert!(
+        is_hex || is_version_tag,
+        "Commit should be hex hash or version tag. Got: {}",
+        commit
+    );
+}
+
+#[test]
+fn crate_info_version_tag_fallback() {
+    // When no GIT_COMMIT env var, falls back to v{CARGO_PKG_VERSION}
+    // This makes crates.io dependencies work automatically!
+
+    let info = crate_info!();
+    let commit = info.commit.expect("should have commit from version fallback");
+
+    // In tests without CI env vars, should be version tag
+    // (unless someone set GIT_COMMIT in their environment)
+    if !commit.chars().all(|c| c.is_ascii_hexdigit()) {
+        assert!(
+            commit.starts_with("v"),
+            "Fallback should be version tag. Got: {}",
+            commit
+        );
+        assert!(
+            commit == concat!("v", env!("CARGO_PKG_VERSION")),
+            "Version tag should match CARGO_PKG_VERSION. Got: {}",
+            commit
+        );
     }
 }
 
