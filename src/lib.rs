@@ -284,6 +284,30 @@ fn unwrap_location(loc: &LocationElem) -> &'static Location<'static> {
 /// let err: At<MyError> = at(MyError::Oops);
 /// assert_eq!(err.trace_len(), 1);
 /// ```
+///
+/// ## Note: Avoid `At<At<E>>`
+///
+/// Nesting `At<At<E>>` is supported but unnecessary and wasteful.
+/// Each `At` has its own trace, so nesting allocates two `Box<Trace>`
+/// instead of one. Use `.at()` on Results to extend the existing trace:
+///
+/// ```rust
+/// use errat::{at, At};
+///
+/// #[derive(Debug)]
+/// struct MyError;
+///
+/// // GOOD: Extend existing trace
+/// fn good() -> Result<(), At<MyError>> {
+///     let err: At<MyError> = at(MyError);
+///     Err(err.at())  // Same trace, new location
+/// }
+///
+/// // UNNECESSARY: Creates two separate traces
+/// fn unnecessary() -> At<At<MyError>> {
+///     at(at(MyError))  // Two allocations
+/// }
+/// ```
 pub struct At<E> {
     error: E,
     trace: Option<Box<Trace>>,
@@ -383,6 +407,42 @@ impl CrateInfo {
 ///
 /// Returns a `&'static CrateInfo` reference that can be used with
 /// `.at_crate()` to mark crate boundaries in traces.
+///
+/// ## Commit Hash Capture
+///
+/// For GitHub permalink generation, set one of these env vars at build time:
+/// - `GIT_COMMIT` - explicit commit hash
+/// - `GITHUB_SHA` - set automatically by GitHub Actions
+/// - `CI_COMMIT_SHA` - set automatically by GitLab CI
+///
+/// ### Option 1: build.rs (recommended)
+///
+/// ```ignore
+/// // build.rs
+/// fn main() {
+///     if let Ok(output) = std::process::Command::new("git")
+///         .args(["rev-parse", "HEAD"])
+///         .output()
+///     {
+///         if let Ok(hash) = String::from_utf8(output.stdout) {
+///             println!("cargo:rustc-env=GIT_COMMIT={}", hash.trim());
+///         }
+///     }
+/// }
+/// ```
+///
+/// ### Option 2: .cargo/config.toml
+///
+/// ```ignore
+/// [env]
+/// GIT_COMMIT = "abc123..."  # manual, or use script to update
+/// ```
+///
+/// ### Option 3: Command line
+///
+/// ```ignore
+/// GIT_COMMIT=$(git rev-parse HEAD) cargo build --release
+/// ```
 ///
 /// ## Example
 ///

@@ -545,3 +545,177 @@ fn prefer_result_at_over_nested_at() {
     assert_eq!(bad_err.trace_len(), 1);
     assert_eq!(bad_err.error().trace_len(), 1);
 }
+
+// ============================================================================
+// GitHub Link Expansion
+// ============================================================================
+
+#[test]
+fn github_link_has_full_url() {
+    static INFO: CrateInfo = CrateInfo::new(
+        "mylib",
+        Some("https://github.com/myorg/mylib"),
+        Some("abc123def"),
+        "mylib",
+    );
+
+    let err = errat::At::new(TestError).at().at_crate(&INFO);
+    let output = format!("{}", err.display_with_meta());
+
+    // Should have complete clickable URL
+    assert!(
+        output.contains("https://github.com/myorg/mylib/blob/abc123def/"),
+        "Link should be full URL. Got:\n{}",
+        output
+    );
+}
+
+#[test]
+fn github_link_has_file_path() {
+    static INFO: CrateInfo = CrateInfo::new(
+        "test",
+        Some("https://github.com/org/repo"),
+        Some("deadbeef"),
+        "test",
+    );
+
+    let err = errat::At::new(TestError).at().at_crate(&INFO);
+    let output = format!("{}", err.display_with_meta());
+
+    // Should include file path in URL
+    assert!(
+        output.contains("tests/crate_info.rs#L"),
+        "Link should include file path and line. Got:\n{}",
+        output
+    );
+}
+
+#[test]
+fn github_link_line_number_is_numeric() {
+    static INFO: CrateInfo = CrateInfo::new(
+        "test",
+        Some("https://github.com/org/repo"),
+        Some("abc"),
+        "test",
+    );
+
+    let err = errat::At::new(TestError).at().at_crate(&INFO);
+    let output = format!("{}", err.display_with_meta());
+
+    // Find #L and verify it's followed by digits
+    let link_part = output
+        .lines()
+        .find(|l| l.contains("#L"))
+        .expect("should have line anchor");
+
+    let anchor_idx = link_part.find("#L").unwrap();
+    let after_anchor = &link_part[anchor_idx + 2..];
+    let line_num: String = after_anchor.chars().take_while(|c| c.is_ascii_digit()).collect();
+
+    assert!(
+        !line_num.is_empty(),
+        "Line number should be numeric. Got: {}",
+        link_part
+    );
+
+    let num: u32 = line_num.parse().expect("should parse as number");
+    assert!(num > 0, "Line number should be positive");
+}
+
+#[test]
+fn windows_paths_converted_to_forward_slashes() {
+    // The implementation converts backslashes to forward slashes
+    // We can't easily test this directly, but we verify no backslashes in output
+    static INFO: CrateInfo = CrateInfo::new(
+        "test",
+        Some("https://github.com/org/repo"),
+        Some("abc"),
+        "test",
+    );
+
+    let err = errat::At::new(TestError).at().at_crate(&INFO);
+    let output = format!("{}", err.display_with_meta());
+
+    // URL lines should not have backslashes
+    for line in output.lines() {
+        if line.contains("github.com") {
+            assert!(
+                !line.contains('\\'),
+                "GitHub URL should use forward slashes. Got: {}",
+                line
+            );
+        }
+    }
+}
+
+// ============================================================================
+// Compile-Time Capture Behavior
+// ============================================================================
+
+#[test]
+fn crate_info_commit_is_compile_time() {
+    // GIT_COMMIT etc are captured at compile time via option_env!()
+    // This means:
+    // 1. Set by CI when building releases
+    // 2. None when building locally without env vars
+    // 3. Does NOT change with incremental compilation unless env changes
+
+    let info = crate_info!();
+
+    // Verify it's either None or a string (not dynamic)
+    match info.commit {
+        Some(commit) => {
+            // If set, should be a valid-looking commit (hex chars)
+            assert!(
+                commit.chars().all(|c| c.is_ascii_hexdigit()),
+                "Commit should be hex. Got: {}",
+                commit
+            );
+        }
+        None => {
+            // Expected when building without CI env vars
+        }
+    }
+}
+
+#[test]
+fn crate_info_is_truly_static() {
+    // Verify crate_info!() returns truly static data
+    let info1 = crate_info!();
+    let info2 = crate_info!();
+
+    // Same compilation unit = same static (by value, different addresses ok)
+    assert_eq!(info1.name, info2.name);
+    assert_eq!(info1.repo, info2.repo);
+    assert_eq!(info1.commit, info2.commit);
+
+    // The data is embedded in the binary, not computed at runtime
+    // This is verified by the fact that option_env!() is a compile-time macro
+}
+
+#[test]
+fn module_path_captured_at_macro_site() {
+    let info = crate_info!();
+
+    // module_path!() captures where crate_info!() is invoked
+    assert!(
+        info.module.starts_with("crate_info"),
+        "Module should be this test module. Got: {}",
+        info.module
+    );
+}
+
+mod nested_module {
+    use errat::crate_info;
+
+    #[test]
+    fn nested_module_has_different_path() {
+        let info = crate_info!();
+
+        assert!(
+            info.module.contains("nested_module"),
+            "Module should include nested_module. Got: {}",
+            info.module
+        );
+    }
+}
