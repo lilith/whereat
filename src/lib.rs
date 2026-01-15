@@ -113,6 +113,10 @@ use alloc::vec::Vec;
 use core::fmt;
 use core::panic::Location;
 
+// Re-export derive macro when feature is enabled
+#[cfg(feature = "derive")]
+pub use errat_derive::TracedError;
+
 // ============================================================================
 // LocationVec - configurable storage for trace locations
 // ============================================================================
