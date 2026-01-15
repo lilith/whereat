@@ -1,5 +1,6 @@
 //! Integration tests for error output formatting.
 
+use core::error::Error;
 use errat::{at, start_at_late, At, ErrorAtExt, ResultAtExt, ResultTraceExt};
 
 #[derive(Debug)]
@@ -327,5 +328,183 @@ fn display_with_meta_shows_crate_name() {
         output.contains("crate: errat"),
         "display_with_meta should show crate name. Got:\n{}",
         output
+    );
+}
+
+// ============================================================================
+// Nested Errors with source()
+// ============================================================================
+
+#[derive(Debug)]
+struct IoError {
+    msg: &'static str,
+}
+
+impl core::fmt::Display for IoError {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        write!(f, "io error: {}", self.msg)
+    }
+}
+
+impl Error for IoError {}
+
+#[derive(Debug)]
+struct AppError {
+    msg: &'static str,
+    source: Option<IoError>,
+}
+
+impl core::fmt::Display for AppError {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        write!(f, "app error: {}", self.msg)
+    }
+}
+
+impl Error for AppError {
+    fn source(&self) -> Option<&(dyn Error + 'static)> {
+        self.source.as_ref().map(|e| e as &(dyn Error + 'static))
+    }
+}
+
+#[test]
+fn at_delegates_source_to_inner() {
+    let inner = IoError { msg: "disk full" };
+    let outer = AppError {
+        msg: "save failed",
+        source: Some(inner),
+    };
+
+    let traced: At<AppError> = at(outer);
+
+    // At<E> should delegate source() to E::source()
+    let source = traced.source().expect("should have source");
+    let source_msg = format!("{}", source);
+    assert!(
+        source_msg.contains("disk full"),
+        "source() should return inner error. Got: {}",
+        source_msg
+    );
+}
+
+#[test]
+fn at_source_is_none_when_inner_has_no_source() {
+    let outer = AppError {
+        msg: "no cause",
+        source: None,
+    };
+
+    let traced: At<AppError> = at(outer);
+    assert!(
+        traced.source().is_none(),
+        "source() should be None when inner has no source"
+    );
+}
+
+#[test]
+fn error_chain_traversable() {
+    let inner = IoError {
+        msg: "connection reset",
+    };
+    let outer = AppError {
+        msg: "request failed",
+        source: Some(inner),
+    };
+
+    let traced: At<AppError> = at(outer);
+
+    // Walk the error chain
+    let mut chain: Vec<String> = vec![];
+    let mut current: Option<&(dyn Error + 'static)> = Some(&traced);
+
+    while let Some(err) = current {
+        chain.push(format!("{}", err));
+        current = err.source();
+    }
+
+    // At<E> is transparent - delegates source() directly to E::source()
+    // Chain: At<AppError> (displays as AppError) -> IoError
+    assert_eq!(chain.len(), 2, "Chain should have 2 errors: At<AppError> -> IoError");
+    assert!(chain[0].contains("request failed"), "First should be AppError (via At)");
+    assert!(chain[1].contains("connection reset"), "Second should be IoError");
+}
+
+#[test]
+fn nested_at_errors() {
+    // At<At<E>> - nested traced errors
+    let inner_traced: At<IoError> = at(IoError { msg: "read failed" });
+    let outer_traced: At<At<IoError>> = at(inner_traced);
+
+    assert_eq!(outer_traced.trace_len(), 1, "Outer should have its own trace");
+    assert_eq!(
+        outer_traced.error().trace_len(),
+        1,
+        "Inner should have its own trace"
+    );
+
+    // Can access the innermost error
+    let innermost = outer_traced.error().error();
+    assert_eq!(innermost.msg, "read failed");
+}
+
+#[derive(Debug)]
+struct ThreeLevelError {
+    msg: &'static str,
+    source: Option<AppError>,
+}
+
+impl core::fmt::Display for ThreeLevelError {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        write!(f, "level3: {}", self.msg)
+    }
+}
+
+impl Error for ThreeLevelError {
+    fn source(&self) -> Option<&(dyn Error + 'static)> {
+        self.source.as_ref().map(|e| e as &(dyn Error + 'static))
+    }
+}
+
+#[test]
+fn three_level_error_chain() {
+    let level1 = IoError { msg: "level1" };
+    let level2 = AppError {
+        msg: "level2",
+        source: Some(level1),
+    };
+    let level3 = ThreeLevelError {
+        msg: "level3",
+        source: Some(level2),
+    };
+
+    let traced: At<ThreeLevelError> = at(level3);
+
+    // Walk full chain - At<E> is transparent, delegates to E::source()
+    let mut depth = 0;
+    let mut current: Option<&(dyn Error + 'static)> = Some(&traced);
+    while let Some(err) = current {
+        depth += 1;
+        current = err.source();
+    }
+
+    // Chain: At<ThreeLevelError> -> AppError -> IoError (At is transparent)
+    assert_eq!(depth, 3, "Should have 3 levels: At<ThreeLevelError> -> AppError -> IoError");
+}
+
+#[test]
+fn source_preserved_through_trace_operations() {
+    let inner = IoError { msg: "original" };
+    let outer = AppError {
+        msg: "wrapped",
+        source: Some(inner),
+    };
+
+    // Chain multiple trace operations
+    let traced = at(outer).at_str("context1").at_str("context2").at_skipped();
+
+    // source() should still work
+    let source = traced.source().expect("should have source");
+    assert!(
+        format!("{}", source).contains("original"),
+        "source should still be accessible after trace operations"
     );
 }
