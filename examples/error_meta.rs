@@ -53,21 +53,21 @@ impl ErrorMeta for AppError {
 
 fn fetch_user(id: u64) -> Result<(), Traced<AppError>> {
     if id == 0 {
-        return Err(AppError::Unauthorized.traced());
+        return Err(AppError::Unauthorized.start_at());
     }
     Err(AppError::NotFound {
         resource: format!("user/{}", id),
     }
-    .traced())
+    .start_at())
 }
 
 fn process_request(user_id: u64) -> Result<(), Traced<AppError>> {
-    fetch_user(user_id).msg("fetching user data")?;
+    fetch_user(user_id).at_message("fetching user data")?;
     Ok(())
 }
 
 fn handle_api_call() -> Result<(), Traced<AppError>> {
-    process_request(42).msg("processing API request")
+    process_request(42).at_message("processing API request")
 }
 
 fn main() {

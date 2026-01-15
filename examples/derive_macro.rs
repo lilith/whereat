@@ -27,28 +27,28 @@ enum AppError {
 
 fn find_user(id: u64) -> Result<String, Traced<AppError>> {
     if id == 0 {
-        return Err(AppError::NotFound(format!("user/{}", id)).traced());
+        return Err(AppError::NotFound(format!("user/{}", id)).start_at());
     }
     Ok(format!("User {}", id))
 }
 
 fn validate_input(s: &str) -> Result<(), Traced<AppError>> {
     if s.is_empty() {
-        return Err(AppError::InvalidInput("empty string".into()).traced());
+        return Err(AppError::InvalidInput("empty string".into()).start_at());
     }
     Ok(())
 }
 
 fn read_config() -> Result<String, Traced<AppError>> {
     // This uses the #[from] impl - io::Error converts to AppError::Io
-    // Then we use .trace() to wrap in Traced and capture location
+    // Then we use .start_at() to wrap in Traced and capture location
     let err = std::io::Error::new(std::io::ErrorKind::NotFound, "config.toml not found");
-    Err(AppError::from(err).traced())
+    Err(AppError::from(err).start_at())
 }
 
 fn process_request(user_id: u64, input: &str) -> Result<String, Traced<AppError>> {
-    validate_input(input).msg("validating request input")?;
-    let user = find_user(user_id).msg("looking up user")?;
+    validate_input(input).at_message("validating request input")?;
+    let user = find_user(user_id).at_message("looking up user")?;
     Ok(format!(
         "Processed request for {} with input '{}'",
         user, input
@@ -73,7 +73,7 @@ fn main() {
         name: "database".into(),
         code: 503,
     }
-    .traced();
+    .start_at();
     println!("Display: {}", err);
     println!("Debug:\n{:?}", err);
 

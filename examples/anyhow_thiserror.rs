@@ -48,15 +48,15 @@ fn read_config_file(path: &str) -> Result<String, Traced<AppError>> {
     Err(AppError::NotFound {
         resource: path.to_string(),
     }
-    .traced())
+    .start_at())
 }
 
 fn load_config() -> Result<String, Traced<AppError>> {
-    read_config_file("/etc/app.conf").msg("loading application config")
+    read_config_file("/etc/app.conf").at_message("loading application config")
 }
 
 fn init_app() -> Result<(), Traced<AppError>> {
-    let _config = load_config().msg("during initialization")?;
+    let _config = load_config().at_message("during initialization")?;
     Ok(())
 }
 
@@ -74,7 +74,7 @@ fn traced_to_any<E: std::error::Error + Send + Sync + 'static>(err: Traced<E>) -
 
 /// Wrap an anyhow-style error with errat tracing
 fn any_to_traced(err: AnyError) -> Traced<AnyError> {
-    err.traced()
+    err.start_at()
 }
 
 // ============================================================================
@@ -91,12 +91,12 @@ fn inner_operation() -> Result<(), std::io::Error> {
 fn middle_layer() -> Result<(), Traced<AppError>> {
     inner_operation()
         .map_err(AppError::Io)
-        .map_err(|e| e.traced())
-        .msg("connecting to database")
+        .map_err(|e| e.start_at())
+        .at_message("connecting to database")
 }
 
 fn outer_layer() -> Result<(), Traced<AppError>> {
-    middle_layer().msg("in business logic")
+    middle_layer().at_message("in business logic")
 }
 
 // ============================================================================
@@ -137,8 +137,8 @@ fn main() {
     println!(
         "
 errat works well with thiserror-style errors:
-- Wrap any error with .traced() to start collecting locations
-- Use .msg() to add context as errors propagate
+- Wrap any error with .start_at() to start collecting locations
+- Use .at_message() to add context as errors propagate
 - Traced<E> implements Error, so it can be boxed like anyhow
 - The error source chain is preserved through Traced<E>
 

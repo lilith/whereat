@@ -420,13 +420,111 @@ impl<T: core::any::Any + fmt::Display + Send + Sync> DisplayAny for T {
 }
 
 // ============================================================================
+// CrateInfo - Static metadata about a crate for cross-crate tracing
+// ============================================================================
+
+/// Static metadata about a crate, used for generating repository links.
+///
+/// Create using the `crate_info!()` macro which captures compile-time values.
+/// This is stored as a `&'static` reference in trace entries.
+#[derive(Debug, Clone, Copy)]
+pub struct CrateInfo {
+    /// Crate name (from CARGO_PKG_NAME)
+    pub name: &'static str,
+    /// Repository URL (from CARGO_PKG_REPOSITORY or #[errat(repo = "...")])
+    pub repo: Option<&'static str>,
+    /// Git commit hash or tag for generating permalinks
+    pub commit: Option<&'static str>,
+    /// Module path where this info was captured
+    pub module: &'static str,
+}
+
+impl CrateInfo {
+    /// Create a new CrateInfo with all fields specified.
+    pub const fn new(
+        name: &'static str,
+        repo: Option<&'static str>,
+        commit: Option<&'static str>,
+        module: &'static str,
+    ) -> Self {
+        Self {
+            name,
+            repo,
+            commit,
+            module,
+        }
+    }
+}
+
+/// Captures crate metadata at the call site.
+///
+/// Returns a `&'static CrateInfo` reference that can be used with
+/// `.at_crate()` to mark crate boundaries in traces.
+///
+/// ## Example
+///
+/// ```rust
+/// use errat::{crate_info, CrateInfo};
+///
+/// let info: &'static CrateInfo = crate_info!();
+/// assert_eq!(info.name, "errat");
+/// ```
+#[macro_export]
+macro_rules! crate_info {
+    () => {{
+        // Use match instead of .or() because Option::or isn't const on stable
+        static INFO: $crate::CrateInfo = $crate::CrateInfo::new(
+            env!("CARGO_PKG_NAME"),
+            option_env!("CARGO_PKG_REPOSITORY"),
+            match option_env!("GIT_COMMIT") {
+                Some(c) => Some(c),
+                None => match option_env!("GITHUB_SHA") {
+                    Some(c) => Some(c),
+                    None => option_env!("CI_COMMIT_SHA"),
+                },
+            },
+            module_path!(),
+        );
+        &INFO
+    }};
+}
+
+/// Start tracing an error with crate metadata for repository links.
+///
+/// This is equivalent to `err.start_at().at_crate(crate_info!())` but more concise.
+/// Use this when creating new traced errors in your crate.
+///
+/// ## Example
+///
+/// ```rust
+/// use errat::{at, Traced};
+///
+/// #[derive(Debug)]
+/// enum MyError { NotFound }
+///
+/// fn find_user(id: u64) -> Result<String, Traced<MyError>> {
+///     if id == 0 {
+///         return Err(at!(MyError::NotFound));
+///     }
+///     Ok(format!("User {}", id))
+/// }
+/// ```
+#[macro_export]
+macro_rules! at {
+    ($err:expr) => {{
+        use $crate::Traceable;
+        $err.start_at().at_crate($crate::crate_info!())
+    }};
+}
+
+// ============================================================================
 // Context Enum
 // ============================================================================
 
 /// Context data attached to a trace segment.
 ///
-/// Can be a simple string message or arbitrary typed data with either
-/// Debug or Display formatting.
+/// Can be a simple string message, typed data (Debug/Display), or
+/// crate boundary information for cross-crate tracing.
 pub enum Context {
     /// A text message describing what operation was being performed.
     /// Uses `Cow<'static, str>` for zero-copy static strings.
@@ -435,6 +533,9 @@ pub enum Context {
     Debug(Box<dyn DebugAny>),
     /// Typed context data formatted via Display.
     Display(Box<dyn DisplayAny>),
+    /// Crate boundary marker - changes the assumed crate for subsequent locations.
+    /// Used for generating correct repository links in cross-crate traces.
+    Crate(&'static CrateInfo),
 }
 
 impl Context {
@@ -442,14 +543,22 @@ impl Context {
     pub fn as_text(&self) -> Option<&str> {
         match self {
             Context::Text(s) => Some(s),
-            Context::Debug(_) | Context::Display(_) => None,
+            _ => None,
+        }
+    }
+
+    /// Get as crate info, if this is a Crate variant.
+    pub fn as_crate_info(&self) -> Option<&'static CrateInfo> {
+        match self {
+            Context::Crate(info) => Some(info),
+            _ => None,
         }
     }
 
     /// Try to downcast to a specific type, if this is a typed variant.
     pub fn downcast_ref<T: 'static>(&self) -> Option<&T> {
         match self {
-            Context::Text(_) => None,
+            Context::Text(_) | Context::Crate(_) => None,
             // Must use (**b) to call as_any on the trait object, not the Box
             // (Box<dyn DebugAny> itself implements DebugAny through the blanket impl)
             Context::Debug(b) => (**b).as_any().downcast_ref(),
@@ -460,7 +569,7 @@ impl Context {
     /// Get the type name if this is a typed variant.
     pub fn type_name(&self) -> Option<&'static str> {
         match self {
-            Context::Text(_) => None,
+            Context::Text(_) | Context::Crate(_) => None,
             Context::Debug(b) => Some((**b).type_name()),
             Context::Display(b) => Some((**b).type_name()),
         }
@@ -470,6 +579,11 @@ impl Context {
     pub fn is_display(&self) -> bool {
         matches!(self, Context::Text(_) | Context::Display(_))
     }
+
+    /// Check if this is a crate boundary marker.
+    pub fn is_crate_boundary(&self) -> bool {
+        matches!(self, Context::Crate(_))
+    }
 }
 
 impl fmt::Debug for Context {
@@ -478,6 +592,7 @@ impl fmt::Debug for Context {
             Context::Text(s) => write!(f, "{:?}", s),
             Context::Debug(t) => write!(f, "{:?}", &**t),
             Context::Display(t) => write!(f, "{}", &**t), // Display types use Display even in Debug
+            Context::Crate(info) => write!(f, "[crate: {}]", info.name),
         }
     }
 }
@@ -488,6 +603,7 @@ impl fmt::Display for Context {
             Context::Text(s) => write!(f, "{}", s),
             Context::Debug(t) => write!(f, "{:?}", &**t), // Debug types use Debug in Display
             Context::Display(t) => write!(f, "{}", &**t),
+            Context::Crate(info) => write!(f, "[crate: {}]", info.name),
         }
     }
 }
@@ -640,7 +756,6 @@ impl<E> Traced<E> {
     /// Add the caller's location and a context message to the trace.
     ///
     /// Accepts `&'static str` (zero-copy) or `String` (owned).
-    /// For computed messages, use `with_msg()` to defer allocation to error path.
     ///
     /// ## Example
     ///
@@ -651,17 +766,17 @@ impl<E> Traced<E> {
     /// enum MyError { IoError }
     ///
     /// fn read_config() -> Result<(), Traced<MyError>> {
-    ///     Err(MyError::IoError.traced())
+    ///     Err(MyError::IoError.start_at())
     /// }
     ///
     /// fn init() -> Result<(), Traced<MyError>> {
-    ///     read_config().msg("while loading configuration")?;
+    ///     read_config().at_message("while loading configuration")?;
     ///     Ok(())
     /// }
     /// ```
     #[track_caller]
     #[inline]
-    pub fn msg(mut self, msg: impl Into<Cow<'static, str>>) -> Self {
+    pub fn at_message(mut self, msg: impl Into<Cow<'static, str>>) -> Self {
         let loc = Location::caller();
         let context = Context::Text(msg.into());
 
@@ -680,37 +795,10 @@ impl<E> Traced<E> {
         self
     }
 
-    /// Add the caller's location and a lazily-computed context message.
+    /// Add the caller's location and lazily-computed typed context (Display formatted).
     ///
-    /// The closure is only called if this is an error, avoiding allocation on success.
-    ///
-    /// ## Example
-    ///
-    /// ```rust
-    /// use errat::{Traced, Traceable, ResultExt};
-    ///
-    /// #[derive(Debug)]
-    /// enum MyError { NotFound }
-    ///
-    /// fn load(path: &str) -> Result<(), Traced<MyError>> {
-    ///     Err(MyError::NotFound.traced())
-    /// }
-    ///
-    /// fn init(path: &str) -> Result<(), Traced<MyError>> {
-    ///     load(path).with_msg(|| format!("loading {}", path))?;
-    ///     Ok(())
-    /// }
-    /// ```
-    #[track_caller]
-    #[inline]
-    pub fn with_msg(self, f: impl FnOnce() -> String) -> Self {
-        self.msg(f())
-    }
-
-    /// Add the caller's location and typed context (Display formatted).
-    ///
-    /// Use for human-readable context. For debug output, use `dbg_ctx()`.
-    /// For lazy evaluation, use `with_ctx()`.
+    /// The closure is only called on error path, avoiding allocation on success.
+    /// Use for human-readable context messages.
     ///
     /// ## Example
     ///
@@ -720,14 +808,23 @@ impl<E> Traced<E> {
     /// #[derive(Debug)]
     /// enum MyError { NotFound }
     ///
-    /// let err = MyError::NotFound
-    ///     .traced()
-    ///     .ctx("loading config file /etc/config.toml");
+    /// fn load(path: &str) -> Result<(), Traced<MyError>> {
+    ///     Err(MyError::NotFound.start_at())
+    /// }
+    ///
+    /// fn init(path: &str) -> Result<(), Traced<MyError>> {
+    ///     load(path).map_err(|e| e.at_display(|| format!("loading {}", path)))?;
+    ///     Ok(())
+    /// }
     /// ```
     #[track_caller]
     #[inline]
-    pub fn ctx<T: fmt::Display + Send + Sync + 'static>(mut self, ctx: T) -> Self {
+    pub fn at_display<T: fmt::Display + Send + Sync + 'static>(
+        mut self,
+        f: impl FnOnce() -> T,
+    ) -> Self {
         let loc = Location::caller();
+        let ctx = f();
         let Some(boxed_ctx) = try_box(ctx) else {
             return self;
         };
@@ -748,18 +845,9 @@ impl<E> Traced<E> {
         self
     }
 
-    /// Add the caller's location and lazily-computed typed context (Display formatted).
+    /// Add the caller's location and lazily-computed typed context (Debug formatted).
     ///
-    /// The closure is only called if this is an error.
-    #[track_caller]
-    #[inline]
-    pub fn with_ctx<T: fmt::Display + Send + Sync + 'static>(self, f: impl FnOnce() -> T) -> Self {
-        self.ctx(f())
-    }
-
-    /// Add the caller's location and typed context (Debug formatted).
-    ///
-    /// Use for developer-readable debug output. For human-readable, use `ctx()`.
+    /// The closure is only called on error path, avoiding allocation on success.
     /// Use `contexts()` to retrieve entries and `downcast_ref` to access typed data.
     ///
     /// ## Example
@@ -774,8 +862,8 @@ impl<E> Traced<E> {
     /// enum MyError { Forbidden }
     ///
     /// let err = MyError::Forbidden
-    ///     .traced()
-    ///     .dbg_ctx(RequestInfo { user_id: 42, path: "/admin".into() });
+    ///     .start_at()
+    ///     .at_debug(|| RequestInfo { user_id: 42, path: "/admin".into() });
     ///
     /// // Later, retrieve the context
     /// for ctx in err.contexts() {
@@ -786,8 +874,12 @@ impl<E> Traced<E> {
     /// ```
     #[track_caller]
     #[inline]
-    pub fn dbg_ctx<T: fmt::Debug + Send + Sync + 'static>(mut self, ctx: T) -> Self {
+    pub fn at_debug<T: fmt::Debug + Send + Sync + 'static>(
+        mut self,
+        f: impl FnOnce() -> T,
+    ) -> Self {
         let loc = Location::caller();
+        let ctx = f();
         let Some(boxed_ctx) = try_box(ctx) else {
             return self;
         };
@@ -808,31 +900,107 @@ impl<E> Traced<E> {
         self
     }
 
-    /// Add the caller's location and lazily-computed typed context (Debug formatted).
+    /// Add a crate boundary marker to the trace.
     ///
-    /// The closure is only called if this is an error.
+    /// This marks that subsequent locations belong to a different crate,
+    /// enabling correct GitHub links in cross-crate traces.
+    ///
+    /// Use `crate_info!()` to capture the current crate's metadata.
+    ///
+    /// ## Example
+    ///
+    /// ```rust
+    /// use errat::{Traced, Traceable, crate_info};
+    ///
+    /// #[derive(Debug)]
+    /// enum MyError { Wrapped(String) }
+    ///
+    /// // When receiving an error from a dependency:
+    /// fn wrap_external_error(msg: &str) -> Traced<MyError> {
+    ///     MyError::Wrapped(msg.into())
+    ///         .start_at()
+    ///         .at_crate(crate_info!())  // Mark crate boundary
+    /// }
+    /// ```
     #[track_caller]
     #[inline]
-    pub fn with_dbg_ctx<T: fmt::Debug + Send + Sync + 'static>(
-        self,
-        f: impl FnOnce() -> T,
-    ) -> Self {
-        self.dbg_ctx(f())
+    pub fn at_crate(mut self, info: &'static CrateInfo) -> Self {
+        let loc = Location::caller();
+        let context = Context::Crate(info);
+
+        match &mut self.trace {
+            Some(trace) => {
+                trace.try_push_with_context(loc, context);
+            }
+            None => {
+                let mut trace = Trace::new();
+                trace.try_push_with_context(loc, context);
+                if let Some(boxed) = try_box(trace) {
+                    self.trace = Some(boxed);
+                }
+            }
+        }
+        self
     }
 
     // Legacy aliases for backwards compatibility
     #[doc(hidden)]
     #[track_caller]
     #[inline]
+    pub fn msg(self, msg: impl Into<Cow<'static, str>>) -> Self {
+        self.at_message(msg)
+    }
+
+    #[doc(hidden)]
+    #[track_caller]
+    #[inline]
+    pub fn with_msg(self, f: impl FnOnce() -> String) -> Self {
+        self.at_message(f())
+    }
+
+    #[doc(hidden)]
+    #[track_caller]
+    #[inline]
+    pub fn ctx<T: fmt::Display + Send + Sync + 'static>(self, ctx: T) -> Self {
+        self.at_display(|| ctx)
+    }
+
+    #[doc(hidden)]
+    #[track_caller]
+    #[inline]
+    pub fn with_ctx<T: fmt::Display + Send + Sync + 'static>(self, f: impl FnOnce() -> T) -> Self {
+        self.at_display(f)
+    }
+
+    #[doc(hidden)]
+    #[track_caller]
+    #[inline]
+    pub fn dbg_ctx<T: fmt::Debug + Send + Sync + 'static>(self, ctx: T) -> Self {
+        self.at_debug(|| ctx)
+    }
+
+    #[doc(hidden)]
+    #[track_caller]
+    #[inline]
+    pub fn with_dbg_ctx<T: fmt::Debug + Send + Sync + 'static>(
+        self,
+        f: impl FnOnce() -> T,
+    ) -> Self {
+        self.at_debug(f)
+    }
+
+    #[doc(hidden)]
+    #[track_caller]
+    #[inline]
     pub fn at_msg(self, msg: &str) -> Self {
-        self.msg(msg.to_string())
+        self.at_message(msg.to_string())
     }
 
     #[doc(hidden)]
     #[track_caller]
     #[inline]
     pub fn at_context<T: fmt::Debug + Send + Sync + 'static>(self, ctx: T) -> Self {
-        self.dbg_ctx(ctx)
+        self.at_debug(|| ctx)
     }
 
     #[doc(hidden)]
@@ -923,6 +1091,7 @@ impl<E: fmt::Debug> fmt::Debug for Traced<E> {
                     Context::Text(msg) => writeln!(f, "       ╰─ {}", msg)?,
                     Context::Debug(t) => writeln!(f, "       ╰─ {:?}", &**t)?,
                     Context::Display(t) => writeln!(f, "       ╰─ {}", &**t)?,
+                    Context::Crate(_) => {} // Crate boundaries don't display in basic Debug
                 }
             }
         }
@@ -1019,6 +1188,7 @@ impl<E: fmt::Debug + ErrorMeta> fmt::Display for DisplayWithMeta<'_, E> {
                     Context::Text(msg) => writeln!(f, "       ╰─ {}", msg)?,
                     Context::Debug(t) => writeln!(f, "       ╰─ {:?}", &**t)?,
                     Context::Display(t) => writeln!(f, "       ╰─ {}", &**t)?,
+                    Context::Crate(_) => {} // TODO: update github_base for subsequent locations
                 }
             }
         }
@@ -1077,11 +1247,23 @@ impl<E: fmt::Debug + fmt::Display> core::error::Error for Traced<E> {}
 pub trait Traceable: Sized {
     /// Wrap this value in a `Traced` and add the caller's location.
     /// If allocation fails, the error is still wrapped but trace may be empty.
+    ///
+    /// For crate-aware tracing with repository links, use `at!(err)` or
+    /// `err.at_crate(crate_info!())` instead.
     #[track_caller]
-    fn traced(self) -> Traced<Self>;
+    fn start_at(self) -> Traced<Self>;
 
     /// Wrap this value in a `Traced` and add the caller's location with a message.
     /// If allocation fails, the error is still wrapped but trace may be empty.
+    #[track_caller]
+    fn start_at_message(self, msg: impl Into<Cow<'static, str>>) -> Traced<Self>;
+
+    // Legacy alias
+    #[doc(hidden)]
+    #[track_caller]
+    fn traced(self) -> Traced<Self>;
+
+    #[doc(hidden)]
     #[track_caller]
     fn traced_msg(self, msg: &str) -> Traced<Self>;
 }
@@ -1089,14 +1271,26 @@ pub trait Traceable: Sized {
 impl<E> Traceable for E {
     #[track_caller]
     #[inline]
-    fn traced(self) -> Traced<Self> {
+    fn start_at(self) -> Traced<Self> {
         Traced::new(self).at()
     }
 
     #[track_caller]
     #[inline]
+    fn start_at_message(self, msg: impl Into<Cow<'static, str>>) -> Traced<Self> {
+        Traced::new(self).at_message(msg)
+    }
+
+    #[track_caller]
+    #[inline]
+    fn traced(self) -> Traced<Self> {
+        self.start_at()
+    }
+
+    #[track_caller]
+    #[inline]
     fn traced_msg(self, msg: &str) -> Traced<Self> {
-        Traced::new(self).msg(msg.to_string())
+        self.start_at_message(msg.to_string())
     }
 }
 
@@ -1115,7 +1309,7 @@ impl<E> Traceable for E {
 /// enum MyError { Oops }
 ///
 /// fn inner() -> Result<(), Traced<MyError>> {
-///     Err(MyError::Oops.traced())
+///     Err(MyError::Oops.start_at())
 /// }
 ///
 /// fn outer() -> Result<(), Traced<MyError>> {
@@ -1128,30 +1322,48 @@ pub trait ResultExt<T, E> {
     #[track_caller]
     fn at(self) -> Result<T, Traced<E>>;
 
-    /// Add location and message context. Use `with_msg` for lazy evaluation.
+    /// Add location and message context.
+    #[track_caller]
+    fn at_message(self, msg: impl Into<Cow<'static, str>>) -> Result<T, Traced<E>>;
+
+    /// Add location and lazily-computed typed context (Display formatted).
+    #[track_caller]
+    fn at_display<C: fmt::Display + Send + Sync + 'static>(
+        self,
+        f: impl FnOnce() -> C,
+    ) -> Result<T, Traced<E>>;
+
+    /// Add location and lazily-computed typed context (Debug formatted).
+    #[track_caller]
+    fn at_debug<C: fmt::Debug + Send + Sync + 'static>(
+        self,
+        f: impl FnOnce() -> C,
+    ) -> Result<T, Traced<E>>;
+
+    /// Add a crate boundary marker. Use with `crate_info!()` for cross-crate tracing.
+    #[track_caller]
+    fn at_crate(self, info: &'static CrateInfo) -> Result<T, Traced<E>>;
+
+    // Legacy aliases
+    #[doc(hidden)]
     #[track_caller]
     fn msg(self, msg: impl Into<Cow<'static, str>>) -> Result<T, Traced<E>>;
-
-    /// Add location and lazily-computed message context.
+    #[doc(hidden)]
     #[track_caller]
     fn with_msg(self, f: impl FnOnce() -> String) -> Result<T, Traced<E>>;
-
-    /// Add location and typed context (Display). Use `with_ctx` for lazy evaluation.
+    #[doc(hidden)]
     #[track_caller]
     fn ctx<C: fmt::Display + Send + Sync + 'static>(self, ctx: C) -> Result<T, Traced<E>>;
-
-    /// Add location and lazily-computed typed context (Display).
+    #[doc(hidden)]
     #[track_caller]
     fn with_ctx<C: fmt::Display + Send + Sync + 'static>(
         self,
         f: impl FnOnce() -> C,
     ) -> Result<T, Traced<E>>;
-
-    /// Add location and typed context (Debug). Use `with_dbg_ctx` for lazy evaluation.
+    #[doc(hidden)]
     #[track_caller]
     fn dbg_ctx<C: fmt::Debug + Send + Sync + 'static>(self, ctx: C) -> Result<T, Traced<E>>;
-
-    /// Add location and lazily-computed typed context (Debug).
+    #[doc(hidden)]
     #[track_caller]
     fn with_dbg_ctx<C: fmt::Debug + Send + Sync + 'static>(
         self,
@@ -1171,29 +1383,63 @@ impl<T, E> ResultExt<T, E> for Result<T, Traced<E>> {
 
     #[track_caller]
     #[inline]
-    fn msg(self, msg: impl Into<Cow<'static, str>>) -> Result<T, Traced<E>> {
+    fn at_message(self, msg: impl Into<Cow<'static, str>>) -> Result<T, Traced<E>> {
         match self {
             Ok(v) => Ok(v),
-            Err(e) => Err(e.msg(msg)),
+            Err(e) => Err(e.at_message(msg)),
         }
+    }
+
+    #[track_caller]
+    #[inline]
+    fn at_display<C: fmt::Display + Send + Sync + 'static>(
+        self,
+        f: impl FnOnce() -> C,
+    ) -> Result<T, Traced<E>> {
+        match self {
+            Ok(v) => Ok(v),
+            Err(e) => Err(e.at_display(f)),
+        }
+    }
+
+    #[track_caller]
+    #[inline]
+    fn at_debug<C: fmt::Debug + Send + Sync + 'static>(
+        self,
+        f: impl FnOnce() -> C,
+    ) -> Result<T, Traced<E>> {
+        match self {
+            Ok(v) => Ok(v),
+            Err(e) => Err(e.at_debug(f)),
+        }
+    }
+
+    #[track_caller]
+    #[inline]
+    fn at_crate(self, info: &'static CrateInfo) -> Result<T, Traced<E>> {
+        match self {
+            Ok(v) => Ok(v),
+            Err(e) => Err(e.at_crate(info)),
+        }
+    }
+
+    // Legacy aliases
+    #[track_caller]
+    #[inline]
+    fn msg(self, msg: impl Into<Cow<'static, str>>) -> Result<T, Traced<E>> {
+        self.at_message(msg)
     }
 
     #[track_caller]
     #[inline]
     fn with_msg(self, f: impl FnOnce() -> String) -> Result<T, Traced<E>> {
-        match self {
-            Ok(v) => Ok(v),
-            Err(e) => Err(e.with_msg(f)),
-        }
+        self.at_message(f())
     }
 
     #[track_caller]
     #[inline]
     fn ctx<C: fmt::Display + Send + Sync + 'static>(self, ctx: C) -> Result<T, Traced<E>> {
-        match self {
-            Ok(v) => Ok(v),
-            Err(e) => Err(e.ctx(ctx)),
-        }
+        self.at_display(|| ctx)
     }
 
     #[track_caller]
@@ -1202,19 +1448,13 @@ impl<T, E> ResultExt<T, E> for Result<T, Traced<E>> {
         self,
         f: impl FnOnce() -> C,
     ) -> Result<T, Traced<E>> {
-        match self {
-            Ok(v) => Ok(v),
-            Err(e) => Err(e.with_ctx(f)),
-        }
+        self.at_display(f)
     }
 
     #[track_caller]
     #[inline]
     fn dbg_ctx<C: fmt::Debug + Send + Sync + 'static>(self, ctx: C) -> Result<T, Traced<E>> {
-        match self {
-            Ok(v) => Ok(v),
-            Err(e) => Err(e.dbg_ctx(ctx)),
-        }
+        self.at_debug(|| ctx)
     }
 
     #[track_caller]
@@ -1223,10 +1463,7 @@ impl<T, E> ResultExt<T, E> for Result<T, Traced<E>> {
         self,
         f: impl FnOnce() -> C,
     ) -> Result<T, Traced<E>> {
-        match self {
-            Ok(v) => Ok(v),
-            Err(e) => Err(e.with_dbg_ctx(f)),
-        }
+        self.at_debug(f)
     }
 }
 
