@@ -367,30 +367,74 @@ impl<T: core::any::Any + fmt::Display + Send + Sync> DisplayAny for T {
 }
 
 // ============================================================================
-// CrateInfo - Static metadata about a crate for cross-crate tracing
+// AtCrateInfo - Static metadata about a crate for cross-crate tracing
 // ============================================================================
 
 /// Static metadata about a crate, used for generating repository links.
 ///
-/// Create using the `crate_info!()` macro which captures compile-time values.
-/// This is stored as a `&'static` reference in trace entries.
+/// Create using [`AtCrateInfo::builder()`] for a fluent const-compatible API,
+/// or use the [`crate_info_static!()`] macro for automatic capture.
+///
+/// ## Builder Pattern (Recommended)
+///
+/// ```rust
+/// use errat::AtCrateInfo;
+///
+/// static INFO: AtCrateInfo = AtCrateInfo::builder()
+///     .name("mylib")
+///     .repo(Some("https://github.com/org/repo"))
+///     .commit(Some("abc123"))
+///     .path(Some("crates/mylib/"))
+///     .build();
+/// ```
+///
+/// ## With Custom Metadata
+///
+/// ```rust
+/// use errat::AtCrateInfo;
+///
+/// static INFO: AtCrateInfo = AtCrateInfo::builder()
+///     .name("mylib")
+///     .meta(&[("team", "platform"), ("service", "auth")])
+///     .build();
+/// ```
 #[derive(Debug, Clone, Copy)]
-pub struct CrateInfo {
+pub struct AtCrateInfo {
     /// Crate name (from CARGO_PKG_NAME)
     pub name: &'static str,
-    /// Repository URL (from CARGO_PKG_REPOSITORY or #[errat(repo = "...")])
+    /// Repository URL (from CARGO_PKG_REPOSITORY)
     pub repo: Option<&'static str>,
     /// Git commit hash or tag for generating permalinks
     pub commit: Option<&'static str>,
     /// Path from repository root to crate (e.g., "crates/mylib/")
-    /// Set via CRATE_PATH env var for workspace crates not at repo root.
     pub crate_path: Option<&'static str>,
     /// Module path where this info was captured
     pub module: &'static str,
+    /// Custom key-value metadata for extensibility
+    pub meta: &'static [(&'static str, &'static str)],
 }
 
-impl CrateInfo {
-    /// Create a new CrateInfo with all fields specified.
+impl AtCrateInfo {
+    /// Create a builder for constructing AtCrateInfo with a fluent API.
+    ///
+    /// All builder methods are `const fn`, so you can use this in static contexts.
+    ///
+    /// ## Example
+    ///
+    /// ```rust
+    /// use errat::AtCrateInfo;
+    ///
+    /// static INFO: AtCrateInfo = AtCrateInfo::builder()
+    ///     .name(env!("CARGO_PKG_NAME"))
+    ///     .repo(option_env!("CARGO_PKG_REPOSITORY"))
+    ///     .build();
+    /// ```
+    pub const fn builder() -> AtCrateInfoBuilder {
+        AtCrateInfoBuilder::new()
+    }
+
+    /// Create a new AtCrateInfo with all fields specified (legacy constructor).
+    #[doc(hidden)]
     pub const fn new(
         name: &'static str,
         repo: Option<&'static str>,
@@ -403,10 +447,12 @@ impl CrateInfo {
             commit,
             crate_path: None,
             module,
+            meta: &[],
         }
     }
 
-    /// Create a new CrateInfo with crate_path for workspace crates.
+    /// Create a new AtCrateInfo with crate_path (legacy constructor).
+    #[doc(hidden)]
     pub const fn with_path(
         name: &'static str,
         repo: Option<&'static str>,
@@ -420,7 +466,162 @@ impl CrateInfo {
             commit,
             crate_path,
             module,
+            meta: &[],
         }
+    }
+
+    /// Look up a custom metadata value by key.
+    ///
+    /// ## Example
+    ///
+    /// ```rust
+    /// use errat::AtCrateInfo;
+    ///
+    /// static INFO: AtCrateInfo = AtCrateInfo::builder()
+    ///     .name("mylib")
+    ///     .meta(&[("team", "platform")])
+    ///     .build();
+    ///
+    /// assert_eq!(INFO.get_meta("team"), Some("platform"));
+    /// assert_eq!(INFO.get_meta("unknown"), None);
+    /// ```
+    pub const fn get_meta(&self, key: &str) -> Option<&'static str> {
+        let mut i = 0;
+        while i < self.meta.len() {
+            let (k, v) = self.meta[i];
+            if const_str_eq(k, key) {
+                return Some(v);
+            }
+            i += 1;
+        }
+        None
+    }
+}
+
+/// Const-compatible string equality check.
+const fn const_str_eq(a: &str, b: &str) -> bool {
+    let a = a.as_bytes();
+    let b = b.as_bytes();
+    if a.len() != b.len() {
+        return false;
+    }
+    let mut i = 0;
+    while i < a.len() {
+        if a[i] != b[i] {
+            return false;
+        }
+        i += 1;
+    }
+    true
+}
+
+/// Builder for [`AtCrateInfo`] with a fluent, const-compatible API.
+///
+/// All methods are `const fn`, enabling use in static/const contexts.
+///
+/// ## Example
+///
+/// ```rust
+/// use errat::AtCrateInfo;
+///
+/// static INFO: AtCrateInfo = AtCrateInfo::builder()
+///     .name("mylib")
+///     .repo(Some("https://github.com/org/repo"))
+///     .commit(option_env!("GIT_COMMIT"))
+///     .path(Some("crates/mylib/"))
+///     .meta(&[("team", "platform")])
+///     .build();
+/// ```
+#[derive(Debug, Clone, Copy)]
+pub struct AtCrateInfoBuilder {
+    name: &'static str,
+    repo: Option<&'static str>,
+    commit: Option<&'static str>,
+    crate_path: Option<&'static str>,
+    module: &'static str,
+    meta: &'static [(&'static str, &'static str)],
+}
+
+impl AtCrateInfoBuilder {
+    /// Create a new builder with default values.
+    pub const fn new() -> Self {
+        Self {
+            name: "",
+            repo: None,
+            commit: None,
+            crate_path: None,
+            module: "",
+            meta: &[],
+        }
+    }
+
+    /// Set the crate name.
+    pub const fn name(mut self, name: &'static str) -> Self {
+        self.name = name;
+        self
+    }
+
+    /// Set the repository URL.
+    pub const fn repo(mut self, repo: Option<&'static str>) -> Self {
+        self.repo = repo;
+        self
+    }
+
+    /// Set the git commit hash or version tag.
+    pub const fn commit(mut self, commit: Option<&'static str>) -> Self {
+        self.commit = commit;
+        self
+    }
+
+    /// Set the crate path within the repository (for workspace crates).
+    pub const fn path(mut self, path: Option<&'static str>) -> Self {
+        self.crate_path = path;
+        self
+    }
+
+    /// Set the module path.
+    pub const fn module(mut self, module: &'static str) -> Self {
+        self.module = module;
+        self
+    }
+
+    /// Set custom key-value metadata.
+    ///
+    /// ## Example
+    ///
+    /// ```rust
+    /// use errat::AtCrateInfo;
+    ///
+    /// static INFO: AtCrateInfo = AtCrateInfo::builder()
+    ///     .name("mylib")
+    ///     .meta(&[
+    ///         ("team", "platform"),
+    ///         ("service", "auth"),
+    ///         ("oncall", "platform-oncall@example.com"),
+    ///     ])
+    ///     .build();
+    /// ```
+    pub const fn meta(mut self, meta: &'static [(&'static str, &'static str)]) -> Self {
+        self.meta = meta;
+        self
+    }
+
+    /// Build the final AtCrateInfo.
+    pub const fn build(self) -> AtCrateInfo {
+        AtCrateInfo {
+            name: self.name,
+            repo: self.repo,
+            commit: self.commit,
+            crate_path: self.crate_path,
+            module: self.module,
+            meta: self.meta,
+        }
+    }
+}
+
+impl Default for AtCrateInfoBuilder {
+    fn default() -> Self {
+        Self::new()
     }
 }
 
@@ -432,7 +633,7 @@ impl CrateInfo {
 // because the macro isn't defined yet at this point in the file.
 
 #[doc(hidden)]
-pub(crate) static __ERRAT_CRATE_INFO: CrateInfo = CrateInfo::with_path(
+pub(crate) static __ERRAT_CRATE_INFO: AtCrateInfo = AtCrateInfo::with_path(
     "errat",
     option_env!("CARGO_PKG_REPOSITORY"),
     match option_env!("GIT_COMMIT") {
@@ -451,7 +652,7 @@ pub(crate) static __ERRAT_CRATE_INFO: CrateInfo = CrateInfo::with_path(
 
 /// Captures crate metadata at the call site.
 ///
-/// Returns a `&'static CrateInfo` reference that can be used with
+/// Returns a `&'static AtCrateInfo` reference that can be used with
 /// `.at_crate()` to mark crate boundaries in traces.
 ///
 /// ## How Git References Work
@@ -515,32 +716,41 @@ pub(crate) static __ERRAT_CRATE_INFO: CrateInfo = CrateInfo::with_path(
 /// ## Example
 ///
 /// ```rust
-/// use errat::{crate_info, CrateInfo};
+/// use errat::{crate_info, AtCrateInfo};
 ///
-/// let info: &'static CrateInfo = crate_info!();
+/// let info: &'static AtCrateInfo = crate_info!();
 /// assert_eq!(info.name, "errat");
 /// ```
 #[macro_export]
 macro_rules! crate_info {
     () => {{
-        static INFO: $crate::CrateInfo = $crate::CrateInfo::with_path(
-            env!("CARGO_PKG_NAME"),
-            option_env!("CARGO_PKG_REPOSITORY"),
-            match option_env!("GIT_COMMIT") {
-                Some(c) => Some(c),
-                None => match option_env!("GITHUB_SHA") {
-                    Some(c) => Some(c),
-                    None => match option_env!("CI_COMMIT_SHA") {
-                        Some(c) => Some(c),
-                        None => Some(concat!("v", env!("CARGO_PKG_VERSION"))),
-                    },
-                },
-            },
-            option_env!("CRATE_PATH"),
-            module_path!(),
-        );
+        static INFO: $crate::AtCrateInfo = $crate::AtCrateInfo::builder()
+            .name(env!("CARGO_PKG_NAME"))
+            .repo(option_env!("CARGO_PKG_REPOSITORY"))
+            .commit($crate::__errat_detect_commit!())
+            .path(option_env!("CRATE_PATH"))
+            .module(module_path!())
+            .build();
         &INFO
     }};
+}
+
+/// Internal macro for commit detection chain.
+#[doc(hidden)]
+#[macro_export]
+macro_rules! __errat_detect_commit {
+    () => {
+        match option_env!("GIT_COMMIT") {
+            Some(c) => Some(c),
+            None => match option_env!("GITHUB_SHA") {
+                Some(c) => Some(c),
+                None => match option_env!("CI_COMMIT_SHA") {
+                    Some(c) => Some(c),
+                    None => Some(concat!("v", env!("CARGO_PKG_VERSION"))),
+                },
+            },
+        }
+    };
 }
 
 /// Define crate-level error tracking info. Call once in your crate root (lib.rs or main.rs).
@@ -555,22 +765,19 @@ macro_rules! crate_info {
 /// errat::crate_info_static!();
 /// ```
 ///
-/// ## With Workspace Path
-///
-/// For crates in a subdirectory of the repository (e.g., `crates/mylib/`):
-///
-/// ```rust,ignore
-/// errat::crate_info_static!(path = "crates/mylib/");
-/// ```
-///
-/// ## Multiple Options
+/// ## With Options
 ///
 /// ```rust,ignore
 /// errat::crate_info_static!(
 ///     path = "crates/mylib/",
-///     // Future: more options can be added here
+///     meta = &[("team", "platform"), ("service", "auth")],
 /// );
 /// ```
+///
+/// ## Available Options
+///
+/// - `path = "..."` - Crate path within repository (for workspace crates)
+/// - `meta = &[...]` - Custom key-value metadata
 ///
 /// ## How It Works
 ///
@@ -578,49 +785,59 @@ macro_rules! crate_info {
 /// - `CARGO_PKG_NAME` - crate name
 /// - `CARGO_PKG_REPOSITORY` - repository URL from Cargo.toml
 /// - `GIT_COMMIT` / `GITHUB_SHA` / `CI_COMMIT_SHA` - commit hash (or `v{VERSION}` fallback)
-/// - `path` option - subdirectory path for workspace crates
 #[macro_export]
 macro_rules! crate_info_static {
+    // Base case: no options
     () => {
         #[doc(hidden)]
-        pub(crate) static __ERRAT_CRATE_INFO: $crate::CrateInfo = $crate::CrateInfo::with_path(
-            env!("CARGO_PKG_NAME"),
-            option_env!("CARGO_PKG_REPOSITORY"),
-            match option_env!("GIT_COMMIT") {
-                Some(c) => Some(c),
-                None => match option_env!("GITHUB_SHA") {
-                    Some(c) => Some(c),
-                    None => match option_env!("CI_COMMIT_SHA") {
-                        Some(c) => Some(c),
-                        None => Some(concat!("v", env!("CARGO_PKG_VERSION"))),
-                    },
-                },
-            },
-            None,
-            module_path!(),
-        );
+        pub(crate) static __ERRAT_CRATE_INFO: $crate::AtCrateInfo = $crate::AtCrateInfo::builder()
+            .name(env!("CARGO_PKG_NAME"))
+            .repo(option_env!("CARGO_PKG_REPOSITORY"))
+            .commit($crate::__errat_detect_commit!())
+            .module(module_path!())
+            .build();
     };
-    (path = $path:literal) => {
+
+    // With path only
+    (path = $path:literal $(,)?) => {
         #[doc(hidden)]
-        pub(crate) static __ERRAT_CRATE_INFO: $crate::CrateInfo = $crate::CrateInfo::with_path(
-            env!("CARGO_PKG_NAME"),
-            option_env!("CARGO_PKG_REPOSITORY"),
-            match option_env!("GIT_COMMIT") {
-                Some(c) => Some(c),
-                None => match option_env!("GITHUB_SHA") {
-                    Some(c) => Some(c),
-                    None => match option_env!("CI_COMMIT_SHA") {
-                        Some(c) => Some(c),
-                        None => Some(concat!("v", env!("CARGO_PKG_VERSION"))),
-                    },
-                },
-            },
-            Some($path),
-            module_path!(),
-        );
+        pub(crate) static __ERRAT_CRATE_INFO: $crate::AtCrateInfo = $crate::AtCrateInfo::builder()
+            .name(env!("CARGO_PKG_NAME"))
+            .repo(option_env!("CARGO_PKG_REPOSITORY"))
+            .commit($crate::__errat_detect_commit!())
+            .path(Some($path))
+            .module(module_path!())
+            .build();
     };
-    (path = $path:literal, $($rest:tt)*) => {
-        $crate::crate_info_static!(path = $path);
+
+    // With meta only
+    (meta = $meta:expr $(,)?) => {
+        #[doc(hidden)]
+        pub(crate) static __ERRAT_CRATE_INFO: $crate::AtCrateInfo = $crate::AtCrateInfo::builder()
+            .name(env!("CARGO_PKG_NAME"))
+            .repo(option_env!("CARGO_PKG_REPOSITORY"))
+            .commit($crate::__errat_detect_commit!())
+            .module(module_path!())
+            .meta($meta)
+            .build();
+    };
+
+    // With path and meta
+    (path = $path:literal, meta = $meta:expr $(,)?) => {
+        #[doc(hidden)]
+        pub(crate) static __ERRAT_CRATE_INFO: $crate::AtCrateInfo = $crate::AtCrateInfo::builder()
+            .name(env!("CARGO_PKG_NAME"))
+            .repo(option_env!("CARGO_PKG_REPOSITORY"))
+            .commit($crate::__errat_detect_commit!())
+            .path(Some($path))
+            .module(module_path!())
+            .meta($meta)
+            .build();
+    };
+
+    // With meta and path (reversed order)
+    (meta = $meta:expr, path = $path:literal $(,)?) => {
+        $crate::crate_info_static!(path = $path, meta = $meta);
     };
 }
 
@@ -767,7 +984,7 @@ pub enum Context {
     Display(Box<dyn DisplayAny>),
     /// Crate boundary marker - changes the assumed crate for subsequent locations.
     /// Used for generating correct repository links in cross-crate traces.
-    Crate(&'static CrateInfo),
+    Crate(&'static AtCrateInfo),
     /// Marker indicating that some frames were skipped.
     /// Used when starting tracing late or skipping intermediate frames.
     /// Displayed as `[...]` in trace output.
@@ -784,7 +1001,7 @@ impl Context {
     }
 
     /// Get as crate info, if this is a Crate variant.
-    pub fn as_crate_info(&self) -> Option<&'static CrateInfo> {
+    pub fn as_crate_info(&self) -> Option<&'static AtCrateInfo> {
         match self {
             Context::Crate(info) => Some(info),
             _ => None,
@@ -1222,7 +1439,7 @@ impl<E> At<E> {
     /// ```
     #[track_caller]
     #[inline]
-    pub fn at_crate(mut self, info: &'static CrateInfo) -> Self {
+    pub fn at_crate(mut self, info: &'static AtCrateInfo) -> Self {
         let loc = Location::caller();
         let context = Context::Crate(info);
 
@@ -1373,11 +1590,11 @@ impl<E: fmt::Debug> fmt::Debug for At<E> {
 }
 
 // ============================================================================
-// Enhanced display with CrateInfo from trace
+// Enhanced display with AtCrateInfo from trace
 // ============================================================================
 
 impl<E: fmt::Debug> At<E> {
-    /// Format the error with GitHub links using CrateInfo from the trace.
+    /// Format the error with GitHub links using AtCrateInfo from the trace.
     ///
     /// When you use `at!()` or `.at_crate(crate_info!())`, the crate metadata
     /// is stored in the trace. This method uses that metadata to generate
@@ -1403,7 +1620,7 @@ impl<E: fmt::Debug> At<E> {
     }
 }
 
-/// Wrapper for displaying At<E> with CrateInfo enhancements.
+/// Wrapper for displaying At<E> with AtCrateInfo enhancements.
 struct DisplayWithMeta<'a, E> {
     traced: &'a At<E>,
 }
@@ -1417,8 +1634,8 @@ impl<E: fmt::Debug> fmt::Display for DisplayWithMeta<'_, E> {
             return Ok(());
         };
 
-        // Find initial CrateInfo from first Context::Crate in trace
-        let mut current_crate: Option<&'static CrateInfo> = None;
+        // Find initial AtCrateInfo from first Context::Crate in trace
+        let mut current_crate: Option<&'static AtCrateInfo> = None;
         for ctx in trace.contexts() {
             if let Context::Crate(info) = ctx {
                 current_crate = Some(info);
@@ -1606,7 +1823,7 @@ pub trait ResultAtExt<T, E> {
 
     /// Add a crate boundary marker. Use with `crate_info!()` for cross-crate tracing.
     #[track_caller]
-    fn at_crate(self, info: &'static CrateInfo) -> Result<T, At<E>>;
+    fn at_crate(self, info: &'static AtCrateInfo) -> Result<T, At<E>>;
 
     /// Add a skip marker to indicate skipped frames.
     #[track_caller]
@@ -1667,7 +1884,7 @@ impl<T, E> ResultAtExt<T, E> for Result<T, At<E>> {
 
     #[track_caller]
     #[inline]
-    fn at_crate(self, info: &'static CrateInfo) -> Result<T, At<E>> {
+    fn at_crate(self, info: &'static AtCrateInfo) -> Result<T, At<E>> {
         match self {
             Ok(v) => Ok(v),
             Err(e) => Err(e.at_crate(info)),

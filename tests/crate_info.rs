@@ -1,9 +1,9 @@
-//! Integration tests for CrateInfo, cross-crate boundaries, and sizeof.
+//! Integration tests for AtCrateInfo, cross-crate boundaries, and sizeof.
 
 #![allow(dead_code)]
 
 use core::mem::size_of;
-use errat::{At, Context, CrateInfo, at, at_crate, crate_info};
+use errat::{At, AtCrateInfo, Context, at, at_crate, crate_info};
 
 // Define the crate-level static for at!() and at_crate!() to reference
 errat::crate_info_static!();
@@ -12,12 +12,12 @@ errat::crate_info_static!();
 struct TestError;
 
 // ============================================================================
-// CrateInfo Static Allocation
+// AtCrateInfo Static Allocation
 // ============================================================================
 
 #[test]
 fn crate_info_is_static() {
-    let info: &'static CrateInfo = crate_info!();
+    let info: &'static AtCrateInfo = crate_info!();
 
     // Should be a static reference, not heap allocated
     assert!(!info.name.is_empty());
@@ -81,7 +81,7 @@ fn multiple_crate_info_calls_same_static() {
 }
 
 // ============================================================================
-// CrateInfo in Traces
+// AtCrateInfo in Traces
 // ============================================================================
 
 #[test]
@@ -125,7 +125,7 @@ fn crate_info_accessible_from_context() {
             return;
         }
     }
-    panic!("Should find CrateInfo in contexts");
+    panic!("Should find AtCrateInfo in contexts");
 }
 
 #[test]
@@ -229,15 +229,16 @@ fn sizeof_at_is_error_plus_pointer() {
 }
 
 #[test]
-fn sizeof_crate_info_is_five_pointers() {
-    // CrateInfo has 5 fields: name, repo, commit, crate_path, module
-    // All are &'static str or Option<&'static str>
-    let info_size = size_of::<CrateInfo>();
-    let expected = 5 * size_of::<Option<&'static str>>();
+fn sizeof_crate_info_is_six_fields() {
+    // AtCrateInfo has 6 fields: name, repo, commit, crate_path, module, meta
+    // 5 are &'static str or Option<&'static str> (16 bytes each)
+    // 1 is &'static [(&'static str, &'static str)] (16 bytes: ptr + len)
+    let info_size = size_of::<AtCrateInfo>();
+    let expected = 6 * size_of::<Option<&'static str>>();
 
     assert_eq!(
         info_size, expected,
-        "CrateInfo should be 5 pointers ({} bytes). Got: {}",
+        "AtCrateInfo should be 6 fields ({} bytes). Got: {}",
         expected, info_size
     );
 }
@@ -312,8 +313,8 @@ fn sizeof_common_error_types() {
 
 #[test]
 fn crate_info_new_const() {
-    // CrateInfo::new is const
-    const INFO: CrateInfo = CrateInfo::new(
+    // AtCrateInfo::new is const
+    const INFO: AtCrateInfo = AtCrateInfo::new(
         "test-crate",
         Some("https://github.com/user/repo"),
         Some("abc123"),
@@ -328,8 +329,8 @@ fn crate_info_new_const() {
 
 #[test]
 fn crate_info_static_in_const_context() {
-    // Can use CrateInfo in const/static contexts
-    static INFO: CrateInfo = CrateInfo::new(
+    // Can use AtCrateInfo in const/static contexts
+    static INFO: AtCrateInfo = AtCrateInfo::new(
         "my-crate",
         Some("https://github.com/me/my-crate"),
         None,
@@ -341,8 +342,8 @@ fn crate_info_static_in_const_context() {
 
 #[test]
 fn github_link_format_in_display() {
-    // Create a CrateInfo with repo and commit
-    static INFO: CrateInfo = CrateInfo::new(
+    // Create a AtCrateInfo with repo and commit
+    static INFO: AtCrateInfo = AtCrateInfo::new(
         "test",
         Some("https://github.com/user/repo"),
         Some("deadbeef"),
@@ -362,7 +363,7 @@ fn github_link_format_in_display() {
 
 #[test]
 fn github_link_includes_line_number() {
-    static INFO: CrateInfo = CrateInfo::new(
+    static INFO: AtCrateInfo = AtCrateInfo::new(
         "test",
         Some("https://github.com/user/repo"),
         Some("abc123"),
@@ -382,7 +383,7 @@ fn github_link_includes_line_number() {
 
 #[test]
 fn repo_without_commit_no_link() {
-    static INFO: CrateInfo = CrateInfo::new(
+    static INFO: AtCrateInfo = AtCrateInfo::new(
         "test",
         Some("https://github.com/user/repo"),
         None, // No commit
@@ -402,7 +403,7 @@ fn repo_without_commit_no_link() {
 
 #[test]
 fn trailing_slash_stripped_from_repo() {
-    static INFO: CrateInfo = CrateInfo::new(
+    static INFO: AtCrateInfo = AtCrateInfo::new(
         "test",
         Some("https://github.com/user/repo/"), // Trailing slash
         Some("abc123"),
@@ -426,14 +427,14 @@ fn trailing_slash_stripped_from_repo() {
 
 #[test]
 fn crate_boundary_switches_github_links() {
-    static CRATE_A: CrateInfo = CrateInfo::new(
+    static CRATE_A: AtCrateInfo = AtCrateInfo::new(
         "crate-a",
         Some("https://github.com/org/crate-a"),
         Some("aaa111"),
         "crate_a",
     );
 
-    static CRATE_B: CrateInfo = CrateInfo::new(
+    static CRATE_B: AtCrateInfo = AtCrateInfo::new(
         "crate-b",
         Some("https://github.com/org/crate-b"),
         Some("bbb222"),
@@ -465,7 +466,7 @@ fn crate_boundary_switches_github_links() {
 
 #[test]
 fn crate_boundary_affects_subsequent_locations() {
-    static CRATE_X: CrateInfo = CrateInfo::new(
+    static CRATE_X: AtCrateInfo = AtCrateInfo::new(
         "crate-x",
         Some("https://github.com/org/crate-x"),
         Some("xxx"),
@@ -492,9 +493,9 @@ fn crate_boundary_affects_subsequent_locations() {
 
 #[test]
 fn multiple_boundary_switches() {
-    static C1: CrateInfo = CrateInfo::new("c1", Some("https://gh.com/c1"), Some("111"), "c1");
-    static C2: CrateInfo = CrateInfo::new("c2", Some("https://gh.com/c2"), Some("222"), "c2");
-    static C3: CrateInfo = CrateInfo::new("c3", Some("https://gh.com/c3"), Some("333"), "c3");
+    static C1: AtCrateInfo = AtCrateInfo::new("c1", Some("https://gh.com/c1"), Some("111"), "c1");
+    static C2: AtCrateInfo = AtCrateInfo::new("c2", Some("https://gh.com/c2"), Some("222"), "c2");
+    static C3: AtCrateInfo = AtCrateInfo::new("c3", Some("https://gh.com/c3"), Some("333"), "c3");
 
     let err = errat::At::new(TestError)
         .at_crate(&C1)
@@ -565,7 +566,7 @@ fn prefer_result_at_over_nested_at() {
 
 #[test]
 fn github_link_has_full_url() {
-    static INFO: CrateInfo = CrateInfo::new(
+    static INFO: AtCrateInfo = AtCrateInfo::new(
         "mylib",
         Some("https://github.com/myorg/mylib"),
         Some("abc123def"),
@@ -585,7 +586,7 @@ fn github_link_has_full_url() {
 
 #[test]
 fn github_link_has_file_path() {
-    static INFO: CrateInfo = CrateInfo::new(
+    static INFO: AtCrateInfo = AtCrateInfo::new(
         "test",
         Some("https://github.com/org/repo"),
         Some("deadbeef"),
@@ -605,7 +606,7 @@ fn github_link_has_file_path() {
 
 #[test]
 fn github_link_line_number_is_numeric() {
-    static INFO: CrateInfo = CrateInfo::new(
+    static INFO: AtCrateInfo = AtCrateInfo::new(
         "test",
         Some("https://github.com/org/repo"),
         Some("abc"),
@@ -642,7 +643,7 @@ fn github_link_line_number_is_numeric() {
 fn windows_paths_converted_to_forward_slashes() {
     // The implementation converts backslashes to forward slashes
     // We can't easily test this directly, but we verify no backslashes in output
-    static INFO: CrateInfo = CrateInfo::new(
+    static INFO: AtCrateInfo = AtCrateInfo::new(
         "test",
         Some("https://github.com/org/repo"),
         Some("abc"),
@@ -765,7 +766,7 @@ mod nested_module {
 
 #[test]
 fn crate_path_included_in_github_url() {
-    static INFO: CrateInfo = CrateInfo::with_path(
+    static INFO: AtCrateInfo = AtCrateInfo::with_path(
         "workspace-crate",
         Some("https://github.com/org/monorepo"),
         Some("abc123"),
@@ -786,7 +787,7 @@ fn crate_path_included_in_github_url() {
 
 #[test]
 fn crate_path_none_works() {
-    static INFO: CrateInfo = CrateInfo::with_path(
+    static INFO: AtCrateInfo = AtCrateInfo::with_path(
         "root-crate",
         Some("https://github.com/org/repo"),
         Some("def456"),
@@ -807,7 +808,7 @@ fn crate_path_none_works() {
 
 #[test]
 fn crate_path_with_trailing_slash() {
-    static INFO: CrateInfo = CrateInfo::with_path(
+    static INFO: AtCrateInfo = AtCrateInfo::with_path(
         "test",
         Some("https://github.com/org/repo"),
         Some("abc"),
@@ -833,7 +834,7 @@ fn crate_path_with_trailing_slash() {
 
 #[test]
 fn crate_path_without_trailing_slash() {
-    static INFO: CrateInfo = CrateInfo::with_path(
+    static INFO: AtCrateInfo = AtCrateInfo::with_path(
         "test",
         Some("https://github.com/org/repo"),
         Some("abc"),
@@ -878,7 +879,7 @@ fn crate_info_static_has_correct_name() {
             return;
         }
     }
-    panic!("Should find CrateInfo in at!() error");
+    panic!("Should find AtCrateInfo in at!() error");
 }
 
 // Test that crate_info_static!(path = "...") variant works
@@ -892,8 +893,8 @@ mod with_path {
     fn path_option_sets_crate_path() {
         // We can't easily test crate_info_static!(path = ...) here because
         // we already called crate_info_static!() at the top of this file.
-        // Instead, test that CrateInfo::with_path works correctly.
-        static INFO: CrateInfo = CrateInfo::with_path(
+        // Instead, test that AtCrateInfo::with_path works correctly.
+        static INFO: AtCrateInfo = AtCrateInfo::with_path(
             "test",
             Some("https://github.com/org/repo"),
             Some("abc123"),

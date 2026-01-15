@@ -1,4 +1,4 @@
-//! Demonstrates enhanced trace display with CrateInfo and GitHub links.
+//! Demonstrates enhanced trace display with AtCrateInfo and GitHub links.
 
 use errat::{At, ResultAtExt, at, crate_info};
 
@@ -48,15 +48,15 @@ fn main() {
     println!("=== Standard Debug output ===\n");
     println!("{:?}", err);
 
-    println!("\n=== Enhanced output with CrateInfo ===\n");
+    println!("\n=== Enhanced output with AtCrateInfo ===\n");
     println!("{}", err.display_with_meta());
 
-    println!("=== How CrateInfo works ===");
+    println!("=== How AtCrateInfo works ===");
     println!(
         "
 When you use at!() to create errors, it automatically:
 1. Captures the crate name, repo URL, and git commit
-2. Stores this as CrateInfo in the trace
+2. Stores this as AtCrateInfo in the trace
 3. display_with_meta() uses this to generate GitHub links
 
 The crate_info!() macro captures:

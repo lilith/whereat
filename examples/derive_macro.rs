@@ -91,7 +91,7 @@ fn main() {
     let err = process_request(0, "test").unwrap_err();
     println!("{}", err.display_with_meta());
 
-    println!("\n=== Example 6: CrateInfo macro ===\n");
+    println!("\n=== Example 6: AtCrateInfo macro ===\n");
     let info = crate_info!();
     println!("Crate: {}", info.name);
     println!("Module: {}", info.module);

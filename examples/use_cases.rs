@@ -133,7 +133,7 @@ mod use_case_3 {
 
         let err = my_function().unwrap_err();
 
-        // display_with_meta() shows GitHub links when CrateInfo has repo+commit
+        // display_with_meta() shows GitHub links when AtCrateInfo has repo+commit
         println!("{}", err.display_with_meta());
         println!();
     }
