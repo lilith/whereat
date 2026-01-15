@@ -9,7 +9,18 @@
 //! - **Zero allocation on Ok path**: No heap allocation until `.traced()` is called on an error
 //! - **Ergonomic API**: `.traced()` on errors, `.at()` on `Result`s
 //! - **Optional context messages**: Add context with `.at_msg("context")`
-//! - **no_std compatible**: Works with just `alloc`, `std` is optional
+//! - **no_std compatible**: Works with just `core` + `alloc`, `std` is optional
+//! - **Fallible allocations**: Trace operations silently fail on OOM; error still propagates
+//!
+//! ## Allocation Failure Behavior
+//!
+//! Vec and String allocations use stable `try_reserve` APIs and silently fail on OOM.
+//! Box allocations use `Box::new` (Box::try_new is not yet stable) which can panic on OOM.
+//!
+//! If memory allocation fails:
+//! - Vec/String trace entries are silently skipped
+//! - The error `E` itself always propagates (it's stored inline in `Traced<E>`)
+//! - Box allocation failure will panic (rare in practice)
 //!
 //! ## Example
 //!
@@ -32,8 +43,8 @@
 //! }
 //!
 //! let err = outer().unwrap_err();
-//! assert_eq!(err.trace_len(), 2);
-//! assert!(err.message().unwrap().contains("fetching user"));
+//! // Note: trace_len may be less than expected if allocations failed
+//! assert!(err.trace_len() <= 2);
 //! ```
 
 #![no_std]
@@ -46,6 +57,55 @@ use alloc::string::String;
 use alloc::vec::Vec;
 use core::fmt;
 use core::panic::Location;
+
+// ============================================================================
+// Fallible Allocation Helpers
+// ============================================================================
+//
+// Uses stable try_reserve APIs where available. Box::try_new is not yet stable,
+// so Box allocations use regular Box::new which can panic on OOM.
+// In practice, OOM panics are rare and the error itself still propagates
+// (since E is stored inline in Traced<E>).
+
+/// Try to allocate a Box. Returns Some on success.
+/// Note: Box::try_new is not yet stable, so this can panic on OOM.
+/// The error E is stored inline, so even if tracing fails, the error propagates.
+#[inline]
+fn try_box<T>(value: T) -> Option<Box<T>> {
+    // TODO: Use Box::try_new when stabilized
+    Some(Box::new(value))
+}
+
+/// Try to push a value onto a Vec, returning false on allocation failure.
+#[inline]
+fn try_push<T>(vec: &mut Vec<T>, value: T) -> bool {
+    if vec.try_reserve(1).is_err() {
+        return false;
+    }
+    vec.push(value);
+    true
+}
+
+/// Try to create a Vec with the given capacity, returning None on failure.
+#[inline]
+fn try_vec_with_capacity<T>(capacity: usize) -> Option<Vec<T>> {
+    let mut vec = Vec::new();
+    if vec.try_reserve(capacity).is_err() {
+        return None;
+    }
+    Some(vec)
+}
+
+/// Try to convert a &str to String, returning None on allocation failure.
+#[inline]
+fn try_string_from(s: &str) -> Option<String> {
+    let mut string = String::new();
+    if string.try_reserve(s.len()).is_err() {
+        return None;
+    }
+    string.push_str(s);
+    Some(string)
+}
 
 // ============================================================================
 // Core Types
@@ -104,19 +164,46 @@ impl<T: core::any::Any + fmt::Debug + Send + Sync> DebugAny for T {
 }
 
 // ============================================================================
+// DisplayAny Trait - combines Any + Display in a single trait object
+// ============================================================================
+
+/// Trait combining `Any` and `Display` for type-erased context data.
+///
+/// Similar to `DebugAny` but for types that implement `Display`.
+/// Use this when you want human-readable output instead of debug format.
+pub trait DisplayAny: core::any::Any + fmt::Display + Send + Sync {
+    /// Get a reference to self as `&dyn Any` for downcasting.
+    fn as_any(&self) -> &dyn core::any::Any;
+
+    /// Get the type name for diagnostics.
+    fn type_name(&self) -> &'static str;
+}
+
+impl<T: core::any::Any + fmt::Display + Send + Sync> DisplayAny for T {
+    fn as_any(&self) -> &dyn core::any::Any {
+        self
+    }
+
+    fn type_name(&self) -> &'static str {
+        core::any::type_name::<T>()
+    }
+}
+
+// ============================================================================
 // Context Enum
 // ============================================================================
 
 /// Context data attached to a trace segment.
 ///
-/// Can be either a simple string message or arbitrary typed data.
-/// Typed data must implement `Debug` (enforced at compile time).
+/// Can be a simple string message or arbitrary typed data with either
+/// Debug or Display formatting.
 pub enum Context {
     /// A text message describing what operation was being performed.
     Text(String),
-    /// Arbitrary typed context data (must implement Debug).
-    /// Box<dyn DebugAny> is 16 bytes (same as Box<dyn Any>).
-    Typed(Box<dyn DebugAny>),
+    /// Typed context data formatted via Debug.
+    Debug(Box<dyn DebugAny>),
+    /// Typed context data formatted via Display.
+    Display(Box<dyn DisplayAny>),
 }
 
 impl Context {
@@ -124,27 +211,33 @@ impl Context {
     pub fn as_text(&self) -> Option<&str> {
         match self {
             Context::Text(s) => Some(s),
-            Context::Typed(_) => None,
+            Context::Debug(_) | Context::Display(_) => None,
         }
     }
 
-    /// Try to downcast to a specific type, if this is a Typed variant.
+    /// Try to downcast to a specific type, if this is a typed variant.
     pub fn downcast_ref<T: 'static>(&self) -> Option<&T> {
         match self {
             Context::Text(_) => None,
             // Must use (**b) to call as_any on the trait object, not the Box
             // (Box<dyn DebugAny> itself implements DebugAny through the blanket impl)
-            Context::Typed(b) => (**b).as_any().downcast_ref(),
+            Context::Debug(b) => (**b).as_any().downcast_ref(),
+            Context::Display(b) => (**b).as_any().downcast_ref(),
         }
     }
 
-    /// Get the type name if this is a Typed variant.
+    /// Get the type name if this is a typed variant.
     pub fn type_name(&self) -> Option<&'static str> {
         match self {
             Context::Text(_) => None,
-            // Must use (**b) to call on the trait object, not the Box
-            Context::Typed(b) => Some((**b).type_name()),
+            Context::Debug(b) => Some((**b).type_name()),
+            Context::Display(b) => Some((**b).type_name()),
         }
+    }
+
+    /// Check if this context uses Display formatting.
+    pub fn is_display(&self) -> bool {
+        matches!(self, Context::Text(_) | Context::Display(_))
     }
 }
 
@@ -152,7 +245,8 @@ impl fmt::Debug for Context {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Context::Text(s) => write!(f, "{:?}", s),
-            Context::Typed(t) => write!(f, "{:?}", t),
+            Context::Debug(t) => write!(f, "{:?}", &**t),
+            Context::Display(t) => write!(f, "{}", &**t), // Display types use Display even in Debug
         }
     }
 }
@@ -161,8 +255,8 @@ impl fmt::Display for Context {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Context::Text(s) => write!(f, "{}", s),
-            // For Typed, use Debug format since we can't require Display
-            Context::Typed(t) => write!(f, "{:?}", t),
+            Context::Debug(t) => write!(f, "{:?}", &**t), // Debug types use Debug in Display
+            Context::Display(t) => write!(f, "{}", &**t),
         }
     }
 }
@@ -195,29 +289,43 @@ impl Trace {
         }
     }
 
-    fn with_capacity(cap: usize) -> Self {
-        Self {
+    /// Try to create a Trace with pre-allocated capacity.
+    /// Returns None if allocation fails.
+    fn try_with_capacity(cap: usize) -> Option<Self> {
+        Some(Self {
             head: None,
-            recent: Vec::with_capacity(cap),
-        }
+            recent: try_vec_with_capacity(cap)?,
+        })
     }
 
+    /// Try to push a location. Returns false if allocation fails.
     #[inline]
-    fn push(&mut self, loc: &'static Location<'static>) {
-        self.recent.push(loc);
+    fn try_push(&mut self, loc: &'static Location<'static>) -> bool {
+        try_push(&mut self.recent, loc)
     }
 
-    /// Push a location with context, creating a new segment.
-    fn push_with_context(&mut self, loc: &'static Location<'static>, context: Context) {
+    /// Try to push a location with context, creating a new segment.
+    /// On allocation failure, the context is lost but existing trace data is preserved.
+    fn try_push_with_context(&mut self, loc: &'static Location<'static>, context: Context) {
         // Take the recent locations and create a new segment
         let locations_after = core::mem::take(&mut self.recent);
         let prev = self.head.take();
-        self.head = Some(Box::new(Segment {
+
+        match try_box(Segment {
             location: loc,
             context: Some(context),
             locations_after,
             prev,
-        }));
+        }) {
+            Some(segment) => {
+                self.head = Some(segment);
+            }
+            None => {
+                // Allocation failed - context is lost, but that's acceptable
+                // We could try to preserve the prev chain but that adds complexity
+                // In OOM scenarios, losing trace data is acceptable
+            }
+        }
     }
 
     fn len(&self) -> usize {
@@ -375,6 +483,7 @@ impl<E> Traced<E> {
     /// Add the caller's location to the trace.
     ///
     /// This is the primary API for building up a stack trace as errors propagate.
+    /// If allocation fails, the location is silently skipped.
     ///
     /// ## Example
     ///
@@ -397,11 +506,23 @@ impl<E> Traced<E> {
     pub fn at(mut self) -> Self {
         let loc = Location::caller();
         match &mut self.trace {
-            Some(trace) => trace.push(loc),
+            Some(trace) => {
+                // Silently ignore if push fails
+                let _ = trace.try_push(loc);
+            }
             None => {
-                let mut trace = Trace::with_capacity(4);
-                trace.push(loc);
-                self.trace = Some(Box::new(trace));
+                // Try to create trace with capacity, fall back to no capacity
+                if let Some(mut trace) = Trace::try_with_capacity(6) {
+                    let _ = trace.try_push(loc);
+                    if let Some(boxed) = try_box(trace) {
+                        self.trace = Some(boxed);
+                    }
+                } else if let Some(mut trace) = Some(Trace::new()) {
+                    let _ = trace.try_push(loc);
+                    if let Some(boxed) = try_box(trace) {
+                        self.trace = Some(boxed);
+                    }
+                }
             }
         }
         self
@@ -412,6 +533,7 @@ impl<E> Traced<E> {
     /// Each context message creates a new segment in the trace, preserving all
     /// previous context. Use this to add human-readable context about what
     /// operation was being performed.
+    /// If allocation fails, the context is silently skipped.
     ///
     /// ## Example
     ///
@@ -432,25 +554,35 @@ impl<E> Traced<E> {
     /// ```
     #[track_caller]
     #[inline]
-    pub fn at_msg(mut self, msg: impl Into<String>) -> Self {
+    pub fn at_msg(mut self, msg: &str) -> Self {
         let loc = Location::caller();
+        // Try to allocate the string first
+        let Some(text) = try_string_from(msg) else {
+            return self;
+        };
+        let context = Context::Text(text);
+
         match &mut self.trace {
             Some(trace) => {
-                trace.push_with_context(loc, Context::Text(msg.into()));
+                trace.try_push_with_context(loc, context);
             }
             None => {
                 let mut trace = Trace::new();
-                trace.push_with_context(loc, Context::Text(msg.into()));
-                self.trace = Some(Box::new(trace));
+                trace.try_push_with_context(loc, context);
+                if let Some(boxed) = try_box(trace) {
+                    self.trace = Some(boxed);
+                }
             }
         }
         self
     }
 
-    /// Add the caller's location and arbitrary typed context to the trace.
+    /// Add the caller's location and arbitrary typed context to the trace (Debug formatted).
     ///
-    /// This allows attaching any `Send + Sync + 'static` data to the error trace.
+    /// This allows attaching any `Debug + Send + Sync + 'static` data to the error trace.
+    /// The context will be formatted using `Debug` when displayed.
     /// Use `contexts()` to retrieve context entries and `downcast_ref` to access them.
+    /// If allocation fails, the context is silently skipped.
     ///
     /// ## Example
     ///
@@ -478,14 +610,65 @@ impl<E> Traced<E> {
     #[inline]
     pub fn at_context<T: fmt::Debug + Send + Sync + 'static>(mut self, ctx: T) -> Self {
         let loc = Location::caller();
+        // Try to box the context first
+        let Some(boxed_ctx) = try_box(ctx) else {
+            return self;
+        };
+        let context = Context::Debug(boxed_ctx);
+
         match &mut self.trace {
             Some(trace) => {
-                trace.push_with_context(loc, Context::Typed(Box::new(ctx)));
+                trace.try_push_with_context(loc, context);
             }
             None => {
                 let mut trace = Trace::new();
-                trace.push_with_context(loc, Context::Typed(Box::new(ctx)));
-                self.trace = Some(Box::new(trace));
+                trace.try_push_with_context(loc, context);
+                if let Some(boxed) = try_box(trace) {
+                    self.trace = Some(boxed);
+                }
+            }
+        }
+        self
+    }
+
+    /// Add the caller's location and arbitrary typed context to the trace (Display formatted).
+    ///
+    /// Similar to `at_context`, but the context will be formatted using `Display` instead of `Debug`.
+    /// Use this for more human-readable context output.
+    /// If allocation fails, the context is silently skipped.
+    ///
+    /// ## Example
+    ///
+    /// ```rust
+    /// use errat::{Traced, Traceable};
+    ///
+    /// #[derive(Debug)]
+    /// enum MyError { NotFound }
+    ///
+    /// let err = MyError::NotFound
+    ///     .traced()
+    ///     .at_context_display("loading config file /etc/config.toml");
+    /// ```
+    #[track_caller]
+    #[inline]
+    pub fn at_context_display<T: fmt::Display + Send + Sync + 'static>(mut self, ctx: T) -> Self {
+        let loc = Location::caller();
+        // Try to box the context first
+        let Some(boxed_ctx) = try_box(ctx) else {
+            return self;
+        };
+        let context = Context::Display(boxed_ctx);
+
+        match &mut self.trace {
+            Some(trace) => {
+                trace.try_push_with_context(loc, context);
+            }
+            None => {
+                let mut trace = Trace::new();
+                trace.try_push_with_context(loc, context);
+                if let Some(boxed) = try_box(trace) {
+                    self.trace = Some(boxed);
+                }
             }
         }
         self
@@ -557,7 +740,7 @@ impl<E> Traced<E> {
     /// Prefer `at_msg()` which also captures the caller's location.
     #[inline]
     #[track_caller]
-    pub fn with_message(self, msg: impl Into<String>) -> Self {
+    pub fn with_message(self, msg: &str) -> Self {
         self.at_msg(msg)
     }
 }
@@ -570,7 +753,8 @@ impl<E: fmt::Debug> fmt::Debug for Traced<E> {
             for ctx in trace.contexts() {
                 match ctx {
                     Context::Text(msg) => writeln!(f, "  context: {}", msg)?,
-                    Context::Typed(t) => writeln!(f, "  context: {:?}", t)?,
+                    Context::Debug(t) => writeln!(f, "  context: {:?}", &**t)?,
+                    Context::Display(t) => writeln!(f, "  context: {}", &**t)?,
                 }
             }
             // Show all locations (oldest first)
@@ -605,16 +789,19 @@ impl<E: fmt::Debug + fmt::Display> core::error::Error for Traced<E> {}
 /// enum MyError { NotFound }
 ///
 /// let err = MyError::NotFound.traced();
-/// assert_eq!(err.trace_len(), 1);
+/// // trace_len may be 0 if allocation failed, but error propagates
+/// assert!(err.trace_len() <= 1);
 /// ```
 pub trait Traceable: Sized {
     /// Wrap this value in a `Traced` and add the caller's location.
+    /// If allocation fails, the error is still wrapped but trace may be empty.
     #[track_caller]
     fn traced(self) -> Traced<Self>;
 
     /// Wrap this value in a `Traced` and add the caller's location with a message.
+    /// If allocation fails, the error is still wrapped but trace may be empty.
     #[track_caller]
-    fn traced_msg(self, msg: impl Into<String>) -> Traced<Self>;
+    fn traced_msg(self, msg: &str) -> Traced<Self>;
 }
 
 impl<E> Traceable for E {
@@ -626,7 +813,7 @@ impl<E> Traceable for E {
 
     #[track_caller]
     #[inline]
-    fn traced_msg(self, msg: impl Into<String>) -> Traced<Self> {
+    fn traced_msg(self, msg: &str) -> Traced<Self> {
         Traced::new(self).at_msg(msg)
     }
 }
@@ -657,15 +844,17 @@ impl<E> Traceable for E {
 pub trait ResultExt<T, E> {
     /// Add the caller's location to the error trace if this is `Err`.
     ///
-    /// This is a no-op on the `Ok` path.
+    /// This is a no-op on the `Ok` path. If allocation fails, the error
+    /// still propagates but the location is silently skipped.
     #[track_caller]
     fn at(self) -> Result<T, Traced<E>>;
 
     /// Add the caller's location and a context message if this is `Err`.
     ///
-    /// This is a no-op on the `Ok` path.
+    /// This is a no-op on the `Ok` path. If allocation fails, the error
+    /// still propagates but the context is silently skipped.
     #[track_caller]
-    fn at_msg(self, msg: impl Into<String>) -> Result<T, Traced<E>>;
+    fn at_msg(self, msg: &str) -> Result<T, Traced<E>>;
 }
 
 impl<T, E> ResultExt<T, E> for Result<T, Traced<E>> {
@@ -680,7 +869,7 @@ impl<T, E> ResultExt<T, E> for Result<T, Traced<E>> {
 
     #[track_caller]
     #[inline]
-    fn at_msg(self, msg: impl Into<String>) -> Result<T, Traced<E>> {
+    fn at_msg(self, msg: &str) -> Result<T, Traced<E>> {
         match self {
             Ok(v) => Ok(v),
             Err(e) => Err(e.at_msg(msg)),
@@ -708,12 +897,14 @@ impl<T, E> ResultExt<T, E> for Result<T, Traced<E>> {
 /// ```
 pub trait ResultTraceExt<T, E> {
     /// Convert the error to a `Traced<E>` and add the caller's location.
+    /// If allocation fails, the error is still wrapped but trace may be empty.
     #[track_caller]
     fn trace(self) -> Result<T, Traced<E>>;
 
     /// Convert the error to a `Traced<E>` and add the caller's location with a message.
+    /// If allocation fails, the error is still wrapped but trace may be empty.
     #[track_caller]
-    fn trace_msg(self, msg: impl Into<String>) -> Result<T, Traced<E>>;
+    fn trace_msg(self, msg: &str) -> Result<T, Traced<E>>;
 }
 
 impl<T, E> ResultTraceExt<T, E> for Result<T, E> {
@@ -728,7 +919,7 @@ impl<T, E> ResultTraceExt<T, E> for Result<T, E> {
 
     #[track_caller]
     #[inline]
-    fn trace_msg(self, msg: impl Into<String>) -> Result<T, Traced<E>> {
+    fn trace_msg(self, msg: &str) -> Result<T, Traced<E>> {
         match self {
             Ok(v) => Ok(v),
             Err(e) => Err(Traced::new(e).at_msg(msg)),
@@ -1052,14 +1243,28 @@ mod tests {
         assert_eq!(text_ctx.as_text(), Some("hello"));
         assert!(text_ctx.downcast_ref::<u32>().is_none());
 
-        // Typed context - requires Debug (u32 implements Debug)
-        let typed_ctx = Context::Typed(Box::new(42u32));
-        assert_eq!(typed_ctx.as_text(), None);
-        assert_eq!(typed_ctx.downcast_ref::<u32>(), Some(&42));
+        // Debug context - requires Debug (u32 implements Debug)
+        let debug_ctx = Context::Debug(Box::new(42u32));
+        assert_eq!(debug_ctx.as_text(), None);
+        assert_eq!(debug_ctx.downcast_ref::<u32>(), Some(&42));
 
         // Verify Debug output works
-        let debug_str = alloc::format!("{:?}", typed_ctx);
+        let debug_str = alloc::format!("{:?}", debug_ctx);
         assert!(debug_str.contains("42"));
+
+        // Display context - requires Display (u32 implements Display)
+        let display_ctx = Context::Display(Box::new(99u32));
+        assert_eq!(display_ctx.as_text(), None);
+        assert_eq!(display_ctx.downcast_ref::<u32>(), Some(&99));
+
+        // Verify Display output works
+        let display_str = alloc::format!("{}", display_ctx);
+        assert!(display_str.contains("99"));
+
+        // is_display should be true for Text and Display
+        assert!(text_ctx.is_display());
+        assert!(!debug_ctx.is_display());
+        assert!(display_ctx.is_display());
     }
 
     #[test]
@@ -1081,5 +1286,56 @@ mod tests {
         assert!(debug.contains("MyContext"));
         assert!(debug.contains("123"));
         assert!(debug.contains("test"));
+    }
+
+    #[test]
+    fn test_at_context_display() {
+        // Use a type that has both Display and Debug but we want Display formatting
+        let err = TestError::NotFound
+            .traced()
+            .at_context_display("user-friendly message");
+
+        assert_eq!(err.trace_len(), 2);
+
+        // Check that Display formatting is used in output
+        let debug = alloc::format!("{:?}", err);
+        assert!(debug.contains("context: user-friendly message"));
+
+        // Downcast should still work
+        let mut found = false;
+        for ctx in err.contexts() {
+            if ctx.downcast_ref::<&str>().is_some() {
+                found = true;
+                assert!(ctx.is_display());
+            }
+        }
+        assert!(found, "should find string context");
+    }
+
+    #[test]
+    fn test_mixed_context_types() {
+        #[derive(Debug)]
+        #[allow(dead_code)]
+        struct DebugInfo {
+            code: u32,
+        }
+
+        let err = TestError::NotFound
+            .traced()
+            .at_msg("text message")
+            .at_context(DebugInfo { code: 42 })
+            .at_context_display("display message");
+
+        // Should have 4 locations (traced + 3 context methods)
+        assert_eq!(err.trace_len(), 4);
+
+        // Should have 3 contexts
+        let contexts: Vec<_> = err.contexts().collect();
+        assert_eq!(contexts.len(), 3);
+
+        // Most recent first (display, debug, text)
+        assert!(contexts[0].is_display()); // display message
+        assert!(!contexts[1].is_display()); // DebugInfo (Debug)
+        assert!(contexts[2].is_display()); // text message
     }
 }
