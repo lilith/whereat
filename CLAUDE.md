@@ -10,6 +10,9 @@ just fmt     # format only
 just clippy  # clippy only
 just test    # test only
 just outdated
+just bench   # run benchmarks
+just bench-group "happy_path"  # run specific benchmark group
+just example-patterns  # run patterns example (good/bad/ugly usage)
 ```
 
 ## CI

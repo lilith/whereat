@@ -40,3 +40,15 @@ example-anyhow:
 # Run CrateInfo example with GitHub links
 example-meta:
     cargo run --example error_meta
+
+# Run patterns example (good/bad/ugly usage patterns)
+example-patterns:
+    cargo run --example patterns
+
+# Run benchmarks
+bench:
+    cargo bench --bench overhead
+
+# Run specific benchmark group
+bench-group group:
+    cargo bench --bench overhead -- "{{group}}"
