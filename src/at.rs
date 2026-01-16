@@ -408,87 +408,6 @@ impl<E> At<E> {
         self
     }
 
-    // ========================================================================
-    // with_* methods - add context to the current location (no new location)
-    // ========================================================================
-
-    /// Add a static string context to the current location (without adding a new location).
-    ///
-    /// Use this to attach multiple contexts to the same stack frame.
-    /// If the trace is empty, the context is silently dropped.
-    ///
-    /// ## Example
-    ///
-    /// ```rust
-    /// use errat::at;
-    ///
-    /// #[derive(Debug)]
-    /// enum MyError { NotFound }
-    ///
-    /// // One location with two contexts:
-    /// let err = at(MyError::NotFound)
-    ///     .at_str("loading config")
-    ///     .with_str("for production environment");
-    ///
-    /// assert_eq!(err.trace_len(), 2); // at() + at_str(), not 3
-    /// ```
-    #[inline]
-    pub fn with_str(mut self, msg: &'static str) -> Self {
-        if let Some(trace) = &mut self.trace {
-            let context = AtContext::Text(Cow::Borrowed(msg));
-            let _ = trace.try_add_context(context);
-        }
-        self
-    }
-
-    /// Add a lazily-computed string context to the current location.
-    ///
-    /// Like `with_str`, but for dynamically-constructed strings.
-    #[inline]
-    pub fn with_string(mut self, f: impl FnOnce() -> String) -> Self {
-        if let Some(trace) = &mut self.trace {
-            let context = AtContext::Text(Cow::Owned(f()));
-            let _ = trace.try_add_context(context);
-        }
-        self
-    }
-
-    /// Add lazily-computed typed context (Display formatted) to the current location.
-    ///
-    /// Like `at_data`, but doesn't add a new location.
-    #[inline]
-    pub fn with_data<T: fmt::Display + Send + Sync + 'static>(
-        mut self,
-        f: impl FnOnce() -> T,
-    ) -> Self {
-        if let Some(trace) = &mut self.trace {
-            let ctx = f();
-            if let Some(boxed_ctx) = try_box(ctx) {
-                let context = AtContext::Display(boxed_ctx);
-                let _ = trace.try_add_context(context);
-            }
-        }
-        self
-    }
-
-    /// Add lazily-computed typed context (Debug formatted) to the current location.
-    ///
-    /// Like `at_debug`, but doesn't add a new location.
-    #[inline]
-    pub fn with_debug<T: fmt::Debug + Send + Sync + 'static>(
-        mut self,
-        f: impl FnOnce() -> T,
-    ) -> Self {
-        if let Some(trace) = &mut self.trace {
-            let ctx = f();
-            if let Some(boxed_ctx) = try_box(ctx) {
-                let context = AtContext::Debug(boxed_ctx);
-                let _ = trace.try_add_context(context);
-            }
-        }
-        self
-    }
-
     /// Set the crate info for this trace.
     ///
     /// This is used by `at!()` to provide repository metadata for GitHub links.
@@ -623,13 +542,13 @@ impl<E: fmt::Debug> fmt::Debug for At<E> {
 
         writeln!(f)?;
 
-        // Simple iteration: walk locations, check for contexts at each index
+        // Simple iteration: walk locations, check for context at each index
         // None = skipped frame marker
         for (i, loc_opt) in trace.iter().enumerate() {
             match loc_opt {
                 Some(loc) => {
                     writeln!(f, "    at {}:{}", loc.file(), loc.line())?;
-                    for context in trace.contexts_at(i) {
+                    if let Some(context) = trace.context_at(i) {
                         match context {
                             AtContext::Text(msg) => writeln!(f, "       ╰─ {}", msg)?,
                             AtContext::Debug(t) => writeln!(f, "       ╰─ {:?}", &**t)?,
@@ -713,18 +632,16 @@ impl<E: fmt::Debug> fmt::Display for DisplayWithMeta<'_, E> {
         // None = skipped frame marker
         for (i, loc_opt) in trace.iter().enumerate() {
             // Check for crate boundary at this location - rebuild URL only when crate changes
-            for context in trace.contexts_at(i) {
-                if let AtContext::Crate(info) = context {
-                    github_base = build_github_base(info);
-                }
+            if let Some(AtContext::Crate(info)) = trace.context_at(i) {
+                github_base = build_github_base(info);
             }
 
             match loc_opt {
                 Some(loc) => {
                     write_location_meta(f, loc, github_base.as_deref())?;
 
-                    // Show non-crate contexts
-                    for context in trace.contexts_at(i) {
+                    // Show non-crate context
+                    if let Some(context) = trace.context_at(i) {
                         match context {
                             AtContext::Text(msg) => writeln!(f, "       ╰─ {}", msg)?,
                             AtContext::Debug(t) => writeln!(f, "       ╰─ {:?}", &**t)?,

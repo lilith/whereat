@@ -128,26 +128,6 @@ pub trait ResultAtExt<T, E> {
 
     /// Add a skip marker to indicate skipped frames.
     fn at_skipped_frames(self) -> Result<T, At<E>>;
-
-    // with_* methods - add context without new location
-
-    /// Add static string context to the current location (no new location).
-    fn with_str(self, msg: &'static str) -> Result<T, At<E>>;
-
-    /// Add lazily-computed string context to the current location.
-    fn with_string(self, f: impl FnOnce() -> String) -> Result<T, At<E>>;
-
-    /// Add lazily-computed typed context (Display) to the current location.
-    fn with_data<C: fmt::Display + Send + Sync + 'static>(
-        self,
-        f: impl FnOnce() -> C,
-    ) -> Result<T, At<E>>;
-
-    /// Add lazily-computed typed context (Debug) to the current location.
-    fn with_debug<C: fmt::Debug + Send + Sync + 'static>(
-        self,
-        f: impl FnOnce() -> C,
-    ) -> Result<T, At<E>>;
 }
 
 impl<T, E> ResultAtExt<T, E> for Result<T, At<E>> {
@@ -216,44 +196,6 @@ impl<T, E> ResultAtExt<T, E> for Result<T, At<E>> {
         match self {
             Ok(v) => Ok(v),
             Err(e) => Err(e.at_skipped_frames()),
-        }
-    }
-
-    #[inline]
-    fn with_str(self, msg: &'static str) -> Result<T, At<E>> {
-        match self {
-            Ok(v) => Ok(v),
-            Err(e) => Err(e.with_str(msg)),
-        }
-    }
-
-    #[inline]
-    fn with_string(self, f: impl FnOnce() -> String) -> Result<T, At<E>> {
-        match self {
-            Ok(v) => Ok(v),
-            Err(e) => Err(e.with_string(f)),
-        }
-    }
-
-    #[inline]
-    fn with_data<C: fmt::Display + Send + Sync + 'static>(
-        self,
-        f: impl FnOnce() -> C,
-    ) -> Result<T, At<E>> {
-        match self {
-            Ok(v) => Ok(v),
-            Err(e) => Err(e.with_data(f)),
-        }
-    }
-
-    #[inline]
-    fn with_debug<C: fmt::Debug + Send + Sync + 'static>(
-        self,
-        f: impl FnOnce() -> C,
-    ) -> Result<T, At<E>> {
-        match self {
-            Ok(v) => Ok(v),
-            Err(e) => Err(e.with_debug(f)),
         }
     }
 }
@@ -387,26 +329,6 @@ pub trait ResultAtTraceableExt<T, E: AtTraceable> {
 
     /// Add a skip marker to indicate skipped frames.
     fn at_skipped_frames(self) -> Result<T, E>;
-
-    // with_* methods - add context without new location
-
-    /// Add static string context to the current location (no new location).
-    fn with_str(self, msg: &'static str) -> Result<T, E>;
-
-    /// Add lazily-computed string context to the current location.
-    fn with_string(self, f: impl FnOnce() -> String) -> Result<T, E>;
-
-    /// Add lazily-computed typed context (Display) to the current location.
-    fn with_data<C: fmt::Display + Send + Sync + 'static>(
-        self,
-        f: impl FnOnce() -> C,
-    ) -> Result<T, E>;
-
-    /// Add lazily-computed typed context (Debug) to the current location.
-    fn with_debug<C: fmt::Debug + Send + Sync + 'static>(
-        self,
-        f: impl FnOnce() -> C,
-    ) -> Result<T, E>;
 }
 
 impl<T, E: AtTraceable> ResultAtTraceableExt<T, E> for Result<T, E> {
@@ -455,31 +377,5 @@ impl<T, E: AtTraceable> ResultAtTraceableExt<T, E> for Result<T, E> {
     #[inline]
     fn at_skipped_frames(self) -> Result<T, E> {
         self.map_err(|e| e.at_skipped_frames())
-    }
-
-    #[inline]
-    fn with_str(self, msg: &'static str) -> Result<T, E> {
-        self.map_err(|e| e.with_str(msg))
-    }
-
-    #[inline]
-    fn with_string(self, f: impl FnOnce() -> String) -> Result<T, E> {
-        self.map_err(|e| e.with_string(f))
-    }
-
-    #[inline]
-    fn with_data<C: fmt::Display + Send + Sync + 'static>(
-        self,
-        f: impl FnOnce() -> C,
-    ) -> Result<T, E> {
-        self.map_err(|e| e.with_data(f))
-    }
-
-    #[inline]
-    fn with_debug<C: fmt::Debug + Send + Sync + 'static>(
-        self,
-        f: impl FnOnce() -> C,
-    ) -> Result<T, E> {
-        self.map_err(|e| e.with_debug(f))
     }
 }
