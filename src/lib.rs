@@ -2032,24 +2032,15 @@ impl<E: fmt::Debug> fmt::Display for DisplayWithMeta<'_, E> {
 
         writeln!(f)?;
 
-        // Walk locations, updating crate context as we encounter Crate entries
-        for (i, loc) in trace.iter().enumerate() {
-            // Check for crate boundary at this location
-            if let Some(AtContext::Crate(info)) = trace.context_at(i) {
-                current_crate = Some(info);
-            }
+        // Cache GitHub base URL - only rebuild when crate boundary changes
+        let mut github_base: Option<String> = current_crate.and_then(build_github_base);
 
-            // Build GitHub URL if crate info is available
-            let github_base: Option<String> =
-                current_crate.and_then(|info| match (info.repo(), info.commit()) {
-                    (Some(repo), Some(commit)) => {
-                        let repo = repo.trim_end_matches('/');
-                        // Include crate_path for workspace crates
-                        let crate_path = info.crate_path().unwrap_or("");
-                        Some(alloc::format!("{}/blob/{}/{}", repo, commit, crate_path))
-                    }
-                    _ => None,
-                });
+        // Walk locations, updating GitHub base when we encounter crate boundaries
+        for (i, loc) in trace.iter().enumerate() {
+            // Check for crate boundary at this location - rebuild URL only when crate changes
+            if let Some(AtContext::Crate(info)) = trace.context_at(i) {
+                github_base = build_github_base(info);
+            }
 
             write_location_meta(f, loc, github_base.as_deref())?;
 
@@ -2066,6 +2057,19 @@ impl<E: fmt::Debug> fmt::Display for DisplayWithMeta<'_, E> {
         }
 
         Ok(())
+    }
+}
+
+/// Build GitHub blob URL base from crate info.
+/// Returns `{repo}/blob/{commit}/{crate_path}` or None if repo/commit unavailable.
+fn build_github_base(info: &AtCrateInfo) -> Option<String> {
+    match (info.repo(), info.commit()) {
+        (Some(repo), Some(commit)) => {
+            let repo = repo.trim_end_matches('/');
+            let crate_path = info.crate_path().unwrap_or("");
+            Some(alloc::format!("{}/blob/{}/{}", repo, commit, crate_path))
+        }
+        _ => None,
     }
 }
 
