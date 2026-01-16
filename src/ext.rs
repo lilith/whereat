@@ -100,29 +100,29 @@ pub trait ResultAtExt<T, E> {
     #[track_caller]
     fn at(self) -> Result<T, At<E>>;
 
-    /// Add location and static message context. Zero-cost for static strings.
+    /// Add static string context to last location (or create one if empty).
     #[track_caller]
     fn at_str(self, msg: &'static str) -> Result<T, At<E>>;
 
-    /// Add location and lazily-computed string context.
+    /// Add lazily-computed string context to last location (or create one if empty).
     #[track_caller]
     fn at_string(self, f: impl FnOnce() -> String) -> Result<T, At<E>>;
 
-    /// Add location and lazily-computed typed context (Display formatted).
+    /// Add lazily-computed typed context (Display) to last location (or create one if empty).
     #[track_caller]
     fn at_data<C: fmt::Display + Send + Sync + 'static>(
         self,
         f: impl FnOnce() -> C,
     ) -> Result<T, At<E>>;
 
-    /// Add location and lazily-computed typed context (Debug formatted).
+    /// Add lazily-computed typed context (Debug) to last location (or create one if empty).
     #[track_caller]
     fn at_debug<C: fmt::Debug + Send + Sync + 'static>(
         self,
         f: impl FnOnce() -> C,
     ) -> Result<T, At<E>>;
 
-    /// Add a crate boundary marker. Use `at_crate!(result)` for convenience.
+    /// Add crate boundary marker to last location (or create one if empty).
     #[track_caller]
     fn at_crate(self, info: &'static AtCrateInfo) -> Result<T, At<E>>;
 
@@ -303,27 +303,27 @@ pub trait ResultAtTraceableExt<T, E: AtTraceable> {
     #[track_caller]
     fn at(self) -> Result<T, E>;
 
-    /// Add location and static message context.
+    /// Add static string context to last location (or create one if empty).
     #[track_caller]
     fn at_str(self, msg: &'static str) -> Result<T, E>;
 
-    /// Add location and lazily-computed string context.
+    /// Add lazily-computed string context to last location (or create one if empty).
     #[track_caller]
     fn at_string(self, f: impl FnOnce() -> String) -> Result<T, E>;
 
-    /// Add location and lazily-computed typed context (Display formatted).
+    /// Add lazily-computed typed context (Display) to last location (or create one if empty).
     #[track_caller]
     fn at_data<C: fmt::Display + Send + Sync + 'static>(
         self,
         f: impl FnOnce() -> C,
     ) -> Result<T, E>;
 
-    /// Add location and lazily-computed typed context (Debug formatted).
+    /// Add lazily-computed typed context (Debug) to last location (or create one if empty).
     #[track_caller]
     fn at_debug<C: fmt::Debug + Send + Sync + 'static>(self, f: impl FnOnce() -> C)
     -> Result<T, E>;
 
-    /// Add a crate boundary marker.
+    /// Add crate boundary marker to last location (or create one if empty).
     #[track_caller]
     fn at_crate(self, info: &'static AtCrateInfo) -> Result<T, E>;
 

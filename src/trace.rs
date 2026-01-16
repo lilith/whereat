@@ -304,35 +304,20 @@ impl AtTrace {
         try_push_location(&mut self.locations, None)
     }
 
-    /// Try to push a location with context.
+    /// Add context to the last location, or push a new location if trace is empty.
     ///
-    /// If the last location has the same file:line as `loc`, just adds context
-    /// to that location instead of pushing a new one. This allows chaining
-    /// multiple context methods on the same line without duplicating frames.
+    /// This allows `at_str()` etc. to add context without creating duplicate frames.
+    /// Use `try_push()` first if you need a new location, then call this for context.
     ///
-    /// On allocation failure, the location/context may be lost but existing data is preserved.
-    pub(crate) fn try_push_with_context(
-        &mut self,
-        loc: &'static Location<'static>,
-        context: AtContext,
-    ) {
-        // Check if last location matches current file:line - if so, just add context
-        let idx = if let Some(Some(last)) = self.locations.last() {
-            if last.file() == loc.file() && last.line() == loc.line() {
-                // Same location - reuse index
-                (self.locations.len() - 1).min(u16::MAX as usize) as u16
-            } else {
-                // Different location - push new
-                if !try_push_location(&mut self.locations, Some(loc)) {
-                    return;
-                }
-                (self.locations.len() - 1).min(u16::MAX as usize) as u16
-            }
-        } else {
-            // Empty or last was skipped - push new location
+    /// On allocation failure, the context may be lost but existing data is preserved.
+    pub(crate) fn try_add_context(&mut self, loc: &'static Location<'static>, context: AtContext) {
+        // If empty, push a location first
+        let idx = if self.locations.is_empty() {
             if !try_push_location(&mut self.locations, Some(loc)) {
                 return;
             }
+            0u16
+        } else {
             (self.locations.len() - 1).min(u16::MAX as usize) as u16
         };
         // Try to push context; silently fail on OOM
@@ -482,27 +467,27 @@ pub trait AtTraceable: Sized {
         self
     }
 
-    /// Add the caller's location and a static string context.
+    /// Add a static string context to the last location (or create one if empty).
     #[track_caller]
     #[inline]
     fn at_str(mut self, msg: &'static str) -> Self {
         let context = AtContext::Text(Cow::Borrowed(msg));
         self.trace_mut()
-            .try_push_with_context(Location::caller(), context);
+            .try_add_context(Location::caller(), context);
         self
     }
 
-    /// Add the caller's location and a lazily-computed string context.
+    /// Add a lazily-computed string context to the last location (or create one if empty).
     #[track_caller]
     #[inline]
     fn at_string(mut self, f: impl FnOnce() -> String) -> Self {
         let context = AtContext::Text(Cow::Owned(f()));
         self.trace_mut()
-            .try_push_with_context(Location::caller(), context);
+            .try_add_context(Location::caller(), context);
         self
     }
 
-    /// Add the caller's location and lazily-computed typed context (Display formatted).
+    /// Add lazily-computed typed context (Display) to the last location (or create one if empty).
     #[track_caller]
     #[inline]
     fn at_data<T: fmt::Display + Send + Sync + 'static>(mut self, f: impl FnOnce() -> T) -> Self {
@@ -512,11 +497,11 @@ pub trait AtTraceable: Sized {
         };
         let context = AtContext::Display(boxed_ctx);
         self.trace_mut()
-            .try_push_with_context(Location::caller(), context);
+            .try_add_context(Location::caller(), context);
         self
     }
 
-    /// Add the caller's location and lazily-computed typed context (Debug formatted).
+    /// Add lazily-computed typed context (Debug) to the last location (or create one if empty).
     #[track_caller]
     #[inline]
     fn at_debug<T: fmt::Debug + Send + Sync + 'static>(mut self, f: impl FnOnce() -> T) -> Self {
@@ -526,17 +511,17 @@ pub trait AtTraceable: Sized {
         };
         let context = AtContext::Debug(boxed_ctx);
         self.trace_mut()
-            .try_push_with_context(Location::caller(), context);
+            .try_add_context(Location::caller(), context);
         self
     }
 
-    /// Add a crate boundary marker.
+    /// Add a crate boundary marker to the last location (or create one if empty).
     #[track_caller]
     #[inline]
     fn at_crate(mut self, info: &'static AtCrateInfo) -> Self {
         let context = AtContext::Crate(info);
         self.trace_mut()
-            .try_push_with_context(Location::caller(), context);
+            .try_add_context(Location::caller(), context);
         self
     }
 

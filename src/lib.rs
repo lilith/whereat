@@ -654,12 +654,13 @@ mod tests {
         }
 
         fn outer() -> Result<(), At<TestError>> {
+            // at_str adds context to last frame, use .at() first if you want a new frame
             inner().at_str("during initialization")?;
             Ok(())
         }
 
         let err = outer().unwrap_err();
-        assert_eq!(err.trace_len(), 2);
+        assert_eq!(err.trace_len(), 1); // at_str doesn't add new frame
         let text = err.contexts().find_map(|c| c.as_text());
         assert_eq!(text, Some("during initialization"));
     }
@@ -701,7 +702,7 @@ mod tests {
             .start_at()
             .at_debug(|| RequestInfo { user_id: 42 });
 
-        assert_eq!(err.trace_len(), 2);
+        assert_eq!(err.trace_len(), 1); // at_debug adds context to existing frame
 
         // Retrieve typed context
         let mut found = false;
@@ -732,8 +733,8 @@ mod tests {
 
         let err = level3().unwrap_err();
 
-        // Should have 3 locations
-        assert_eq!(err.trace_len(), 3);
+        // at_str adds context to last frame, doesn't create new frames
+        assert_eq!(err.trace_len(), 1);
 
         // Should have 2 context messages (level2 and level3)
         let contexts: Vec<_> = err.contexts().collect();
@@ -802,7 +803,7 @@ mod tests {
             .start_at()
             .at_data(|| "user-friendly message");
 
-        assert_eq!(err.trace_len(), 2);
+        assert_eq!(err.trace_len(), 1); // at_data adds context to existing frame
 
         // Check that Display formatting is used in output
         let debug = alloc::format!("{:?}", err);
@@ -833,8 +834,8 @@ mod tests {
             .at_debug(|| DebugInfo { code: 42 })
             .at_data(|| "display message");
 
-        // Should have 4 locations (traced + 3 context methods)
-        assert_eq!(err.trace_len(), 4);
+        // All context methods add to the existing frame, not new ones
+        assert_eq!(err.trace_len(), 1);
 
         // Should have 3 contexts
         let contexts: Vec<_> = err.contexts().collect();

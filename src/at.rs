@@ -123,9 +123,9 @@ impl<E> At<E> {
         self
     }
 
-    /// Add the caller's location and a static string context to the trace.
+    /// Add a static string context to the last location (or create one if empty).
     ///
-    /// This is zero-cost for static strings - just stores a pointer.
+    /// Zero-cost for static strings - just stores a pointer.
     /// For dynamically-computed strings, use `at_string()` instead.
     ///
     /// ## Example
@@ -153,11 +153,11 @@ impl<E> At<E> {
 
         match &mut self.trace {
             Some(trace) => {
-                trace.try_push_with_context(loc, context);
+                trace.try_add_context(loc, context);
             }
             None => {
                 let mut trace = AtTrace::new();
-                trace.try_push_with_context(loc, context);
+                trace.try_add_context(loc, context);
                 if let Some(boxed) = try_box(trace) {
                     self.trace = Some(boxed);
                 }
@@ -166,7 +166,7 @@ impl<E> At<E> {
         self
     }
 
-    /// Add the caller's location and a lazily-computed string context to the trace.
+    /// Add a lazily-computed string context to the last location (or create one if empty).
     ///
     /// The closure is only called on error path, avoiding allocation on success.
     /// For static strings, use `at_str()` instead for zero overhead.
@@ -197,11 +197,11 @@ impl<E> At<E> {
 
         match &mut self.trace {
             Some(trace) => {
-                trace.try_push_with_context(loc, context);
+                trace.try_add_context(loc, context);
             }
             None => {
                 let mut trace = AtTrace::new();
-                trace.try_push_with_context(loc, context);
+                trace.try_add_context(loc, context);
                 if let Some(boxed) = try_box(trace) {
                     self.trace = Some(boxed);
                 }
@@ -210,7 +210,7 @@ impl<E> At<E> {
         self
     }
 
-    /// Add the caller's location and lazily-computed typed context (Display formatted).
+    /// Add lazily-computed typed context (Display) to the last location (or create one if empty).
     ///
     /// The closure is only called on error path, avoiding allocation on success.
     /// Use for typed data that you want to format with `Display` and later retrieve
@@ -259,11 +259,11 @@ impl<E> At<E> {
 
         match &mut self.trace {
             Some(trace) => {
-                trace.try_push_with_context(loc, context);
+                trace.try_add_context(loc, context);
             }
             None => {
                 let mut trace = AtTrace::new();
-                trace.try_push_with_context(loc, context);
+                trace.try_add_context(loc, context);
                 if let Some(boxed) = try_box(trace) {
                     self.trace = Some(boxed);
                 }
@@ -272,7 +272,7 @@ impl<E> At<E> {
         self
     }
 
-    /// Add the caller's location and lazily-computed typed context (Debug formatted).
+    /// Add lazily-computed typed context (Debug) to the last location (or create one if empty).
     ///
     /// The closure is only called on error path, avoiding allocation on success.
     /// Use `contexts()` to retrieve entries and `downcast_ref` to access typed data.
@@ -313,11 +313,11 @@ impl<E> At<E> {
 
         match &mut self.trace {
             Some(trace) => {
-                trace.try_push_with_context(loc, context);
+                trace.try_add_context(loc, context);
             }
             None => {
                 let mut trace = AtTrace::new();
-                trace.try_push_with_context(loc, context);
+                trace.try_add_context(loc, context);
                 if let Some(boxed) = try_box(trace) {
                     self.trace = Some(boxed);
                 }
@@ -326,7 +326,7 @@ impl<E> At<E> {
         self
     }
 
-    /// Add a crate boundary marker to the trace.
+    /// Add a crate boundary marker to the last location (or create one if empty).
     ///
     /// This marks that subsequent locations belong to a different crate,
     /// enabling correct GitHub links in cross-crate traces.
@@ -358,11 +358,11 @@ impl<E> At<E> {
 
         match &mut self.trace {
             Some(trace) => {
-                trace.try_push_with_context(loc, context);
+                trace.try_add_context(loc, context);
             }
             None => {
                 let mut trace = AtTrace::new();
-                trace.try_push_with_context(loc, context);
+                trace.try_add_context(loc, context);
                 if let Some(boxed) = try_box(trace) {
                     self.trace = Some(boxed);
                 }
