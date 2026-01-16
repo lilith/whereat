@@ -1242,7 +1242,7 @@ impl Default for AtTrace {
 /// Implement this trait to get all the `.at_*()` methods on your custom error types.
 /// Only one method is required: [`trace_mut()`](Self::trace_mut).
 ///
-/// ## Example
+/// ## Example: Inline trace
 ///
 /// ```rust
 /// use errat::{AtTrace, AtTraceable};
@@ -1270,17 +1270,67 @@ impl Default for AtTrace {
 ///     .at_str("looking up user");
 /// ```
 ///
+/// ## Example: Boxed trace (smaller error type)
+///
+/// ```rust
+/// use errat::{AtTrace, AtTraceable};
+///
+/// struct MyError {
+///     kind: &'static str,
+///     trace: Box<AtTrace>,  // 8 bytes instead of sizeof(AtTrace)
+/// }
+///
+/// impl AtTraceable for MyError {
+///     fn trace_mut(&mut self) -> &mut AtTrace {
+///         &mut self.trace
+///     }
+/// }
+///
+/// impl MyError {
+///     #[track_caller]
+///     fn new(kind: &'static str) -> Self {
+///         Self { kind, trace: Box::new(AtTrace::capture()) }
+///     }
+/// }
+/// ```
+///
+/// ## Example: Optional boxed trace (lazy allocation)
+///
+/// ```rust
+/// use errat::{AtTrace, AtTraceable};
+///
+/// struct MyError {
+///     kind: &'static str,
+///     trace: Option<Box<AtTrace>>,  // None until first .at_*() call
+/// }
+///
+/// impl AtTraceable for MyError {
+///     fn trace_mut(&mut self) -> &mut AtTrace {
+///         self.trace.get_or_insert_with(|| Box::new(AtTrace::new()))
+///     }
+/// }
+///
+/// impl MyError {
+///     fn new(kind: &'static str) -> Self {  // No #[track_caller] needed
+///         Self { kind, trace: None }
+///     }
+/// }
+///
+/// // Trace allocated lazily on first .at_*() call
+/// let err = MyError::new("not_found").at_str("context");
+/// ```
+///
 /// ## Why use this over `At<E>`?
 ///
 /// Use `AtTraceable` when you want:
-/// - The trace to be inline in your error (not boxed)
 /// - Full control over your error type's layout
-/// - To avoid the 8-byte pointer overhead of `At<E>`
+/// - Custom storage strategy (inline, boxed, or optional)
+/// - To define your own error constructors
 ///
 /// Use `At<E>` when you want:
 /// - Minimal changes to existing code
-/// - The error type to remain small (trace is boxed)
 /// - To wrap errors from external crates
+/// - The simplest possible setup
 pub trait AtTraceable: Sized {
     /// Get a mutable reference to the embedded trace.
     fn trace_mut(&mut self) -> &mut AtTrace;
@@ -2162,6 +2212,131 @@ impl<T, E> ResultStartAtExt<T, E> for Result<T, E> {
             Ok(v) => Ok(v),
             Err(e) => Err(At::new(e).at_skipped_frames()),
         }
+    }
+}
+
+// ============================================================================
+// ResultAtTraceableExt - for Results with AtTraceable errors
+// ============================================================================
+
+/// Extension trait for `Result<T, E>` where `E` implements [`AtTraceable`].
+///
+/// Provides the same ergonomics as [`ResultAtExt`] but for custom error types
+/// that embed their own trace.
+///
+/// ## Example
+///
+/// ```rust
+/// use errat::{AtTrace, AtTraceable, ResultAtTraceableExt};
+///
+/// struct MyError {
+///     msg: &'static str,
+///     trace: AtTrace,
+/// }
+///
+/// impl AtTraceable for MyError {
+///     fn trace_mut(&mut self) -> &mut AtTrace { &mut self.trace }
+/// }
+///
+/// impl MyError {
+///     #[track_caller]
+///     fn new(msg: &'static str) -> Self {
+///         Self { msg, trace: AtTrace::capture() }
+///     }
+/// }
+///
+/// fn inner() -> Result<(), MyError> {
+///     Err(MyError::new("oops"))
+/// }
+///
+/// fn outer() -> Result<(), MyError> {
+///     inner().at_str("in outer")?;  // Works directly on Result!
+///     Ok(())
+/// }
+/// ```
+pub trait ResultAtTraceableExt<T, E: AtTraceable> {
+    /// Add the caller's location to the error trace if this is `Err`.
+    #[track_caller]
+    fn at(self) -> Result<T, E>;
+
+    /// Add location and static message context.
+    #[track_caller]
+    fn at_str(self, msg: &'static str) -> Result<T, E>;
+
+    /// Add location and lazily-computed string context.
+    #[track_caller]
+    fn at_string(self, f: impl FnOnce() -> String) -> Result<T, E>;
+
+    /// Add location and lazily-computed typed context (Display formatted).
+    #[track_caller]
+    fn at_data<C: fmt::Display + Send + Sync + 'static>(
+        self,
+        f: impl FnOnce() -> C,
+    ) -> Result<T, E>;
+
+    /// Add location and lazily-computed typed context (Debug formatted).
+    #[track_caller]
+    fn at_debug<C: fmt::Debug + Send + Sync + 'static>(
+        self,
+        f: impl FnOnce() -> C,
+    ) -> Result<T, E>;
+
+    /// Add a crate boundary marker.
+    #[track_caller]
+    fn at_crate(self, info: &'static AtCrateInfo) -> Result<T, E>;
+
+    /// Add a skip marker to indicate skipped frames.
+    #[track_caller]
+    fn at_skipped_frames(self) -> Result<T, E>;
+}
+
+impl<T, E: AtTraceable> ResultAtTraceableExt<T, E> for Result<T, E> {
+    #[track_caller]
+    #[inline]
+    fn at(self) -> Result<T, E> {
+        self.map_err(|e| e.at())
+    }
+
+    #[track_caller]
+    #[inline]
+    fn at_str(self, msg: &'static str) -> Result<T, E> {
+        self.map_err(|e| e.at_str(msg))
+    }
+
+    #[track_caller]
+    #[inline]
+    fn at_string(self, f: impl FnOnce() -> String) -> Result<T, E> {
+        self.map_err(|e| e.at_string(f))
+    }
+
+    #[track_caller]
+    #[inline]
+    fn at_data<C: fmt::Display + Send + Sync + 'static>(
+        self,
+        f: impl FnOnce() -> C,
+    ) -> Result<T, E> {
+        self.map_err(|e| e.at_data(f))
+    }
+
+    #[track_caller]
+    #[inline]
+    fn at_debug<C: fmt::Debug + Send + Sync + 'static>(
+        self,
+        f: impl FnOnce() -> C,
+    ) -> Result<T, E> {
+        self.map_err(|e| e.at_debug(f))
+    }
+
+    #[track_caller]
+    #[inline]
+    fn at_crate(self, info: &'static AtCrateInfo) -> Result<T, E> {
+        self.map_err(|e| e.at_crate(info))
+    }
+
+    #[track_caller]
+    #[inline]
+    fn at_skipped_frames(self) -> Result<T, E> {
+        self.map_err(|e| e.at_skipped_frames())
     }
 }
 
