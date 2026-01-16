@@ -604,6 +604,92 @@ impl AtCrateInfoBuilder {
             meta: self.meta,
         }
     }
+
+    // ========================================================================
+    // Runtime (owned) variants - these leak strings for 'static lifetime
+    // ========================================================================
+
+    /// Set the crate name from an owned string (leaks memory for static lifetime).
+    ///
+    /// Use for runtime configuration with `OnceLock`.
+    pub fn name_owned(mut self, name: alloc::string::String) -> Self {
+        self.name = alloc::boxed::Box::leak(name.into_boxed_str());
+        self
+    }
+
+    /// Set the repository URL from an owned string (leaks memory for static lifetime).
+    pub fn repo_owned(mut self, repo: Option<alloc::string::String>) -> Self {
+        self.repo = repo.map(|s| {
+            let leaked: &'static str = alloc::boxed::Box::leak(s.into_boxed_str());
+            leaked
+        });
+        self
+    }
+
+    /// Set the commit hash from an owned string (leaks memory for static lifetime).
+    pub fn commit_owned(mut self, commit: Option<alloc::string::String>) -> Self {
+        self.commit = commit.map(|s| {
+            let leaked: &'static str = alloc::boxed::Box::leak(s.into_boxed_str());
+            leaked
+        });
+        self
+    }
+
+    /// Set the crate path from an owned string (leaks memory for static lifetime).
+    pub fn path_owned(mut self, path: Option<alloc::string::String>) -> Self {
+        self.crate_path = path.map(|s| {
+            let leaked: &'static str = alloc::boxed::Box::leak(s.into_boxed_str());
+            leaked
+        });
+        self
+    }
+
+    /// Set the module path from an owned string (leaks memory for static lifetime).
+    pub fn module_owned(mut self, module: alloc::string::String) -> Self {
+        self.module = alloc::boxed::Box::leak(module.into_boxed_str());
+        self
+    }
+
+    /// Set custom metadata from owned strings (leaks memory for static lifetime).
+    ///
+    /// ## Example
+    ///
+    /// ```rust
+    /// use std::sync::OnceLock;
+    /// use errat::AtCrateInfo;
+    ///
+    /// static CRATE_INFO: OnceLock<AtCrateInfo> = OnceLock::new();
+    ///
+    /// fn init_crate_info(instance_id: String) {
+    ///     CRATE_INFO.get_or_init(|| {
+    ///         AtCrateInfo::builder()
+    ///             .name("mylib")
+    ///             .module("mylib")
+    ///             .meta_owned(vec![
+    ///                 ("instance".into(), instance_id),
+    ///             ])
+    ///             .build()
+    ///     });
+    /// }
+    /// ```
+    pub fn meta_owned(
+        mut self,
+        entries: alloc::vec::Vec<(alloc::string::String, alloc::string::String)>,
+    ) -> Self {
+        let leaked: &'static [(&'static str, &'static str)] = alloc::boxed::Box::leak(
+            entries
+                .into_iter()
+                .map(|(k, v)| {
+                    let k: &'static str = alloc::boxed::Box::leak(k.into_boxed_str());
+                    let v: &'static str = alloc::boxed::Box::leak(v.into_boxed_str());
+                    (k, v)
+                })
+                .collect::<alloc::vec::Vec<_>>()
+                .into_boxed_slice(),
+        );
+        self.meta = leaked;
+        self
+    }
 }
 
 impl Default for AtCrateInfoBuilder {
