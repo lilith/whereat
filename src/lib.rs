@@ -804,6 +804,7 @@ macro_rules! define_at_crate_info {
     // Base case: no options (uses CRATE_PATH from env if set)
     () => {
         #[doc(hidden)]
+        #[allow(dead_code)]
         static __AT_CRATE_INFO: $crate::AtCrateInfo = $crate::AtCrateInfo::builder()
             .name(env!("CARGO_PKG_NAME"))
             .repo(option_env!("CARGO_PKG_REPOSITORY"))
@@ -822,6 +823,7 @@ macro_rules! define_at_crate_info {
     // With path only
     (path = $path:literal $(,)?) => {
         #[doc(hidden)]
+        #[allow(dead_code)]
         static __AT_CRATE_INFO: $crate::AtCrateInfo = $crate::AtCrateInfo::builder()
             .name(env!("CARGO_PKG_NAME"))
             .repo(option_env!("CARGO_PKG_REPOSITORY"))
@@ -840,6 +842,7 @@ macro_rules! define_at_crate_info {
     // With meta only (uses CRATE_PATH from env if set)
     (meta = $meta:expr $(,)?) => {
         #[doc(hidden)]
+        #[allow(dead_code)]
         static __AT_CRATE_INFO: $crate::AtCrateInfo = $crate::AtCrateInfo::builder()
             .name(env!("CARGO_PKG_NAME"))
             .repo(option_env!("CARGO_PKG_REPOSITORY"))
@@ -859,6 +862,7 @@ macro_rules! define_at_crate_info {
     // With path and meta
     (path = $path:literal, meta = $meta:expr $(,)?) => {
         #[doc(hidden)]
+        #[allow(dead_code)]
         static __AT_CRATE_INFO: $crate::AtCrateInfo = $crate::AtCrateInfo::builder()
             .name(env!("CARGO_PKG_NAME"))
             .repo(option_env!("CARGO_PKG_REPOSITORY"))
