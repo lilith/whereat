@@ -2,8 +2,8 @@
 
 use errat::{At, ResultAtExt, at};
 
-// Required for at!() macro - defines __errat_crate_info() getter
-errat::at_crate_info_static!();
+// Required for at!() macro - defines at_crate_info() getter
+errat::define_at_crate_info!();
 
 #[derive(Debug)]
 #[allow(dead_code)]
@@ -59,11 +59,11 @@ When you use at!() to create errors, it automatically:
 2. Stores this as AtCrateInfo in the trace
 3. display_with_meta() uses this to generate GitHub links
 
-The at_crate_info_static!() macro defines a getter that captures:
+The define_at_crate_info!() macro defines a getter that captures:
 "
     );
 
-    let info = __errat_crate_info();
+    let info = at_crate_info();
     println!("  - name: {}", info.name());
     println!("  - module: {}", info.module());
     if let Some(repo) = info.repo() {

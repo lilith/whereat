@@ -4,8 +4,8 @@
 
 use errat::{At, ResultAtExt, at};
 
-// Required for at!() macro - defines __errat_crate_info() getter
-errat::at_crate_info_static!();
+// Required for at!() macro - defines at_crate_info() getter
+errat::define_at_crate_info!();
 
 #[derive(Debug)]
 #[allow(dead_code)]
@@ -92,7 +92,7 @@ fn main() {
     println!("{}", err.display_with_meta());
 
     println!("\n=== Example 6: AtCrateInfo getter ===\n");
-    let info = __errat_crate_info();
+    let info = at_crate_info();
     println!("Crate: {}", info.name());
     println!("Module: {}", info.module());
     if let Some(repo) = info.repo() {

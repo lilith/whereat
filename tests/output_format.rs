@@ -4,7 +4,7 @@ use core::error::Error;
 use errat::{At, ErrorAtExt, ResultAtExt, ResultStartAtExt, at};
 
 // Define the crate-level static for at!() to reference
-errat::at_crate_info_static!();
+errat::define_at_crate_info!();
 
 #[derive(Debug)]
 enum TestError {

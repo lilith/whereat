@@ -6,7 +6,7 @@ use core::mem::size_of;
 use errat::{At, AtContext, AtCrateInfo, at, at_crate};
 
 // Define the crate-level static for at!() and at_crate!() to reference
-errat::at_crate_info_static!();
+errat::define_at_crate_info!();
 
 #[derive(Debug)]
 struct TestError;
@@ -17,7 +17,7 @@ struct TestError;
 
 #[test]
 fn crate_info_is_static() {
-    let info: &'static AtCrateInfo = crate::__errat_crate_info();
+    let info: &'static AtCrateInfo = crate::at_crate_info();
 
     // Should be a static reference, not heap allocated
     assert!(!info.name().is_empty());
@@ -25,16 +25,16 @@ fn crate_info_is_static() {
 
 #[test]
 fn crate_info_captures_crate_name() {
-    let info = crate::__errat_crate_info();
+    let info = crate::at_crate_info();
 
     assert_eq!(info.name(), "errat", "Should capture CARGO_PKG_NAME");
 }
 
 #[test]
 fn crate_info_captures_module_path() {
-    let info = crate::__errat_crate_info();
+    let info = crate::at_crate_info();
 
-    // module_path!() returns the module where crate::__errat_crate_info() is called
+    // module_path!() returns the module where crate::at_crate_info() is called
     assert!(
         info.module().contains("crate_info"),
         "Module should contain test module name. Got: {}",
@@ -44,7 +44,7 @@ fn crate_info_captures_module_path() {
 
 #[test]
 fn crate_info_repo_from_cargo_toml() {
-    let info = crate::__errat_crate_info();
+    let info = crate::at_crate_info();
 
     // CARGO_PKG_REPOSITORY is set in Cargo.toml
     // May be None or empty string if not set
@@ -63,7 +63,7 @@ fn crate_info_repo_from_cargo_toml() {
 
 #[test]
 fn crate_info_commit_from_env() {
-    let info = crate::__errat_crate_info();
+    let info = crate::at_crate_info();
 
     // GIT_COMMIT, GITHUB_SHA, or CI_COMMIT_SHA - usually None in tests
     // Just verify it doesn't panic
@@ -72,8 +72,8 @@ fn crate_info_commit_from_env() {
 
 #[test]
 fn multiple_crate_info_calls_same_static() {
-    let info1 = crate::__errat_crate_info();
-    let info2 = crate::__errat_crate_info();
+    let info1 = crate::at_crate_info();
+    let info2 = crate::at_crate_info();
 
     // Each call creates its own static, but with same values
     assert_eq!(info1.name(), info2.name());
@@ -182,7 +182,7 @@ fn cross_crate_trace_has_multiple_boundaries() {
 
 #[test]
 fn crate_boundary_updates_github_links() {
-    let err = at!(TestError).at_crate(crate::__errat_crate_info());
+    let err = at!(TestError).at_crate(crate::at_crate_info());
     let output = format!("{}", err.display_with_meta());
 
     // Should have location lines
@@ -695,7 +695,7 @@ fn crate_info_commit_is_compile_time() {
     // GIT_COMMIT etc are captured at compile time via option_env!()
     // Falls back to version tag (v{VERSION}) for crates.io compatibility
 
-    let info = crate::__errat_crate_info();
+    let info = crate::at_crate_info();
 
     // Should always have a commit (either env var or version tag fallback)
     let commit = info
@@ -718,7 +718,7 @@ fn crate_info_version_tag_fallback() {
     // When no GIT_COMMIT env var, falls back to v{CARGO_PKG_VERSION}
     // This makes crates.io dependencies work automatically!
 
-    let info = crate::__errat_crate_info();
+    let info = crate::at_crate_info();
     let commit = info
         .commit()
         .expect("should have commit from version fallback");
@@ -741,9 +741,9 @@ fn crate_info_version_tag_fallback() {
 
 #[test]
 fn crate_info_is_truly_static() {
-    // Verify crate::__errat_crate_info() returns truly static data
-    let info1 = crate::__errat_crate_info();
-    let info2 = crate::__errat_crate_info();
+    // Verify crate::at_crate_info() returns truly static data
+    let info1 = crate::at_crate_info();
+    let info2 = crate::at_crate_info();
 
     // Same compilation unit = same static (by value, different addresses ok)
     assert_eq!(info1.name(), info2.name());
@@ -756,9 +756,9 @@ fn crate_info_is_truly_static() {
 
 #[test]
 fn module_path_captured_at_macro_site() {
-    let info = crate::__errat_crate_info();
+    let info = crate::at_crate_info();
 
-    // module_path!() captures where crate::__errat_crate_info() is invoked
+    // module_path!() captures where crate::at_crate_info() is invoked
     assert!(
         info.module().starts_with("crate_info"),
         "Module should be this test module. Got: {}",
@@ -769,11 +769,11 @@ fn module_path_captured_at_macro_site() {
 mod nested_module {
     #[test]
     fn nested_module_has_different_path() {
-        // With the getter pattern, module path is captured at the at_crate_info_static!() site
+        // With the getter pattern, module path is captured at the define_at_crate_info!() site
         // (crate root), not at the call site. This test verifies that behavior.
-        let info = crate::__errat_crate_info();
+        let info = crate::at_crate_info();
 
-        // Module should be the crate root module (where at_crate_info_static!() was called)
+        // Module should be the crate root module (where define_at_crate_info!() was called)
         assert!(
             info.module().starts_with("crate_info"),
             "Module should be crate root. Got: {}",
@@ -888,12 +888,12 @@ fn crate_path_without_trailing_slash() {
 }
 
 // ============================================================================
-// at_crate_info_static!() Macro Tests
+// define_at_crate_info!() Macro Tests
 // ============================================================================
 
 #[test]
 fn crate_info_static_defines_hidden_static() {
-    // __ERRAT_CRATE_INFO is defined by at_crate_info_static!() at top of file
+    // __ERRAT_CRATE_INFO is defined by define_at_crate_info!() at top of file
     // at!() references it
     let err = at!(TestError);
 
@@ -916,17 +916,17 @@ fn crate_info_static_has_correct_name() {
     panic!("Should find AtCrateInfo in at!() error");
 }
 
-// Test that at_crate_info_static!(path = "...") variant works
+// Test that define_at_crate_info!(path = "...") variant works
 mod with_path {
     use super::*;
 
     // This would be in a workspace crate's lib.rs
-    // errat::at_crate_info_static!(path = "crates/mylib/");
+    // errat::define_at_crate_info!(path = "crates/mylib/");
 
     #[test]
     fn path_option_sets_crate_path() {
-        // We can't easily test at_crate_info_static!(path = ...) here because
-        // we already called at_crate_info_static!() at the top of this file.
+        // We can't easily test define_at_crate_info!(path = ...) here because
+        // we already called define_at_crate_info!() at the top of this file.
         // Instead, test that AtCrateInfo::with_path works correctly.
         static INFO: AtCrateInfo = AtCrateInfo::builder()
             .name("test")

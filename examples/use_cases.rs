@@ -7,7 +7,7 @@
 use errat::{At, ErrorAtExt, ResultAtExt, ResultStartAtExt, at, at_crate};
 
 // Required for at!() and at_crate!() macros - defines __ERRAT_CRATE_INFO
-errat::at_crate_info_static!();
+errat::define_at_crate_info!();
 
 // ============================================================================
 // Use Case 1: Basic Error Propagation

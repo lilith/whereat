@@ -724,7 +724,7 @@ pub(crate) static __ERRAT_CRATE_INFO: AtCrateInfo = AtCrateInfo::builder()
     .build();
 
 #[doc(hidden)]
-pub fn __errat_crate_info() -> &'static AtCrateInfo {
+pub fn at_crate_info() -> &'static AtCrateInfo {
     &__ERRAT_CRATE_INFO
 }
 
@@ -750,19 +750,19 @@ macro_rules! __errat_detect_commit {
 ///
 /// This creates a static and getter function that `at!()` and `at_crate!()` use.
 /// For compile-time configuration, use this macro. For runtime configuration,
-/// define your own `__errat_crate_info()` function using `OnceLock`.
+/// define your own `at_crate_info()` function using `OnceLock`.
 ///
 /// ## Basic Usage
 ///
 /// ```rust,ignore
 /// // In lib.rs or main.rs
-/// errat::at_crate_info_static!();
+/// errat::define_at_crate_info!();
 /// ```
 ///
 /// ## With Options
 ///
 /// ```rust,ignore
-/// errat::at_crate_info_static!(
+/// errat::define_at_crate_info!(
 ///     path = "crates/mylib/",
 ///     meta = &[("team", "platform"), ("service", "auth")],
 /// );
@@ -778,7 +778,7 @@ macro_rules! __errat_detect_commit {
 ///
 /// static CRATE_INFO: OnceLock<AtCrateInfo> = OnceLock::new();
 ///
-/// pub(crate) fn __errat_crate_info() -> &'static AtCrateInfo {
+/// pub(crate) fn at_crate_info() -> &'static AtCrateInfo {
 ///     CRATE_INFO.get_or_init(|| {
 ///         AtCrateInfo::builder()
 ///             .name(env!("CARGO_PKG_NAME"))
@@ -800,7 +800,7 @@ macro_rules! __errat_detect_commit {
 /// - `CARGO_PKG_REPOSITORY` - repository URL from Cargo.toml
 /// - `GIT_COMMIT` / `GITHUB_SHA` / `CI_COMMIT_SHA` - commit hash (or `v{VERSION}` fallback)
 #[macro_export]
-macro_rules! at_crate_info_static {
+macro_rules! define_at_crate_info {
     // Base case: no options (uses CRATE_PATH from env if set)
     () => {
         #[doc(hidden)]
@@ -814,7 +814,7 @@ macro_rules! at_crate_info_static {
 
         #[doc(hidden)]
         #[allow(dead_code)]
-        pub(crate) fn __errat_crate_info() -> &'static $crate::AtCrateInfo {
+        pub(crate) fn at_crate_info() -> &'static $crate::AtCrateInfo {
             &__ERRAT_CRATE_INFO
         }
     };
@@ -832,7 +832,7 @@ macro_rules! at_crate_info_static {
 
         #[doc(hidden)]
         #[allow(dead_code)]
-        pub(crate) fn __errat_crate_info() -> &'static $crate::AtCrateInfo {
+        pub(crate) fn at_crate_info() -> &'static $crate::AtCrateInfo {
             &__ERRAT_CRATE_INFO
         }
     };
@@ -851,7 +851,7 @@ macro_rules! at_crate_info_static {
 
         #[doc(hidden)]
         #[allow(dead_code)]
-        pub(crate) fn __errat_crate_info() -> &'static $crate::AtCrateInfo {
+        pub(crate) fn at_crate_info() -> &'static $crate::AtCrateInfo {
             &__ERRAT_CRATE_INFO
         }
     };
@@ -870,25 +870,25 @@ macro_rules! at_crate_info_static {
 
         #[doc(hidden)]
         #[allow(dead_code)]
-        pub(crate) fn __errat_crate_info() -> &'static $crate::AtCrateInfo {
+        pub(crate) fn at_crate_info() -> &'static $crate::AtCrateInfo {
             &__ERRAT_CRATE_INFO
         }
     };
 
     // With meta and path (reversed order)
     (meta = $meta:expr, path = $path:literal $(,)?) => {
-        $crate::at_crate_info_static!(path = $path, meta = $meta);
+        $crate::define_at_crate_info!(path = $path, meta = $meta);
     };
 }
 
 /// Start tracing an error with crate metadata for repository links.
 ///
-/// Requires `at_crate_info_static!()` or a custom `__errat_crate_info()` function.
+/// Requires `define_at_crate_info!()` or a custom `at_crate_info()` function.
 ///
 /// ## Setup (once in lib.rs)
 ///
 /// ```rust,ignore
-/// errat::at_crate_info_static!();
+/// errat::define_at_crate_info!();
 /// ```
 ///
 /// ## Usage
@@ -919,22 +919,18 @@ macro_rules! at_crate_info_static {
 #[macro_export]
 #[allow(clippy::crate_in_macro_def)] // Intentional: calls caller's crate getter
 macro_rules! at {
-    ($err:expr) => {{
-        $crate::At::new($err)
-            .at()
-            .at_crate(crate::__errat_crate_info())
-    }};
+    ($err:expr) => {{ $crate::At::new($err).at().at_crate(crate::at_crate_info()) }};
 }
 
 /// Add crate boundary marker to a Result with an At<E> error.
 ///
-/// Requires `at_crate_info_static!()` or a custom `__errat_crate_info()` function.
+/// Requires `define_at_crate_info!()` or a custom `at_crate_info()` function.
 /// Use at crate boundaries when consuming errors from dependencies.
 ///
 /// ## Setup (once in lib.rs)
 ///
 /// ```rust,ignore
-/// errat::at_crate_info_static!();
+/// errat::define_at_crate_info!();
 /// ```
 ///
 /// ## Usage
@@ -950,7 +946,7 @@ macro_rules! at {
 #[macro_export]
 #[allow(clippy::crate_in_macro_def)] // Intentional: calls caller's crate getter
 macro_rules! at_crate {
-    ($result:expr) => {{ $crate::ResultAtExt::at_crate($result, crate::__errat_crate_info()) }};
+    ($result:expr) => {{ $crate::ResultAtExt::at_crate($result, crate::at_crate_info()) }};
 }
 
 /// Wrap any value in `At<E>` and capture the caller's location.

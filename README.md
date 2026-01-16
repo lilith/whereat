@@ -22,19 +22,19 @@ Add arbitrary debug info at any time with `at_debug(|| impls_debug)`, `at_data(|
 `errat` can (optionally, and with no runtime cost) have backtraces link to the exact commit and line number on github/etc! 
 
 **DO: Keep your hot loops zero-alloc:**
-* You do NOT need to use/add At<> inside hot loops or until you want to incur that allocation. `start_at_late!()` will start the stacktrace with `[...]` to avoid confusion. Skipping frames? `.at_skipped()` will do the same.
+* You do NOT need to use/add At<> inside hot loops or until you want to incur that allocation. `.start_at_late()` will start the stacktrace with `[...]` to avoid confusion. Skipping frames? `.at_skipped_frames()` will do the same.
 
 **DO: Halve allocations with tinyvec**
 
 We suggest the features `tinyvec-128-bytes` or `tinyvec-256-bytes` to give you 11 or 27  stacktrace lines (8 bytes each on 64-bit systems) *without* a 2nd allocation.
 
-**DO: Call `.at_crate(crate_info!())` when consuming a result or error from anther crate**
-This will ensure backtrace lines specify the crate name (no more confusing `src/lib.rs:305` lines!). at! and at_crate! are syntactic sugar for `start_at().at_crate(crate_info!())`.
+**DO: Use `at_crate!()` when consuming a result or error from another crate**
+This will ensure backtrace lines specify the crate name (no more confusing `src/lib.rs:305` lines!). Requires `errat::define_at_crate_info!()` once in your crate root.
 
 **DO: Feel free to add an ergomonic alias**, like `type MyError = At<MyInternalError>`
 
 
-NOTE: `at!(err)` is syntax sugar for `start_at(err).at_crate(crate_info!())`. and `at_crate!(result)` is syntax sugar for `result.at_crate(crate_info!())`. Like `.at()`, `crate_info!()` is generated at build time, and is just a &'static reference.
+**Setup:** Add `errat::define_at_crate_info!();` once in your lib.rs or main.rs. This defines a `at_crate_info()` getter that `at!()` and `at_crate!()` use to embed crate metadata (name, repo URL, commit) for GitHub-linked backtraces.
 
 ## Design Philosophy
 
@@ -59,7 +59,32 @@ This means you can:
 
 ## Quick Start
 
-[..]
+```rust
+// In lib.rs or main.rs - required for at!() and at_crate!() macros
+errat::define_at_crate_info!();
+
+use errat::{At, ResultAtExt, at};
+
+#[derive(Debug)]
+enum MyError {
+    NotFound,
+    InvalidInput(String),
+}
+
+fn find_user(id: u64) -> Result<String, At<MyError>> {
+    if id == 0 {
+        return Err(at!(MyError::InvalidInput("id cannot be zero".into())));
+    }
+    Err(at!(MyError::NotFound))
+}
+
+fn process(id: u64) -> Result<String, At<MyError>> {
+    find_user(id).at_str("looking up user")?;  // Adds context + location
+    Ok("done".into())
+}
+```
+
+For workspace crates, set the path: `errat::define_at_crate_info!(path = "crates/mylib/");`
 
 ## Tinyvec Features
 
