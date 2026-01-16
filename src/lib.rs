@@ -373,7 +373,7 @@ impl<T: core::any::Any + fmt::Display + Send + Sync> AtDisplayAny for T {
 /// Static metadata about a crate, used for generating repository links.
 ///
 /// Create using [`AtCrateInfo::builder()`] for a fluent const-compatible API,
-/// or use the [`crate_info_static!()`] macro for automatic capture.
+/// or use the [`define_at_crate_info!()`] macro for automatic capture.
 ///
 /// ## Builder Pattern (Recommended)
 ///
@@ -702,7 +702,7 @@ impl Default for AtCrateInfoBuilder {
 // Crate-level error tracking info (for errat's own at!() / at_crate!() usage)
 // ============================================================================
 //
-// This is what `crate_info_static!()` generates. We define it manually here
+// This is what `define_at_crate_info!()` generates. We define it manually here
 // because the macro isn't defined yet at this point in the file.
 
 // errat's own crate info for internal at!() usage in doctests
@@ -2010,8 +2010,8 @@ pub trait ErrorAtExt: Sized {
     /// Wrap this value in `At<E>` and add the caller's location.
     /// If allocation fails, the error is still wrapped but trace may be empty.
     ///
-    /// For crate-aware tracing with repository links, use `at!(err)` or
-    /// `err.start_at().at_crate(crate_info!())` instead.
+    /// For crate-aware tracing with repository links, use `at!(err)` instead.
+    /// Requires [`define_at_crate_info!()`] in your crate root.
     ///
     /// After calling `.start_at()`, you can chain context methods:
     /// - `.at_str("msg")` - static string context (zero-cost)
@@ -2080,7 +2080,7 @@ pub trait ResultAtExt<T, E> {
         f: impl FnOnce() -> C,
     ) -> Result<T, At<E>>;
 
-    /// Add a crate boundary marker. Use with `crate_info!()` for cross-crate tracing.
+    /// Add a crate boundary marker. Use `at_crate!(result)` for convenience.
     #[track_caller]
     fn at_crate(self, info: &'static AtCrateInfo) -> Result<T, At<E>>;
 

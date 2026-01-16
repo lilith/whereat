@@ -142,6 +142,60 @@ Enable inline storage for traces to avoid heap allocation for short traces:
 errat = { version = "0.1", features = ["tinyvec-128-bytes"] }
 ```
 
+## Embedded Traces (Advanced)
+
+Instead of wrapping errors with `At<E>`, you can embed the trace directly in your error type using `AtTraceable`. This gives you full control over your error's layout.
+
+```rust
+use errat::{AtTrace, AtTraceable, ResultAtTraceableExt};
+
+struct MyError {
+    kind: ErrorKind,
+    trace: AtTrace,
+}
+
+enum ErrorKind { NotFound, InvalidInput }
+
+impl AtTraceable for MyError {
+    fn trace_mut(&mut self) -> &mut AtTrace {
+        &mut self.trace
+    }
+}
+
+impl MyError {
+    #[track_caller]
+    fn not_found() -> Self {
+        Self { kind: ErrorKind::NotFound, trace: AtTrace::capture() }
+    }
+}
+
+fn find_user(id: u64) -> Result<String, MyError> {
+    if id == 0 { return Err(MyError::not_found()); }
+    Ok(format!("User {}", id))
+}
+
+fn process(id: u64) -> Result<String, MyError> {
+    find_user(id).at_str("looking up user")?;  // Works on Result<T, impl AtTraceable>!
+    Ok("done".into())
+}
+```
+
+**Storage options:**
+
+| Field Type | Size | When to use |
+|------------|------|-------------|
+| `AtTrace` | ~48 bytes | Trace always captured at construction |
+| `Box<AtTrace>` | 8 bytes | Smaller error, trace always allocated |
+| `Option<Box<AtTrace>>` | 8 bytes | Lazy allocation on first `.at_*()` call |
+
+For `Option<Box<AtTrace>>`, implement `trace_mut` with lazy init:
+
+```rust
+fn trace_mut(&mut self) -> &mut AtTrace {
+    self.trace.get_or_insert_with(|| Box::new(AtTrace::new()))
+}
+```
+
 ## TODO
 
 - [ ] **Use `Box::try_new` when stabilized**: Currently Box allocations can panic on OOM. Track [rust-lang/rust#32838](https://github.com/rust-lang/rust/issues/32838) for `allocator_api` stabilization.
