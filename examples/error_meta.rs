@@ -1,9 +1,9 @@
 //! Demonstrates enhanced trace display with AtCrateInfo and GitHub links.
 
-use errat::{At, ResultAtExt, at, crate_info};
+use errat::{At, ResultAtExt, at};
 
-// Required for at!() macro
-errat::crate_info_static!();
+// Required for at!() macro - defines __errat_crate_info() getter
+errat::at_crate_info_static!();
 
 #[derive(Debug)]
 #[allow(dead_code)]
@@ -59,23 +59,23 @@ When you use at!() to create errors, it automatically:
 2. Stores this as AtCrateInfo in the trace
 3. display_with_meta() uses this to generate GitHub links
 
-The crate_info!() macro captures:
+The at_crate_info_static!() macro defines a getter that captures:
 "
     );
 
-    let info = crate_info!();
-    println!("  - name: {}", info.name);
-    println!("  - module: {}", info.module);
-    if let Some(repo) = info.repo {
+    let info = __errat_crate_info();
+    println!("  - name: {}", info.name());
+    println!("  - module: {}", info.module());
+    if let Some(repo) = info.repo() {
         println!("  - repo: {}", repo);
     }
-    if let Some(commit) = info.commit {
+    if let Some(commit) = info.commit() {
         println!("  - commit: {}", commit);
     }
 
     println!(
         "
-For cross-crate error handling, use .at_crate(crate_info!())
+For cross-crate error handling, use at_crate!() macro
 at crate boundaries to switch the repository used for links.
 "
     );

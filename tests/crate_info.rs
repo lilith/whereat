@@ -3,10 +3,10 @@
 #![allow(dead_code)]
 
 use core::mem::size_of;
-use errat::{At, AtContext, AtCrateInfo, at, at_crate, crate_info};
+use errat::{At, AtContext, AtCrateInfo, at, at_crate};
 
 // Define the crate-level static for at!() and at_crate!() to reference
-errat::crate_info_static!();
+errat::at_crate_info_static!();
 
 #[derive(Debug)]
 struct TestError;
@@ -17,38 +17,38 @@ struct TestError;
 
 #[test]
 fn crate_info_is_static() {
-    let info: &'static AtCrateInfo = crate_info!();
+    let info: &'static AtCrateInfo = crate::__errat_crate_info();
 
     // Should be a static reference, not heap allocated
-    assert!(!info.name.is_empty());
+    assert!(!info.name().is_empty());
 }
 
 #[test]
 fn crate_info_captures_crate_name() {
-    let info = crate_info!();
+    let info = crate::__errat_crate_info();
 
-    assert_eq!(info.name, "errat", "Should capture CARGO_PKG_NAME");
+    assert_eq!(info.name(), "errat", "Should capture CARGO_PKG_NAME");
 }
 
 #[test]
 fn crate_info_captures_module_path() {
-    let info = crate_info!();
+    let info = crate::__errat_crate_info();
 
-    // module_path!() returns the module where crate_info!() is called
+    // module_path!() returns the module where crate::__errat_crate_info() is called
     assert!(
-        info.module.contains("crate_info"),
+        info.module().contains("crate_info"),
         "Module should contain test module name. Got: {}",
-        info.module
+        info.module()
     );
 }
 
 #[test]
 fn crate_info_repo_from_cargo_toml() {
-    let info = crate_info!();
+    let info = crate::__errat_crate_info();
 
     // CARGO_PKG_REPOSITORY is set in Cargo.toml
     // May be None or empty string if not set
-    if let Some(repo) = info.repo {
+    if let Some(repo) = info.repo() {
         if !repo.is_empty() {
             assert!(
                 repo.contains("github.com")
@@ -63,21 +63,21 @@ fn crate_info_repo_from_cargo_toml() {
 
 #[test]
 fn crate_info_commit_from_env() {
-    let info = crate_info!();
+    let info = crate::__errat_crate_info();
 
     // GIT_COMMIT, GITHUB_SHA, or CI_COMMIT_SHA - usually None in tests
     // Just verify it doesn't panic
-    let _ = info.commit;
+    let _ = info.commit();
 }
 
 #[test]
 fn multiple_crate_info_calls_same_static() {
-    let info1 = crate_info!();
-    let info2 = crate_info!();
+    let info1 = crate::__errat_crate_info();
+    let info2 = crate::__errat_crate_info();
 
     // Each call creates its own static, but with same values
-    assert_eq!(info1.name, info2.name);
-    assert_eq!(info1.repo, info2.repo);
+    assert_eq!(info1.name(), info2.name());
+    assert_eq!(info1.repo(), info2.repo());
 }
 
 // ============================================================================
@@ -121,7 +121,7 @@ fn crate_info_accessible_from_context() {
 
     for ctx in err.contexts() {
         if let Some(info) = ctx.as_crate_info() {
-            assert_eq!(info.name, "errat");
+            assert_eq!(info.name(), "errat");
             return;
         }
     }
@@ -182,7 +182,7 @@ fn cross_crate_trace_has_multiple_boundaries() {
 
 #[test]
 fn crate_boundary_updates_github_links() {
-    let err = at!(TestError).at_crate(crate_info!());
+    let err = at!(TestError).at_crate(crate::__errat_crate_info());
     let output = format!("{}", err.display_with_meta());
 
     // Should have location lines
@@ -314,41 +314,41 @@ fn sizeof_common_error_types() {
 #[test]
 fn crate_info_new_const() {
     // AtCrateInfo::new is const
-    const INFO: AtCrateInfo = AtCrateInfo::new(
-        "test-crate",
-        Some("https://github.com/user/repo"),
-        Some("abc123"),
-        "test::module",
-    );
+    const INFO: AtCrateInfo = AtCrateInfo::builder()
+        .name("test-crate")
+        .repo(Some("https://github.com/user/repo"))
+        .commit(Some("abc123"))
+        .module("test::module")
+        .build();
 
-    assert_eq!(INFO.name, "test-crate");
-    assert_eq!(INFO.repo, Some("https://github.com/user/repo"));
-    assert_eq!(INFO.commit, Some("abc123"));
-    assert_eq!(INFO.module, "test::module");
+    assert_eq!(INFO.name(), "test-crate");
+    assert_eq!(INFO.repo(), Some("https://github.com/user/repo"));
+    assert_eq!(INFO.commit(), Some("abc123"));
+    assert_eq!(INFO.module(), "test::module");
 }
 
 #[test]
 fn crate_info_static_in_const_context() {
     // Can use AtCrateInfo in const/static contexts
-    static INFO: AtCrateInfo = AtCrateInfo::new(
-        "my-crate",
-        Some("https://github.com/me/my-crate"),
-        None,
-        "my_crate",
-    );
+    static INFO: AtCrateInfo = AtCrateInfo::builder()
+        .name("my-crate")
+        .repo(Some("https://github.com/me/my-crate"))
+        .commit(None)
+        .module("my_crate")
+        .build();
 
-    assert_eq!(INFO.name, "my-crate");
+    assert_eq!(INFO.name(), "my-crate");
 }
 
 #[test]
 fn github_link_format_in_display() {
     // Create a AtCrateInfo with repo and commit
-    static INFO: AtCrateInfo = AtCrateInfo::new(
-        "test",
-        Some("https://github.com/user/repo"),
-        Some("deadbeef"),
-        "test",
-    );
+    static INFO: AtCrateInfo = AtCrateInfo::builder()
+        .name("test")
+        .repo(Some("https://github.com/user/repo"))
+        .commit(Some("deadbeef"))
+        .module("test")
+        .build();
 
     let err = errat::At::new(TestError).at().at_crate(&INFO);
     let output = format!("{}", err.display_with_meta());
@@ -363,12 +363,12 @@ fn github_link_format_in_display() {
 
 #[test]
 fn github_link_includes_line_number() {
-    static INFO: AtCrateInfo = AtCrateInfo::new(
-        "test",
-        Some("https://github.com/user/repo"),
-        Some("abc123"),
-        "test",
-    );
+    static INFO: AtCrateInfo = AtCrateInfo::builder()
+        .name("test")
+        .repo(Some("https://github.com/user/repo"))
+        .commit(Some("abc123"))
+        .module("test")
+        .build();
 
     let err = errat::At::new(TestError).at().at_crate(&INFO);
     let output = format!("{}", err.display_with_meta());
@@ -383,12 +383,15 @@ fn github_link_includes_line_number() {
 
 #[test]
 fn repo_without_commit_no_link() {
-    static INFO: AtCrateInfo = AtCrateInfo::new(
-        "test",
-        Some("https://github.com/user/repo"),
-        None, // No commit
-        "test",
-    );
+    static INFO: AtCrateInfo = AtCrateInfo::builder()
+        .name("test")
+        .repo(Some("https://github.com/user/repo"))
+        .commit(None)
+        .module(
+            // No commit
+            "test",
+        )
+        .build();
 
     let err = errat::At::new(TestError).at().at_crate(&INFO);
     let output = format!("{}", err.display_with_meta());
@@ -403,12 +406,15 @@ fn repo_without_commit_no_link() {
 
 #[test]
 fn trailing_slash_stripped_from_repo() {
-    static INFO: AtCrateInfo = AtCrateInfo::new(
-        "test",
-        Some("https://github.com/user/repo/"), // Trailing slash
-        Some("abc123"),
-        "test",
-    );
+    static INFO: AtCrateInfo = AtCrateInfo::builder()
+        .name("test")
+        .repo(Some("https://github.com/user/repo/"))
+        .commit(
+            // Trailing slash
+            Some("abc123"),
+        )
+        .module("test")
+        .build();
 
     let err = errat::At::new(TestError).at().at_crate(&INFO);
     let output = format!("{}", err.display_with_meta());
@@ -427,19 +433,19 @@ fn trailing_slash_stripped_from_repo() {
 
 #[test]
 fn crate_boundary_switches_github_links() {
-    static CRATE_A: AtCrateInfo = AtCrateInfo::new(
-        "crate-a",
-        Some("https://github.com/org/crate-a"),
-        Some("aaa111"),
-        "crate_a",
-    );
+    static CRATE_A: AtCrateInfo = AtCrateInfo::builder()
+        .name("crate-a")
+        .repo(Some("https://github.com/org/crate-a"))
+        .commit(Some("aaa111"))
+        .module("crate_a")
+        .build();
 
-    static CRATE_B: AtCrateInfo = AtCrateInfo::new(
-        "crate-b",
-        Some("https://github.com/org/crate-b"),
-        Some("bbb222"),
-        "crate_b",
-    );
+    static CRATE_B: AtCrateInfo = AtCrateInfo::builder()
+        .name("crate-b")
+        .repo(Some("https://github.com/org/crate-b"))
+        .commit(Some("bbb222"))
+        .module("crate_b")
+        .build();
 
     // Simulate: error in crate-a, crosses to crate-b
     let err = errat::At::new(TestError)
@@ -466,12 +472,12 @@ fn crate_boundary_switches_github_links() {
 
 #[test]
 fn crate_boundary_affects_subsequent_locations() {
-    static CRATE_X: AtCrateInfo = AtCrateInfo::new(
-        "crate-x",
-        Some("https://github.com/org/crate-x"),
-        Some("xxx"),
-        "crate_x",
-    );
+    static CRATE_X: AtCrateInfo = AtCrateInfo::builder()
+        .name("crate-x")
+        .repo(Some("https://github.com/org/crate-x"))
+        .commit(Some("xxx"))
+        .module("crate_x")
+        .build();
 
     // Locations after boundary should use that crate's info
     let err = errat::At::new(TestError)
@@ -493,9 +499,24 @@ fn crate_boundary_affects_subsequent_locations() {
 
 #[test]
 fn multiple_boundary_switches() {
-    static C1: AtCrateInfo = AtCrateInfo::new("c1", Some("https://gh.com/c1"), Some("111"), "c1");
-    static C2: AtCrateInfo = AtCrateInfo::new("c2", Some("https://gh.com/c2"), Some("222"), "c2");
-    static C3: AtCrateInfo = AtCrateInfo::new("c3", Some("https://gh.com/c3"), Some("333"), "c3");
+    static C1: AtCrateInfo = AtCrateInfo::builder()
+        .name("c1")
+        .repo(Some("https://gh.com/c1"))
+        .commit(Some("111"))
+        .module("c1")
+        .build();
+    static C2: AtCrateInfo = AtCrateInfo::builder()
+        .name("c2")
+        .repo(Some("https://gh.com/c2"))
+        .commit(Some("222"))
+        .module("c2")
+        .build();
+    static C3: AtCrateInfo = AtCrateInfo::builder()
+        .name("c3")
+        .repo(Some("https://gh.com/c3"))
+        .commit(Some("333"))
+        .module("c3")
+        .build();
 
     let err = errat::At::new(TestError)
         .at_crate(&C1)
@@ -566,12 +587,12 @@ fn prefer_result_at_over_nested_at() {
 
 #[test]
 fn github_link_has_full_url() {
-    static INFO: AtCrateInfo = AtCrateInfo::new(
-        "mylib",
-        Some("https://github.com/myorg/mylib"),
-        Some("abc123def"),
-        "mylib",
-    );
+    static INFO: AtCrateInfo = AtCrateInfo::builder()
+        .name("mylib")
+        .repo(Some("https://github.com/myorg/mylib"))
+        .commit(Some("abc123def"))
+        .module("mylib")
+        .build();
 
     let err = errat::At::new(TestError).at().at_crate(&INFO);
     let output = format!("{}", err.display_with_meta());
@@ -586,12 +607,12 @@ fn github_link_has_full_url() {
 
 #[test]
 fn github_link_has_file_path() {
-    static INFO: AtCrateInfo = AtCrateInfo::new(
-        "test",
-        Some("https://github.com/org/repo"),
-        Some("deadbeef"),
-        "test",
-    );
+    static INFO: AtCrateInfo = AtCrateInfo::builder()
+        .name("test")
+        .repo(Some("https://github.com/org/repo"))
+        .commit(Some("deadbeef"))
+        .module("test")
+        .build();
 
     let err = errat::At::new(TestError).at().at_crate(&INFO);
     let output = format!("{}", err.display_with_meta());
@@ -606,12 +627,12 @@ fn github_link_has_file_path() {
 
 #[test]
 fn github_link_line_number_is_numeric() {
-    static INFO: AtCrateInfo = AtCrateInfo::new(
-        "test",
-        Some("https://github.com/org/repo"),
-        Some("abc"),
-        "test",
-    );
+    static INFO: AtCrateInfo = AtCrateInfo::builder()
+        .name("test")
+        .repo(Some("https://github.com/org/repo"))
+        .commit(Some("abc"))
+        .module("test")
+        .build();
 
     let err = errat::At::new(TestError).at().at_crate(&INFO);
     let output = format!("{}", err.display_with_meta());
@@ -643,12 +664,12 @@ fn github_link_line_number_is_numeric() {
 fn windows_paths_converted_to_forward_slashes() {
     // The implementation converts backslashes to forward slashes
     // We can't easily test this directly, but we verify no backslashes in output
-    static INFO: AtCrateInfo = AtCrateInfo::new(
-        "test",
-        Some("https://github.com/org/repo"),
-        Some("abc"),
-        "test",
-    );
+    static INFO: AtCrateInfo = AtCrateInfo::builder()
+        .name("test")
+        .repo(Some("https://github.com/org/repo"))
+        .commit(Some("abc"))
+        .module("test")
+        .build();
 
     let err = errat::At::new(TestError).at().at_crate(&INFO);
     let output = format!("{}", err.display_with_meta());
@@ -674,11 +695,11 @@ fn crate_info_commit_is_compile_time() {
     // GIT_COMMIT etc are captured at compile time via option_env!()
     // Falls back to version tag (v{VERSION}) for crates.io compatibility
 
-    let info = crate_info!();
+    let info = crate::__errat_crate_info();
 
     // Should always have a commit (either env var or version tag fallback)
     let commit = info
-        .commit
+        .commit()
         .expect("commit should always be Some due to version fallback");
 
     // Either a hex commit hash OR a version tag like "v0.1.0"
@@ -697,9 +718,9 @@ fn crate_info_version_tag_fallback() {
     // When no GIT_COMMIT env var, falls back to v{CARGO_PKG_VERSION}
     // This makes crates.io dependencies work automatically!
 
-    let info = crate_info!();
+    let info = crate::__errat_crate_info();
     let commit = info
-        .commit
+        .commit()
         .expect("should have commit from version fallback");
 
     // In tests without CI env vars, should be version tag
@@ -720,14 +741,14 @@ fn crate_info_version_tag_fallback() {
 
 #[test]
 fn crate_info_is_truly_static() {
-    // Verify crate_info!() returns truly static data
-    let info1 = crate_info!();
-    let info2 = crate_info!();
+    // Verify crate::__errat_crate_info() returns truly static data
+    let info1 = crate::__errat_crate_info();
+    let info2 = crate::__errat_crate_info();
 
     // Same compilation unit = same static (by value, different addresses ok)
-    assert_eq!(info1.name, info2.name);
-    assert_eq!(info1.repo, info2.repo);
-    assert_eq!(info1.commit, info2.commit);
+    assert_eq!(info1.name(), info2.name());
+    assert_eq!(info1.repo(), info2.repo());
+    assert_eq!(info1.commit(), info2.commit());
 
     // The data is embedded in the binary, not computed at runtime
     // This is verified by the fact that option_env!() is a compile-time macro
@@ -735,27 +756,28 @@ fn crate_info_is_truly_static() {
 
 #[test]
 fn module_path_captured_at_macro_site() {
-    let info = crate_info!();
+    let info = crate::__errat_crate_info();
 
-    // module_path!() captures where crate_info!() is invoked
+    // module_path!() captures where crate::__errat_crate_info() is invoked
     assert!(
-        info.module.starts_with("crate_info"),
+        info.module().starts_with("crate_info"),
         "Module should be this test module. Got: {}",
-        info.module
+        info.module()
     );
 }
 
 mod nested_module {
-    use errat::crate_info;
-
     #[test]
     fn nested_module_has_different_path() {
-        let info = crate_info!();
+        // With the getter pattern, module path is captured at the at_crate_info_static!() site
+        // (crate root), not at the call site. This test verifies that behavior.
+        let info = crate::__errat_crate_info();
 
+        // Module should be the crate root module (where at_crate_info_static!() was called)
         assert!(
-            info.module.contains("nested_module"),
-            "Module should include nested_module. Got: {}",
-            info.module
+            info.module().starts_with("crate_info"),
+            "Module should be crate root. Got: {}",
+            info.module()
         );
     }
 }
@@ -766,13 +788,16 @@ mod nested_module {
 
 #[test]
 fn crate_path_included_in_github_url() {
-    static INFO: AtCrateInfo = AtCrateInfo::with_path(
-        "workspace-crate",
-        Some("https://github.com/org/monorepo"),
-        Some("abc123"),
-        Some("crates/mylib/"), // Crate is in subdirectory
-        "workspace_crate",
-    );
+    static INFO: AtCrateInfo = AtCrateInfo::builder()
+        .name("workspace-crate")
+        .repo(Some("https://github.com/org/monorepo"))
+        .commit(Some("abc123"))
+        .path(Some("crates/mylib/"))
+        .module(
+            // Crate is in subdirectory
+            "workspace_crate",
+        )
+        .build();
 
     let err = errat::At::new(TestError).at().at_crate(&INFO);
     let output = format!("{}", err.display_with_meta());
@@ -787,13 +812,16 @@ fn crate_path_included_in_github_url() {
 
 #[test]
 fn crate_path_none_works() {
-    static INFO: AtCrateInfo = AtCrateInfo::with_path(
-        "root-crate",
-        Some("https://github.com/org/repo"),
-        Some("def456"),
-        None, // Crate at repo root
-        "root_crate",
-    );
+    static INFO: AtCrateInfo = AtCrateInfo::builder()
+        .name("root-crate")
+        .repo(Some("https://github.com/org/repo"))
+        .commit(Some("def456"))
+        .path(None)
+        .module(
+            // Crate at repo root
+            "root_crate",
+        )
+        .build();
 
     let err = errat::At::new(TestError).at().at_crate(&INFO);
     let output = format!("{}", err.display_with_meta());
@@ -808,13 +836,16 @@ fn crate_path_none_works() {
 
 #[test]
 fn crate_path_with_trailing_slash() {
-    static INFO: AtCrateInfo = AtCrateInfo::with_path(
-        "test",
-        Some("https://github.com/org/repo"),
-        Some("abc"),
-        Some("packages/core/"), // With trailing slash
-        "test",
-    );
+    static INFO: AtCrateInfo = AtCrateInfo::builder()
+        .name("test")
+        .repo(Some("https://github.com/org/repo"))
+        .commit(Some("abc"))
+        .path(Some("packages/core/"))
+        .module(
+            // With trailing slash
+            "test",
+        )
+        .build();
 
     let err = errat::At::new(TestError).at().at_crate(&INFO);
     let output = format!("{}", err.display_with_meta());
@@ -834,13 +865,16 @@ fn crate_path_with_trailing_slash() {
 
 #[test]
 fn crate_path_without_trailing_slash() {
-    static INFO: AtCrateInfo = AtCrateInfo::with_path(
-        "test",
-        Some("https://github.com/org/repo"),
-        Some("abc"),
-        Some("packages/core"), // Without trailing slash
-        "test",
-    );
+    static INFO: AtCrateInfo = AtCrateInfo::builder()
+        .name("test")
+        .repo(Some("https://github.com/org/repo"))
+        .commit(Some("abc"))
+        .path(Some("packages/core"))
+        .module(
+            // Without trailing slash
+            "test",
+        )
+        .build();
 
     let err = errat::At::new(TestError).at().at_crate(&INFO);
     let output = format!("{}", err.display_with_meta());
@@ -854,12 +888,12 @@ fn crate_path_without_trailing_slash() {
 }
 
 // ============================================================================
-// crate_info_static!() Macro Tests
+// at_crate_info_static!() Macro Tests
 // ============================================================================
 
 #[test]
 fn crate_info_static_defines_hidden_static() {
-    // __ERRAT_CRATE_INFO is defined by crate_info_static!() at top of file
+    // __ERRAT_CRATE_INFO is defined by at_crate_info_static!() at top of file
     // at!() references it
     let err = at!(TestError);
 
@@ -875,34 +909,34 @@ fn crate_info_static_has_correct_name() {
 
     for ctx in err.contexts() {
         if let Some(info) = ctx.as_crate_info() {
-            assert_eq!(info.name, "errat", "Should have crate name from env");
+            assert_eq!(info.name(), "errat", "Should have crate name from env");
             return;
         }
     }
     panic!("Should find AtCrateInfo in at!() error");
 }
 
-// Test that crate_info_static!(path = "...") variant works
+// Test that at_crate_info_static!(path = "...") variant works
 mod with_path {
     use super::*;
 
     // This would be in a workspace crate's lib.rs
-    // errat::crate_info_static!(path = "crates/mylib/");
+    // errat::at_crate_info_static!(path = "crates/mylib/");
 
     #[test]
     fn path_option_sets_crate_path() {
-        // We can't easily test crate_info_static!(path = ...) here because
-        // we already called crate_info_static!() at the top of this file.
+        // We can't easily test at_crate_info_static!(path = ...) here because
+        // we already called at_crate_info_static!() at the top of this file.
         // Instead, test that AtCrateInfo::with_path works correctly.
-        static INFO: AtCrateInfo = AtCrateInfo::with_path(
-            "test",
-            Some("https://github.com/org/repo"),
-            Some("abc123"),
-            Some("crates/mylib/"),
-            "test",
-        );
+        static INFO: AtCrateInfo = AtCrateInfo::builder()
+            .name("test")
+            .repo(Some("https://github.com/org/repo"))
+            .commit(Some("abc123"))
+            .path(Some("crates/mylib/"))
+            .module("test")
+            .build();
 
-        assert_eq!(INFO.crate_path, Some("crates/mylib/"));
+        assert_eq!(INFO.crate_path(), Some("crates/mylib/"));
 
         let err = errat::At::new(TestError).at().at_crate(&INFO);
         let output = format!("{}", err.display_with_meta());

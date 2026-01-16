@@ -2,10 +2,10 @@
 //!
 //! Run with: cargo run --example derive_macro
 
-use errat::{At, ResultAtExt, at, crate_info};
+use errat::{At, ResultAtExt, at};
 
-// Required for at!() macro
-errat::crate_info_static!();
+// Required for at!() macro - defines __errat_crate_info() getter
+errat::at_crate_info_static!();
 
 #[derive(Debug)]
 #[allow(dead_code)]
@@ -91,11 +91,11 @@ fn main() {
     let err = process_request(0, "test").unwrap_err();
     println!("{}", err.display_with_meta());
 
-    println!("\n=== Example 6: AtCrateInfo macro ===\n");
-    let info = crate_info!();
-    println!("Crate: {}", info.name);
-    println!("Module: {}", info.module);
-    if let Some(repo) = info.repo {
+    println!("\n=== Example 6: AtCrateInfo getter ===\n");
+    let info = __errat_crate_info();
+    println!("Crate: {}", info.name());
+    println!("Module: {}", info.module());
+    if let Some(repo) = info.repo() {
         println!("Repo: {}", repo);
     }
 }

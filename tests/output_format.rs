@@ -4,7 +4,7 @@ use core::error::Error;
 use errat::{At, ErrorAtExt, ResultAtExt, ResultStartAtExt, at};
 
 // Define the crate-level static for at!() to reference
-errat::crate_info_static!();
+errat::at_crate_info_static!();
 
 #[derive(Debug)]
 enum TestError {
@@ -159,7 +159,7 @@ fn data_context_shows_display_format() {
 
 #[test]
 fn skip_marker_shows_brackets() {
-    let err = at(TestError::NotFound).at_skipped();
+    let err = at(TestError::NotFound).at_skipped_frames();
     let output = format!("{:?}", err);
 
     assert!(
@@ -170,13 +170,13 @@ fn skip_marker_shows_brackets() {
 }
 
 #[test]
-fn at_skipped_adds_skip_marker() {
-    let err = at(TestError::NotFound).at_skipped();
+fn at_skipped_frames_adds_skip_marker() {
+    let err = at(TestError::NotFound).at_skipped_frames();
     let output = format!("{:?}", err);
 
     assert!(
         output.contains("[...]"),
-        "at_skipped() should add '[...]' marker. Got:\n{}",
+        "at_skipped_frames() should add '[...]' marker. Got:\n{}",
         output
     );
 }
@@ -517,7 +517,10 @@ fn source_preserved_through_trace_operations() {
     };
 
     // Chain multiple trace operations
-    let traced = at(outer).at_str("context1").at_str("context2").at_skipped();
+    let traced = at(outer)
+        .at_str("context1")
+        .at_str("context2")
+        .at_skipped_frames();
 
     // source() should still work
     let source = traced.source().expect("should have source");

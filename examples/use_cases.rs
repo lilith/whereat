@@ -7,7 +7,7 @@
 use errat::{At, ErrorAtExt, ResultAtExt, ResultStartAtExt, at, at_crate};
 
 // Required for at!() and at_crate!() macros - defines __ERRAT_CRATE_INFO
-errat::crate_info_static!();
+errat::at_crate_info_static!();
 
 // ============================================================================
 // Use Case 1: Basic Error Propagation
@@ -232,11 +232,11 @@ mod use_case_5 {
             .at_str("calling legacy code")
     }
 
-    // Alternative: direct construction with at() + at_skipped()
+    // Alternative: direct construction with at() + at_skipped_frames()
     pub fn wrap_legacy_alt() -> At<&'static str> {
         match legacy::old_function() {
             Ok(()) => unreachable!(),
-            Err(e) => at(e).at_skipped(),
+            Err(e) => at(e).at_skipped_frames(),
         }
     }
 
@@ -247,7 +247,7 @@ mod use_case_5 {
         println!("With start_at_late():");
         println!("{:?}", err);
 
-        println!("\nWith at().at_skipped():");
+        println!("\nWith at().at_skipped_frames():");
         let err = wrap_legacy_alt();
         println!("{:?}", err);
         println!();
@@ -270,5 +270,5 @@ fn main() {
     println!("2. External:   .start_at() / .trace_str() to wrap non-At errors");
     println!("3. Cross-crate: at!() + at_crate!() for GitHub links");
     println!("4. Typed ctx:  .at_debug() / .at_data() + .downcast_ref()");
-    println!("5. Legacy:     .start_at_late() / at().at_skipped() for [...]");
+    println!("5. Legacy:     .start_at_late() / at().at_skipped_frames() for [...]");
 }
