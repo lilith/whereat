@@ -2280,10 +2280,8 @@ pub trait ResultAtTraceableExt<T, E: AtTraceable> {
 
     /// Add location and lazily-computed typed context (Debug formatted).
     #[track_caller]
-    fn at_debug<C: fmt::Debug + Send + Sync + 'static>(
-        self,
-        f: impl FnOnce() -> C,
-    ) -> Result<T, E>;
+    fn at_debug<C: fmt::Debug + Send + Sync + 'static>(self, f: impl FnOnce() -> C)
+    -> Result<T, E>;
 
     /// Add a crate boundary marker.
     #[track_caller]
