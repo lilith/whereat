@@ -781,9 +781,9 @@ macro_rules! __errat_detect_commit {
 /// pub(crate) fn at_crate_info() -> &'static AtCrateInfo {
 ///     CRATE_INFO.get_or_init(|| {
 ///         AtCrateInfo::builder()
-///             .name(env!("CARGO_PKG_NAME"))
-///             .meta_owned(vec![("instance_id", get_instance_id())])
-///             .build_owned()
+///             .name_owned(env!("CARGO_PKG_NAME").into())
+///             .meta_owned(vec![("instance_id".into(), get_instance_id())])
+///             .build()
 ///     })
 /// }
 /// ```
@@ -978,14 +978,14 @@ pub fn at<E>(err: E) -> At<E> {
 }
 
 // ============================================================================
-// AtContext Enum
+// AtContext Enum (internal)
 // ============================================================================
 
-/// AtContext data attached to a trace segment.
+/// Internal context data attached to a trace segment.
 ///
-/// Can be a simple string message, typed data (Debug/Display), or
-/// crate boundary information for cross-crate tracing.
-pub enum AtContext {
+/// This enum is not publicly exposed. Use [`AtContextRef`] to access context data.
+#[non_exhaustive]
+pub(crate) enum AtContext {
     /// A text message describing what operation was being performed.
     /// Uses `Cow<'static, str>` for zero-copy static strings.
     Text(Cow<'static, str>),
@@ -1003,24 +1003,21 @@ pub enum AtContext {
 }
 
 impl AtContext {
-    /// Get as text, if this is a Text variant.
-    pub fn as_text(&self) -> Option<&str> {
+    fn as_text(&self) -> Option<&str> {
         match self {
             AtContext::Text(s) => Some(s),
             _ => None,
         }
     }
 
-    /// Get as crate info, if this is a Crate variant.
-    pub fn as_crate_info(&self) -> Option<&'static AtCrateInfo> {
+    fn as_crate_info(&self) -> Option<&'static AtCrateInfo> {
         match self {
             AtContext::Crate(info) => Some(info),
             _ => None,
         }
     }
 
-    /// Try to downcast to a specific type, if this is a typed variant.
-    pub fn downcast_ref<T: 'static>(&self) -> Option<&T> {
+    fn downcast_ref<T: 'static>(&self) -> Option<&T> {
         match self {
             AtContext::Text(_) | AtContext::Crate(_) | AtContext::Skipped => None,
             // Must use (**b) to call as_any on the trait object, not the Box
@@ -1030,8 +1027,7 @@ impl AtContext {
         }
     }
 
-    /// Get the type name if this is a typed variant.
-    pub fn type_name(&self) -> Option<&'static str> {
+    fn type_name(&self) -> Option<&'static str> {
         match self {
             AtContext::Text(_) | AtContext::Crate(_) | AtContext::Skipped => None,
             AtContext::Debug(b) => Some((**b).type_name()),
@@ -1039,19 +1035,127 @@ impl AtContext {
         }
     }
 
-    /// Check if this context uses Display formatting.
-    pub fn is_display(&self) -> bool {
+    fn is_display(&self) -> bool {
         matches!(self, AtContext::Text(_) | AtContext::Display(_))
     }
 
-    /// Check if this is a crate boundary marker.
-    pub fn is_crate_boundary(&self) -> bool {
+    fn is_crate_boundary(&self) -> bool {
         matches!(self, AtContext::Crate(_))
     }
 
-    /// Check if this is a skip marker.
-    pub fn is_skipped(&self) -> bool {
+    fn is_skipped(&self) -> bool {
         matches!(self, AtContext::Skipped)
+    }
+}
+
+// ============================================================================
+// AtContextRef - Public wrapper for context access
+// ============================================================================
+
+/// A reference to context data attached to a trace location.
+///
+/// This type provides read-only access to context without exposing internal details.
+/// Obtained by iterating over [`At::contexts()`].
+///
+/// ## Example
+///
+/// ```rust
+/// use errat::{at, At};
+///
+/// #[derive(Debug)]
+/// enum MyError { NotFound }
+///
+/// let err = at(MyError::NotFound).at_str("while loading");
+///
+/// for ctx in err.contexts() {
+///     if let Some(text) = ctx.as_text() {
+///         println!("Context: {}", text);
+///     }
+/// }
+/// ```
+#[derive(Clone, Copy)]
+pub struct AtContextRef<'a> {
+    inner: &'a AtContext,
+}
+
+impl<'a> AtContextRef<'a> {
+    /// Get as text, if this is a text context (from `at_str` or `at_string`).
+    #[inline]
+    pub fn as_text(&self) -> Option<&'a str> {
+        self.inner.as_text()
+    }
+
+    /// Get as crate info, if this is a crate boundary marker.
+    #[inline]
+    pub fn as_crate_info(&self) -> Option<&'static AtCrateInfo> {
+        self.inner.as_crate_info()
+    }
+
+    /// Try to downcast to a specific type, if this is typed context.
+    ///
+    /// Works with contexts added via `at_data()` or `at_debug()`.
+    ///
+    /// ## Example
+    ///
+    /// ```rust
+    /// use errat::at;
+    ///
+    /// #[derive(Debug)]
+    /// struct RequestInfo { user_id: u64 }
+    ///
+    /// #[derive(Debug)]
+    /// enum MyError { Forbidden }
+    ///
+    /// let err = at(MyError::Forbidden)
+    ///     .at_debug(|| RequestInfo { user_id: 42 });
+    ///
+    /// for ctx in err.contexts() {
+    ///     if let Some(req) = ctx.downcast_ref::<RequestInfo>() {
+    ///         assert_eq!(req.user_id, 42);
+    ///     }
+    /// }
+    /// ```
+    #[inline]
+    pub fn downcast_ref<T: 'static>(&self) -> Option<&'a T> {
+        self.inner.downcast_ref()
+    }
+
+    /// Get the type name if this is typed context.
+    #[inline]
+    pub fn type_name(&self) -> Option<&'static str> {
+        self.inner.type_name()
+    }
+
+    /// Check if this context uses Display formatting.
+    ///
+    /// Returns `true` for text contexts and `at_data()` contexts.
+    #[inline]
+    pub fn is_display(&self) -> bool {
+        self.inner.is_display()
+    }
+
+    /// Check if this is a crate boundary marker.
+    #[inline]
+    pub fn is_crate_boundary(&self) -> bool {
+        self.inner.is_crate_boundary()
+    }
+
+    /// Check if this is a skip marker (`[...]`).
+    #[inline]
+    pub fn is_skipped(&self) -> bool {
+        self.inner.is_skipped()
+    }
+}
+
+impl fmt::Debug for AtContextRef<'_> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        fmt::Debug::fmt(self.inner, f)
+    }
+}
+
+impl fmt::Display for AtContextRef<'_> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        fmt::Display::fmt(self.inner, f)
     }
 }
 
@@ -1201,20 +1305,12 @@ impl AtTrace {
         self.locations.iter().map(|elem| unwrap_location(elem))
     }
 
-    /// Get the most recent context message (text only).
-    fn message(&self) -> Option<&str> {
-        // Contexts are in order of addition, so iterate backwards for most recent
-        for (_, ctx) in self.contexts.iter().rev() {
-            if let AtContext::Text(msg) = ctx {
-                return Some(msg);
-            }
-        }
-        None
-    }
-
     /// Iterate over all context entries, newest first.
-    fn contexts(&self) -> impl Iterator<Item = &AtContext> {
-        self.contexts.iter().rev().map(|(_, ctx)| ctx)
+    fn contexts(&self) -> impl Iterator<Item = AtContextRef<'_>> {
+        self.contexts
+            .iter()
+            .rev()
+            .map(|(_, ctx)| AtContextRef { inner: ctx })
     }
 
     /// Get context at a specific location index, if any.
@@ -1571,7 +1667,7 @@ impl<E> At<E> {
     /// ## Example
     ///
     /// ```rust
-    /// use errat::{at, At, AtContext};
+    /// use errat::{at, At};
     ///
     /// #[derive(Debug)]
     /// enum MyError { NotFound }
@@ -1629,7 +1725,7 @@ impl<E> At<E> {
     /// ## Example
     ///
     /// ```rust
-    /// use errat::{at, At, AtContext};
+    /// use errat::at;
     ///
     /// #[derive(Debug)]
     /// struct RequestInfo { user_id: u64, path: String }
@@ -1807,16 +1903,29 @@ impl<E> At<E> {
         self.trace_iter().last()
     }
 
-    /// Get the most recent context message (text only), if any was set via `at_msg()`.
-    #[inline]
-    pub fn message(&self) -> Option<&str> {
-        self.trace.as_ref().and_then(|t| t.message())
-    }
-
     /// Iterate over all context entries, newest first.
     ///
-    /// Each call to `at_msg()` or `at_context()` creates a context entry.
-    pub fn contexts(&self) -> impl Iterator<Item = &AtContext> {
+    /// Each call to `at_str()`, `at_string()`, `at_data()`, or `at_debug()` creates
+    /// a context entry. Use [`AtContextRef`] methods to inspect context data.
+    ///
+    /// ## Example
+    ///
+    /// ```rust
+    /// use errat::at;
+    ///
+    /// #[derive(Debug)]
+    /// struct MyError;
+    ///
+    /// let err = at(MyError)
+    ///     .at_str("loading config")
+    ///     .at_str("initializing");
+    ///
+    /// let texts: Vec<_> = err.contexts()
+    ///     .filter_map(|ctx| ctx.as_text())
+    ///     .collect();
+    /// assert_eq!(texts, vec!["initializing", "loading config"]); // newest first
+    /// ```
+    pub fn contexts(&self) -> impl Iterator<Item = AtContextRef<'_>> {
         self.trace.iter().flat_map(|t| t.contexts())
     }
 }
@@ -1897,10 +2006,10 @@ impl<E: fmt::Debug> fmt::Display for DisplayWithMeta<'_, E> {
             return Ok(());
         };
 
-        // Find initial AtCrateInfo from first AtContext::Crate in trace
+        // Find initial AtCrateInfo from first crate boundary in trace
         let mut current_crate: Option<&'static AtCrateInfo> = None;
         for ctx in trace.contexts() {
-            if let AtContext::Crate(info) = ctx {
+            if let Some(info) = ctx.as_crate_info() {
                 current_crate = Some(info);
                 break;
             }
@@ -2615,7 +2724,9 @@ mod tests {
     fn test_at_str() {
         let err = TestError::NotFound.start_at().at_str("while fetching user");
         assert_eq!(err.trace_len(), 2); // start_at + at_str
-        assert_eq!(err.message(), Some("while fetching user"));
+        // Use contexts() to find text context
+        let text = err.contexts().find_map(|c| c.as_text());
+        assert_eq!(text, Some("while fetching user"));
     }
 
     #[test]
@@ -2631,7 +2742,8 @@ mod tests {
 
         let err = outer().unwrap_err();
         assert_eq!(err.trace_len(), 2);
-        assert_eq!(err.message(), Some("during initialization"));
+        let text = err.contexts().find_map(|c| c.as_text());
+        assert_eq!(text, Some("during initialization"));
     }
 
     #[test]
@@ -2647,7 +2759,8 @@ mod tests {
 
         let err = wrapper().unwrap_err();
         assert_eq!(*err.error(), "oops");
-        assert_eq!(err.message(), Some("while doing something"));
+        let text = err.contexts().find_map(|c| c.as_text());
+        assert_eq!(text, Some("while doing something"));
     }
 
     #[test]
