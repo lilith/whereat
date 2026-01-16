@@ -542,13 +542,13 @@ impl<E: fmt::Debug> fmt::Debug for At<E> {
 
         writeln!(f)?;
 
-        // Simple iteration: walk locations, check for context at each index
+        // Simple iteration: walk locations, show all contexts at each index
         // None = skipped frame marker
         for (i, loc_opt) in trace.iter().enumerate() {
             match loc_opt {
                 Some(loc) => {
                     writeln!(f, "    at {}:{}", loc.file(), loc.line())?;
-                    if let Some(context) = trace.context_at(i) {
+                    for context in trace.contexts_at(i) {
                         match context {
                             AtContext::Text(msg) => writeln!(f, "       ╰─ {}", msg)?,
                             AtContext::Debug(t) => writeln!(f, "       ╰─ {:?}", &**t)?,
@@ -632,16 +632,18 @@ impl<E: fmt::Debug> fmt::Display for DisplayWithMeta<'_, E> {
         // None = skipped frame marker
         for (i, loc_opt) in trace.iter().enumerate() {
             // Check for crate boundary at this location - rebuild URL only when crate changes
-            if let Some(AtContext::Crate(info)) = trace.context_at(i) {
-                github_base = build_github_base(info);
+            for context in trace.contexts_at(i) {
+                if let AtContext::Crate(info) = context {
+                    github_base = build_github_base(info);
+                }
             }
 
             match loc_opt {
                 Some(loc) => {
                     write_location_meta(f, loc, github_base.as_deref())?;
 
-                    // Show non-crate context
-                    if let Some(context) = trace.context_at(i) {
+                    // Show non-crate contexts
+                    for context in trace.contexts_at(i) {
                         match context {
                             AtContext::Text(msg) => writeln!(f, "       ╰─ {}", msg)?,
                             AtContext::Debug(t) => writeln!(f, "       ╰─ {:?}", &**t)?,

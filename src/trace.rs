@@ -305,17 +305,36 @@ impl AtTrace {
     }
 
     /// Try to push a location with context.
+    ///
+    /// If the last location has the same file:line as `loc`, just adds context
+    /// to that location instead of pushing a new one. This allows chaining
+    /// multiple context methods on the same line without duplicating frames.
+    ///
     /// On allocation failure, the location/context may be lost but existing data is preserved.
     pub(crate) fn try_push_with_context(
         &mut self,
         loc: &'static Location<'static>,
         context: AtContext,
     ) {
-        if !try_push_location(&mut self.locations, Some(loc)) {
-            return; // Location push failed, skip context too
-        }
-        // Saturate index at u16::MAX
-        let idx = (self.locations.len() - 1).min(u16::MAX as usize) as u16;
+        // Check if last location matches current file:line - if so, just add context
+        let idx = if let Some(Some(last)) = self.locations.last() {
+            if last.file() == loc.file() && last.line() == loc.line() {
+                // Same location - reuse index
+                (self.locations.len() - 1).min(u16::MAX as usize) as u16
+            } else {
+                // Different location - push new
+                if !try_push_location(&mut self.locations, Some(loc)) {
+                    return;
+                }
+                (self.locations.len() - 1).min(u16::MAX as usize) as u16
+            }
+        } else {
+            // Empty or last was skipped - push new location
+            if !try_push_location(&mut self.locations, Some(loc)) {
+                return;
+            }
+            (self.locations.len() - 1).min(u16::MAX as usize) as u16
+        };
         // Try to push context; silently fail on OOM
         let _ = try_push_context(&mut self.contexts, (idx, context));
     }
@@ -339,15 +358,10 @@ impl AtTrace {
             .map(|(_, ctx)| AtContextRef { inner: ctx })
     }
 
-    /// Get context at a specific location index, if any.
-    pub(crate) fn context_at(&self, idx: usize) -> Option<&AtContext> {
-        if idx > u16::MAX as usize {
-            return None;
-        }
-        let idx = idx as u16;
-        // Linear search is fine - contexts vec is typically tiny (0-3 entries)
+    /// Get all contexts at a specific location index.
+    pub(crate) fn contexts_at(&self, idx: usize) -> impl Iterator<Item = &AtContext> {
         context_iter(&self.contexts)
-            .find(|(i, _)| *i == idx)
+            .filter(move |(i, _)| *i as usize == idx)
             .map(|(_, ctx)| ctx)
     }
 }

@@ -641,7 +641,7 @@ mod tests {
     #[test]
     fn test_at_str() {
         let err = TestError::NotFound.start_at().at_str("while fetching user");
-        assert_eq!(err.trace_len(), 2); // start_at + at_str
+        assert_eq!(err.trace_len(), 1); // same line = one location with context
         // Use contexts() to find text context
         let text = err.contexts().find_map(|c| c.as_text());
         assert_eq!(text, Some("while fetching user"));
