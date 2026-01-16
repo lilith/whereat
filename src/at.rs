@@ -9,9 +9,9 @@ use alloc::string::String;
 use core::fmt;
 use core::panic::Location;
 
-use crate::context::{AtContext, AtContextRef};
-use crate::trace::{try_box, AtTrace, DEFAULT_TRACE_CAPACITY};
 use crate::AtCrateInfo;
+use crate::context::{AtContext, AtContextRef};
+use crate::trace::{AtTrace, DEFAULT_TRACE_CAPACITY, try_box};
 
 // ============================================================================
 // At<E> - Core wrapper type
@@ -390,25 +390,63 @@ impl<E> At<E> {
     ///     at(MyError::NotFound).at_skipped_frames()
     /// }
     /// ```
-    #[track_caller]
     #[inline]
     pub fn at_skipped_frames(mut self) -> Self {
-        let loc = Location::caller();
-        let context = AtContext::Skipped;
-
+        // None in locations vec = skipped frame marker
         match &mut self.trace {
             Some(trace) => {
-                trace.try_push_with_context(loc, context);
+                let _ = trace.try_push_skipped();
             }
             None => {
                 let mut trace = AtTrace::new();
-                trace.try_push_with_context(loc, context);
+                let _ = trace.try_push_skipped();
                 if let Some(boxed) = try_box(trace) {
                     self.trace = Some(boxed);
                 }
             }
         }
         self
+    }
+
+    /// Set the crate info for this trace.
+    ///
+    /// This is used by `at!()` to provide repository metadata for GitHub links.
+    /// Calling this creates the trace if it doesn't exist yet.
+    ///
+    /// ## Example
+    ///
+    /// ```rust,ignore
+    /// // Requires define_at_crate_info!() setup
+    /// errat::define_at_crate_info!();
+    ///
+    /// #[derive(Debug)]
+    /// enum MyError { Oops }
+    ///
+    /// let err = At::new(MyError::Oops)
+    ///     .set_crate_info(crate::at_crate_info())
+    ///     .at();
+    /// ```
+    #[inline]
+    pub fn set_crate_info(mut self, info: &'static AtCrateInfo) -> Self {
+        match &mut self.trace {
+            Some(trace) => {
+                trace.set_crate_info(info);
+            }
+            None => {
+                let mut trace = AtTrace::new();
+                trace.set_crate_info(info);
+                if let Some(boxed) = try_box(trace) {
+                    self.trace = Some(boxed);
+                }
+            }
+        }
+        self
+    }
+
+    /// Get the crate info for this trace, if set.
+    #[inline]
+    pub fn crate_info(&self) -> Option<&'static AtCrateInfo> {
+        self.trace.as_ref().and_then(|t| t.crate_info())
     }
 
     /// Get a reference to the inner error.
@@ -442,9 +480,12 @@ impl<E> At<E> {
     }
 
     /// Iterate over all traced locations, oldest first.
+    ///
+    /// Skipped frame markers (`[...]`) are not included in this iteration.
+    /// Use `Debug` formatting to see the full trace with skip markers.
     #[inline]
     pub fn trace_iter(&self) -> impl Iterator<Item = &'static Location<'static>> + '_ {
-        self.trace.iter().flat_map(|t| t.iter())
+        self.trace.iter().flat_map(|t| t.iter()).flatten() // Filter out None (skipped frame markers)
     }
 
     /// Get the first (oldest) location in the trace, if any.
@@ -502,15 +543,22 @@ impl<E: fmt::Debug> fmt::Debug for At<E> {
         writeln!(f)?;
 
         // Simple iteration: walk locations, check for context at each index
-        for (i, loc) in trace.iter().enumerate() {
-            writeln!(f, "    at {}:{}", loc.file(), loc.line())?;
-            if let Some(context) = trace.context_at(i) {
-                match context {
-                    AtContext::Text(msg) => writeln!(f, "       ╰─ {}", msg)?,
-                    AtContext::Debug(t) => writeln!(f, "       ╰─ {:?}", &**t)?,
-                    AtContext::Display(t) => writeln!(f, "       ╰─ {}", &**t)?,
-                    AtContext::Crate(_) => {} // Crate boundaries don't display in basic Debug
-                    AtContext::Skipped => writeln!(f, "       [...]")?,
+        // None = skipped frame marker
+        for (i, loc_opt) in trace.iter().enumerate() {
+            match loc_opt {
+                Some(loc) => {
+                    writeln!(f, "    at {}:{}", loc.file(), loc.line())?;
+                    if let Some(context) = trace.context_at(i) {
+                        match context {
+                            AtContext::Text(msg) => writeln!(f, "       ╰─ {}", msg)?,
+                            AtContext::Debug(t) => writeln!(f, "       ╰─ {:?}", &**t)?,
+                            AtContext::Display(t) => writeln!(f, "       ╰─ {}", &**t)?,
+                            AtContext::Crate(_) => {} // Crate boundaries don't display in basic Debug
+                        }
+                    }
+                }
+                None => {
+                    writeln!(f, "    [...]")?;
                 }
             }
         }
@@ -566,42 +614,44 @@ impl<E: fmt::Debug> fmt::Display for DisplayWithMeta<'_, E> {
             return Ok(());
         };
 
-        // Find initial AtCrateInfo from first crate boundary in trace
-        let mut current_crate: Option<&'static AtCrateInfo> = None;
-        for ctx in trace.contexts() {
-            if let Some(info) = ctx.as_crate_info() {
-                current_crate = Some(info);
-                break;
-            }
-        }
+        // Use crate_info field first (set by at!() macro)
+        // at_crate() context entries can override this per-location
+        let initial_crate = trace.crate_info();
 
         // Show crate info if available
-        if let Some(info) = current_crate {
+        if let Some(info) = initial_crate {
             writeln!(f, "  crate: {}", info.name())?;
         }
 
         writeln!(f)?;
 
-        // Cache GitHub base URL - only rebuild when crate boundary changes
-        let mut github_base: Option<String> = current_crate.and_then(build_github_base);
+        // Cache GitHub base URL - rebuild when crate boundary changes
+        let mut github_base: Option<String> = initial_crate.and_then(build_github_base);
 
         // Walk locations, updating GitHub base when we encounter crate boundaries
-        for (i, loc) in trace.iter().enumerate() {
+        // None = skipped frame marker
+        for (i, loc_opt) in trace.iter().enumerate() {
             // Check for crate boundary at this location - rebuild URL only when crate changes
             if let Some(AtContext::Crate(info)) = trace.context_at(i) {
                 github_base = build_github_base(info);
             }
 
-            write_location_meta(f, loc, github_base.as_deref())?;
+            match loc_opt {
+                Some(loc) => {
+                    write_location_meta(f, loc, github_base.as_deref())?;
 
-            // Show non-crate context
-            if let Some(context) = trace.context_at(i) {
-                match context {
-                    AtContext::Text(msg) => writeln!(f, "       ╰─ {}", msg)?,
-                    AtContext::Debug(t) => writeln!(f, "       ╰─ {:?}", &**t)?,
-                    AtContext::Display(t) => writeln!(f, "       ╰─ {}", &**t)?,
-                    AtContext::Crate(_) => {} // Already handled above
-                    AtContext::Skipped => writeln!(f, "       [...]")?,
+                    // Show non-crate context
+                    if let Some(context) = trace.context_at(i) {
+                        match context {
+                            AtContext::Text(msg) => writeln!(f, "       ╰─ {}", msg)?,
+                            AtContext::Debug(t) => writeln!(f, "       ╰─ {:?}", &**t)?,
+                            AtContext::Display(t) => writeln!(f, "       ╰─ {}", &**t)?,
+                            AtContext::Crate(_) => {} // Already handled above
+                        }
+                    }
+                }
+                None => {
+                    writeln!(f, "    [...]")?;
                 }
             }
         }

@@ -10,32 +10,43 @@ use alloc::vec::Vec;
 use core::fmt;
 use core::panic::Location;
 
-use crate::context::{AtContext, AtContextRef};
 use crate::AtCrateInfo;
+use crate::context::{AtContext, AtContextRef};
+
+/// Context entry: (location_index, context).
+type ContextEntry = (u16, AtContext);
 
 // ============================================================================
 // LocationVec - configurable storage for trace locations
 // ============================================================================
 //
+// Locations are stored as Option<&'static Location> where:
+// - Some(loc) = a real captured location
+// - None = skipped frame marker (displayed as [...])
+//
+// This eliminates the need for AtContext::Skipped and saves context allocations.
+// Option<&T> has the same size as &T due to null pointer optimization.
+//
 // When tinyvec features are enabled, we use TinyVec which starts with inline
-// storage and spills to heap when capacity is exceeded. We use Option<&Location>
-// as the element type because tinyvec requires Default, and Option<&T> has the
-// same size as &T due to null pointer optimization.
+// storage and spills to heap when capacity is exceeded.
 
-/// Stack-first location storage with 3 inline slots (tinyvec-64-bytes: sizeof(AtTrace) = 64).
+/// Location element type. None = skipped frame marker.
+type LocationElem = Option<&'static Location<'static>>;
+
+/// Stack-first location storage with 4 inline slots (tinyvec-64-bytes: sizeof(AtTrace) ≤ 64).
 #[cfg(all(
     feature = "tinyvec-64-bytes",
     not(any(feature = "tinyvec-128-bytes", feature = "tinyvec-256-bytes"))
 ))]
-type LocationVec = tinyvec::TinyVec<[Option<&'static Location<'static>>; 3]>;
+type LocationVec = tinyvec::TinyVec<[LocationElem; 4]>;
 
-/// Stack-first location storage with 11 inline slots (tinyvec-128-bytes: sizeof(AtTrace) = 128).
+/// Stack-first location storage with 12 inline slots (tinyvec-128-bytes: sizeof(AtTrace) ≤ 128).
 #[cfg(all(feature = "tinyvec-128-bytes", not(feature = "tinyvec-256-bytes")))]
-type LocationVec = tinyvec::TinyVec<[Option<&'static Location<'static>>; 11]>;
+type LocationVec = tinyvec::TinyVec<[LocationElem; 12]>;
 
-/// Stack-first location storage with 27 inline slots (tinyvec-256-bytes: sizeof(AtTrace) = 256).
+/// Stack-first location storage with 28 inline slots (tinyvec-256-bytes: sizeof(AtTrace) ≤ 256).
 #[cfg(feature = "tinyvec-256-bytes")]
-type LocationVec = tinyvec::TinyVec<[Option<&'static Location<'static>>; 27]>;
+type LocationVec = tinyvec::TinyVec<[LocationElem; 28]>;
 
 /// Heap-allocated location storage (default, no tinyvec feature).
 #[cfg(not(any(
@@ -43,23 +54,17 @@ type LocationVec = tinyvec::TinyVec<[Option<&'static Location<'static>>; 27]>;
     feature = "tinyvec-128-bytes",
     feature = "tinyvec-256-bytes"
 )))]
-type LocationVec = Vec<&'static Location<'static>>;
+type LocationVec = Vec<LocationElem>;
 
-/// Element type stored in LocationVec (Option-wrapped for tinyvec).
-#[cfg(any(
-    feature = "tinyvec-64-bytes",
-    feature = "tinyvec-128-bytes",
-    feature = "tinyvec-256-bytes"
-))]
-type LocationElem = Option<&'static Location<'static>>;
+// ============================================================================
+// ContextVec - lazily-allocated context storage
+// ============================================================================
+//
+// Context storage is typically empty (most traces have no context).
+// Using Option<Box<Vec>> saves 16 bytes vs Vec in the common case (8 vs 24).
 
-/// Element type stored in LocationVec (direct reference for Vec).
-#[cfg(not(any(
-    feature = "tinyvec-64-bytes",
-    feature = "tinyvec-128-bytes",
-    feature = "tinyvec-256-bytes"
-)))]
-type LocationElem = &'static Location<'static>;
+/// Lazily-allocated context storage. Most traces have no context.
+type ContextVec = Option<Box<Vec<ContextEntry>>>;
 
 // ============================================================================
 // Fallible Allocation Helpers
@@ -88,34 +93,32 @@ pub(crate) fn try_box<T>(value: T) -> Option<Box<T>> {
     Some(Box::new(value))
 }
 
-/// Try to push a location onto a LocationVec, returning false on failure.
-/// For Vec: fails on allocation error.
+/// Try to push a location onto a LocationVec, returning false on allocation failure.
+/// For Vec: uses try_reserve. For TinyVec: spills to heap if needed.
 #[cfg(not(any(
     feature = "tinyvec-64-bytes",
     feature = "tinyvec-128-bytes",
     feature = "tinyvec-256-bytes"
 )))]
 #[inline]
-fn try_push_location(vec: &mut LocationVec, value: &'static Location<'static>) -> bool {
+fn try_push_location(vec: &mut LocationVec, elem: LocationElem) -> bool {
     if vec.try_reserve(1).is_err() {
         return false;
     }
-    vec.push(value);
+    vec.push(elem);
     true
 }
 
-/// Try to push a location onto a LocationVec, returning false on allocation failure.
-/// For TinyVec: wraps in Some(), spills to heap if inline capacity exceeded.
+/// Try to push a location onto a LocationVec (TinyVec version).
+/// TinyVec spills to heap if inline capacity exceeded.
 #[cfg(any(
     feature = "tinyvec-64-bytes",
     feature = "tinyvec-128-bytes",
     feature = "tinyvec-256-bytes"
 ))]
 #[inline]
-fn try_push_location(vec: &mut LocationVec, value: &'static Location<'static>) -> bool {
-    // TinyVec will spill to heap if needed, so this always succeeds
-    // (unless we're truly out of memory, but then we'd panic anyway)
-    vec.push(Some(value));
+fn try_push_location(vec: &mut LocationVec, elem: LocationElem) -> bool {
+    vec.push(elem);
     true
 }
 
@@ -146,27 +149,31 @@ fn try_location_vec_with_capacity(_capacity: usize) -> Option<LocationVec> {
     Some(LocationVec::new())
 }
 
-/// Get location from LocationVec element reference (identity for Vec, unwrap for TinyVec).
-#[cfg(not(any(
-    feature = "tinyvec-64-bytes",
-    feature = "tinyvec-128-bytes",
-    feature = "tinyvec-256-bytes"
-)))]
+// ============================================================================
+// ContextVec Helpers
+// ============================================================================
+
+/// Create a new empty ContextVec.
 #[inline]
-fn unwrap_location(loc: &LocationElem) -> &'static Location<'static> {
-    loc
+fn context_vec_new() -> ContextVec {
+    None
 }
 
-/// Get location from LocationVec element reference (identity for Vec, unwrap for TinyVec).
-#[cfg(any(
-    feature = "tinyvec-64-bytes",
-    feature = "tinyvec-128-bytes",
-    feature = "tinyvec-256-bytes"
-))]
+/// Try to push a context entry (lazily allocates on first push).
 #[inline]
-fn unwrap_location(loc: &LocationElem) -> &'static Location<'static> {
-    // Safe because we only ever push Some values
-    loc.expect("LocationVec should only contain Some values")
+fn try_push_context(vec: &mut ContextVec, entry: ContextEntry) -> bool {
+    let inner = vec.get_or_insert_with(|| Box::new(Vec::new()));
+    if inner.try_reserve(1).is_err() {
+        return false;
+    }
+    inner.push(entry);
+    true
+}
+
+/// Iterate over contexts.
+#[inline]
+fn context_iter(vec: &ContextVec) -> impl DoubleEndedIterator<Item = &ContextEntry> {
+    vec.iter().flat_map(|v| v.iter())
 }
 
 // ============================================================================
@@ -211,9 +218,12 @@ fn unwrap_location(loc: &LocationElem) -> &'static Location<'static> {
 pub struct AtTrace {
     /// All locations in order (oldest first).
     locations: LocationVec,
+    /// Crate info for generating repository links (stored once, not per-location).
+    /// Set by `at!()` macro or `set_crate_info()` method.
+    crate_info: Option<&'static AtCrateInfo>,
     /// AtContext associations: (location_index, context).
     /// Index saturates at u16::MAX; out-of-bounds associations are silently ignored.
-    contexts: Vec<(u16, AtContext)>,
+    contexts: ContextVec,
 }
 
 impl AtTrace {
@@ -224,7 +234,8 @@ impl AtTrace {
     pub fn new() -> Self {
         Self {
             locations: LocationVec::new(),
-            contexts: Vec::new(),
+            crate_info: None,
+            contexts: context_vec_new(),
         }
     }
 
@@ -261,14 +272,36 @@ impl AtTrace {
     pub(crate) fn try_with_capacity(cap: usize) -> Option<Self> {
         Some(Self {
             locations: try_location_vec_with_capacity(cap)?,
-            contexts: Vec::new(),
+            crate_info: None,
+            contexts: context_vec_new(),
         })
+    }
+
+    /// Set the crate info for this trace.
+    ///
+    /// This is used by `at!()` to provide repository metadata for GitHub links.
+    /// Only one crate info can be set per trace - subsequent calls overwrite.
+    #[inline]
+    pub fn set_crate_info(&mut self, info: &'static AtCrateInfo) {
+        self.crate_info = Some(info);
+    }
+
+    /// Get the crate info for this trace, if set.
+    #[inline]
+    pub fn crate_info(&self) -> Option<&'static AtCrateInfo> {
+        self.crate_info
     }
 
     /// Try to push a location. Returns false if allocation fails.
     #[inline]
     pub(crate) fn try_push(&mut self, loc: &'static Location<'static>) -> bool {
-        try_push_location(&mut self.locations, loc)
+        try_push_location(&mut self.locations, Some(loc))
+    }
+
+    /// Try to push a skipped frame marker. Returns false if allocation fails.
+    #[inline]
+    pub(crate) fn try_push_skipped(&mut self) -> bool {
+        try_push_location(&mut self.locations, None)
     }
 
     /// Try to push a location with context.
@@ -278,32 +311,30 @@ impl AtTrace {
         loc: &'static Location<'static>,
         context: AtContext,
     ) {
-        if !try_push_location(&mut self.locations, loc) {
+        if !try_push_location(&mut self.locations, Some(loc)) {
             return; // Location push failed, skip context too
         }
         // Saturate index at u16::MAX
         let idx = (self.locations.len() - 1).min(u16::MAX as usize) as u16;
         // Try to push context; silently fail on OOM
-        if self.contexts.try_reserve(1).is_ok() {
-            self.contexts.push((idx, context));
-        }
+        let _ = try_push_context(&mut self.contexts, (idx, context));
     }
 
-    /// Get the number of locations in the trace.
+    /// Get the number of entries in the trace (locations + skipped markers).
     #[inline]
     pub(crate) fn len(&self) -> usize {
         self.locations.len()
     }
 
-    /// Iterate over all locations, oldest first.
-    pub(crate) fn iter(&self) -> impl Iterator<Item = &'static Location<'static>> + '_ {
-        self.locations.iter().map(|elem| unwrap_location(elem))
+    /// Iterate over all location entries, oldest first.
+    /// Returns Option where None = skipped frame marker.
+    pub(crate) fn iter(&self) -> impl Iterator<Item = Option<&'static Location<'static>>> + '_ {
+        self.locations.iter().copied()
     }
 
     /// Iterate over all context entries, newest first.
     pub(crate) fn contexts(&self) -> impl Iterator<Item = AtContextRef<'_>> {
-        self.contexts
-            .iter()
+        context_iter(&self.contexts)
             .rev()
             .map(|(_, ctx)| AtContextRef { inner: ctx })
     }
@@ -315,8 +346,7 @@ impl AtTrace {
         }
         let idx = idx as u16;
         // Linear search is fine - contexts vec is typically tiny (0-3 entries)
-        self.contexts
-            .iter()
+        context_iter(&self.contexts)
             .find(|(i, _)| *i == idx)
             .map(|(_, ctx)| ctx)
     }
@@ -497,12 +527,11 @@ pub trait AtTraceable: Sized {
     }
 
     /// Add a skip marker to indicate skipped frames.
-    #[track_caller]
+    /// Displayed as `[...]` in trace output.
     #[inline]
     fn at_skipped_frames(mut self) -> Self {
-        let context = AtContext::Skipped;
-        self.trace_mut()
-            .try_push_with_context(Location::caller(), context);
+        // None in locations vec = skipped frame marker
+        let _ = self.trace_mut().try_push_skipped();
         self
     }
 }

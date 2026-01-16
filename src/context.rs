@@ -69,6 +69,9 @@ impl<T: core::any::Any + fmt::Display + Send + Sync> AtDisplayAny for T {
 /// Internal context data attached to a trace segment.
 ///
 /// This enum is not publicly exposed. Use [`AtContextRef`] to access context data.
+///
+/// Note: Skipped frames are represented as `None` in the locations vec,
+/// not as a context entry. This saves allocation for skipped frame markers.
 #[non_exhaustive]
 pub(crate) enum AtContext {
     /// A text message describing what operation was being performed.
@@ -81,10 +84,6 @@ pub(crate) enum AtContext {
     /// Crate boundary marker - changes the assumed crate for subsequent locations.
     /// Used for generating correct repository links in cross-crate traces.
     Crate(&'static AtCrateInfo),
-    /// Marker indicating that some frames were skipped.
-    /// Used when starting tracing late or skipping intermediate frames.
-    /// Displayed as `[...]` in trace output.
-    Skipped,
 }
 
 impl AtContext {
@@ -104,7 +103,7 @@ impl AtContext {
 
     pub(crate) fn downcast_ref<T: 'static>(&self) -> Option<&T> {
         match self {
-            AtContext::Text(_) | AtContext::Crate(_) | AtContext::Skipped => None,
+            AtContext::Text(_) | AtContext::Crate(_) => None,
             // Must use (**b) to call as_any on the trait object, not the Box
             // (Box<dyn AtDebugAny> itself implements AtDebugAny through the blanket impl)
             AtContext::Debug(b) => (**b).as_any().downcast_ref(),
@@ -114,7 +113,7 @@ impl AtContext {
 
     pub(crate) fn type_name(&self) -> Option<&'static str> {
         match self {
-            AtContext::Text(_) | AtContext::Crate(_) | AtContext::Skipped => None,
+            AtContext::Text(_) | AtContext::Crate(_) => None,
             AtContext::Debug(b) => Some((**b).type_name()),
             AtContext::Display(b) => Some((**b).type_name()),
         }
@@ -127,10 +126,6 @@ impl AtContext {
     pub(crate) fn is_crate_boundary(&self) -> bool {
         matches!(self, AtContext::Crate(_))
     }
-
-    pub(crate) fn is_skipped(&self) -> bool {
-        matches!(self, AtContext::Skipped)
-    }
 }
 
 impl fmt::Debug for AtContext {
@@ -140,7 +135,6 @@ impl fmt::Debug for AtContext {
             AtContext::Debug(t) => write!(f, "{:?}", &**t),
             AtContext::Display(t) => write!(f, "{}", &**t), // Display types use Display even in Debug
             AtContext::Crate(info) => write!(f, "[crate: {}]", info.name()),
-            AtContext::Skipped => write!(f, "[...]"),
         }
     }
 }
@@ -152,7 +146,6 @@ impl fmt::Display for AtContext {
             AtContext::Debug(t) => write!(f, "{:?}", &**t), // Debug types use Debug in Display
             AtContext::Display(t) => write!(f, "{}", &**t),
             AtContext::Crate(info) => write!(f, "[crate: {}]", info.name()),
-            AtContext::Skipped => write!(f, "[...]"),
         }
     }
 }
@@ -247,12 +240,6 @@ impl<'a> AtContextRef<'a> {
     #[inline]
     pub fn is_crate_boundary(&self) -> bool {
         self.inner.is_crate_boundary()
-    }
-
-    /// Check if this is a skip marker (`[...]`).
-    #[inline]
-    pub fn is_skipped(&self) -> bool {
-        self.inner.is_skipped()
     }
 }
 

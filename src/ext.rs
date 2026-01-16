@@ -11,9 +11,9 @@
 use alloc::string::String;
 use core::fmt;
 
+use crate::AtCrateInfo;
 use crate::at::At;
 use crate::trace::AtTraceable;
-use crate::AtCrateInfo;
 
 // ============================================================================
 // ErrorAtExt Trait - for calling .start_at() directly on error values
@@ -127,7 +127,6 @@ pub trait ResultAtExt<T, E> {
     fn at_crate(self, info: &'static AtCrateInfo) -> Result<T, At<E>>;
 
     /// Add a skip marker to indicate skipped frames.
-    #[track_caller]
     fn at_skipped_frames(self) -> Result<T, At<E>>;
 }
 
@@ -192,7 +191,6 @@ impl<T, E> ResultAtExt<T, E> for Result<T, At<E>> {
         }
     }
 
-    #[track_caller]
     #[inline]
     fn at_skipped_frames(self) -> Result<T, At<E>> {
         match self {
@@ -323,14 +321,13 @@ pub trait ResultAtTraceableExt<T, E: AtTraceable> {
     /// Add location and lazily-computed typed context (Debug formatted).
     #[track_caller]
     fn at_debug<C: fmt::Debug + Send + Sync + 'static>(self, f: impl FnOnce() -> C)
-        -> Result<T, E>;
+    -> Result<T, E>;
 
     /// Add a crate boundary marker.
     #[track_caller]
     fn at_crate(self, info: &'static AtCrateInfo) -> Result<T, E>;
 
     /// Add a skip marker to indicate skipped frames.
-    #[track_caller]
     fn at_skipped_frames(self) -> Result<T, E>;
 }
 
@@ -377,7 +374,6 @@ impl<T, E: AtTraceable> ResultAtTraceableExt<T, E> for Result<T, E> {
         self.map_err(|e| e.at_crate(info))
     }
 
-    #[track_caller]
     #[inline]
     fn at_skipped_frames(self) -> Result<T, E> {
         self.map_err(|e| e.at_skipped_frames())

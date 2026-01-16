@@ -343,7 +343,11 @@ macro_rules! define_at_crate_info {
 #[macro_export]
 #[allow(clippy::crate_in_macro_def)] // Intentional: calls caller's crate getter
 macro_rules! at {
-    ($err:expr) => {{ $crate::At::new($err).at().at_crate(crate::at_crate_info()) }};
+    ($err:expr) => {{
+        $crate::At::new($err)
+            .set_crate_info(crate::at_crate_info())
+            .at()
+    }};
 }
 
 /// Add crate boundary marker to a Result with an At<E> error.
@@ -406,10 +410,10 @@ pub fn at<E>(err: E) -> At<E> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::context::AtContext;
     use alloc::boxed::Box;
     use alloc::string::String;
     use alloc::vec::Vec;
-    use crate::context::AtContext;
     use core::fmt;
 
     #[derive(Debug, PartialEq)]
@@ -456,17 +460,17 @@ mod tests {
         let trace_size = size_of::<AtTrace>();
 
         // AtTrace size depends on feature flags:
-        // - Without tinyvec: 48 bytes (two Vec<_> at 24 bytes each)
-        // - tinyvec-64-bytes: 64 bytes exactly
-        // - tinyvec-128-bytes: 128 bytes exactly
-        // - tinyvec-256-bytes: 256 bytes exactly
+        // - Without tinyvec: 40 bytes (locations Vec 24 + crate_info 8 + contexts Option<Box> 8)
+        // - tinyvec-64-bytes: 64 bytes (TinyVec<4 slots> 48 + crate_info 8 + contexts 8)
+        // - tinyvec-128-bytes: 128 bytes (TinyVec<12 slots> 112 + crate_info 8 + contexts 8)
+        // - tinyvec-256-bytes: 256 bytes (TinyVec<28 slots> 240 + crate_info 8 + contexts 8)
 
         #[cfg(not(any(
             feature = "tinyvec-64-bytes",
             feature = "tinyvec-128-bytes",
             feature = "tinyvec-256-bytes"
         )))]
-        assert_eq!(trace_size, 48, "AtTrace should be 48 bytes without tinyvec");
+        assert_eq!(trace_size, 40, "AtTrace should be 40 bytes without tinyvec");
 
         #[cfg(all(
             feature = "tinyvec-64-bytes",

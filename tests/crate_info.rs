@@ -88,9 +88,13 @@ fn multiple_crate_info_calls_same_static() {
 fn at_macro_embeds_crate_info() {
     let err = at!(TestError);
 
-    // Should have crate info in contexts
-    let has_crate_ctx = err.contexts().any(|ctx| ctx.is_crate_boundary());
-    assert!(has_crate_ctx, "at!() should embed crate info");
+    // at!() now stores crate info directly on the trace, not in contexts
+    assert!(
+        err.crate_info().is_some(),
+        "at!() should embed crate info. Got: {:?}",
+        err.crate_info()
+    );
+    assert_eq!(err.crate_info().unwrap().name(), "errat");
 }
 
 #[test]
@@ -106,12 +110,18 @@ fn at_crate_adds_boundary_marker() {
 
     let err = outer().unwrap_err();
 
-    // Should have at least 2 crate boundaries (at! and at_crate!)
+    // at!() sets crate_info on trace (not a context), at_crate!() adds a context
+    // So we should have 1 crate boundary in contexts (from at_crate!)
     let crate_count = err.contexts().filter(|ctx| ctx.is_crate_boundary()).count();
     assert!(
-        crate_count >= 2,
-        "Should have multiple crate boundaries. Got: {}",
+        crate_count >= 1,
+        "Should have at least one crate boundary from at_crate!(). Got: {}",
         crate_count
+    );
+    // And the trace should have crate_info set (from at!())
+    assert!(
+        err.crate_info().is_some(),
+        "Should have crate_info set from at!()"
     );
 }
 
@@ -119,13 +129,9 @@ fn at_crate_adds_boundary_marker() {
 fn crate_info_accessible_from_context() {
     let err = at!(TestError);
 
-    for ctx in err.contexts() {
-        if let Some(info) = ctx.as_crate_info() {
-            assert_eq!(info.name(), "errat");
-            return;
-        }
-    }
-    panic!("Should find AtCrateInfo in contexts");
+    // at!() stores crate info directly on the trace via crate_info()
+    let info = err.crate_info().expect("Should find AtCrateInfo on trace");
+    assert_eq!(info.name(), "errat");
 }
 
 #[test]
@@ -167,16 +173,23 @@ fn cross_crate_trace_has_multiple_boundaries() {
 
     let err = my_wrapper().unwrap_err();
 
-    // Count crate boundaries
-    let boundaries: Vec<_> = err
+    // at!() in dep sets crate_info on trace (not a context)
+    // at_crate!() in wrapper adds a crate boundary context
+    // So we have: crate_info from at!() + 1 context from at_crate!()
+    assert!(
+        err.crate_info().is_some(),
+        "Should have crate_info from at!()"
+    );
+
+    let boundary_contexts: Vec<_> = err
         .contexts()
         .filter_map(|ctx| ctx.as_crate_info())
         .collect();
 
     assert!(
-        boundaries.len() >= 2,
-        "Cross-crate trace should have multiple boundaries. Got: {}",
-        boundaries.len()
+        !boundary_contexts.is_empty(),
+        "Should have at least one boundary context from at_crate!(). Got: {}",
+        boundary_contexts.len()
     );
 }
 
@@ -884,12 +897,14 @@ fn crate_path_without_trailing_slash() {
 #[test]
 fn crate_info_static_defines_hidden_static() {
     // __AT_CRATE_INFO is defined by define_at_crate_info!() at top of file
-    // at!() references it
+    // at!() references it via set_crate_info()
     let err = at!(TestError);
 
-    // Should have crate info in contexts
-    let has_crate_ctx = err.contexts().any(|ctx| ctx.is_crate_boundary());
-    assert!(has_crate_ctx, "at!() should reference crate static");
+    // at!() now sets crate_info directly on trace (not as context)
+    assert!(
+        err.crate_info().is_some(),
+        "at!() should reference crate static"
+    );
 }
 
 #[test]
@@ -897,13 +912,11 @@ fn crate_info_static_has_correct_name() {
     // The static should have captured CARGO_PKG_NAME
     let err = at!(TestError);
 
-    for ctx in err.contexts() {
-        if let Some(info) = ctx.as_crate_info() {
-            assert_eq!(info.name(), "errat", "Should have crate name from env");
-            return;
-        }
-    }
-    panic!("Should find AtCrateInfo in at!() error");
+    // at!() stores crate info on trace via crate_info()
+    let info = err
+        .crate_info()
+        .expect("Should find AtCrateInfo in at!() error");
+    assert_eq!(info.name(), "errat", "Should have crate name from env");
 }
 
 // Test that define_at_crate_info!(path = "...") variant works
