@@ -116,7 +116,7 @@ pub use at::At;
 pub use context::{AtContextRef, AtDebugAny, AtDisplayAny};
 pub use crate_info::{AtCrateInfo, AtCrateInfoBuilder};
 pub use ext::{ErrorAtExt, ResultAtExt, ResultAtTraceableExt, ResultStartAtExt};
-pub use trace::{AtTrace, AtTraceable};
+pub use trace::{AtTrace, AtTraceable, AtTraceSegment};
 
 // ============================================================================
 // Crate-level error tracking info (for errat's own at!() / at_crate!() usage)

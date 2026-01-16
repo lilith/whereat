@@ -11,7 +11,7 @@ use core::panic::Location;
 
 use crate::AtCrateInfo;
 use crate::context::{AtContext, AtContextRef};
-use crate::trace::{AtTrace, DEFAULT_TRACE_CAPACITY, try_box};
+use crate::trace::{AtTrace, AtTraceSegment, DEFAULT_TRACE_CAPACITY, try_box};
 
 // ============================================================================
 // At<E> - Core wrapper type
@@ -78,6 +78,29 @@ impl<E> At<E> {
     #[inline]
     pub const fn new(error: E) -> Self {
         Self { error, trace: None }
+    }
+
+    /// Create an `At<E>` from an error and an existing trace.
+    ///
+    /// Used for transferring traces between error types.
+    pub fn from_parts(error: E, trace: AtTrace) -> Self {
+        Self {
+            error,
+            trace: if trace.is_empty() {
+                None
+            } else {
+                try_box(trace)
+            },
+        }
+    }
+
+    /// Ensure trace exists, creating it if necessary.
+    fn ensure_trace(&mut self) -> &mut AtTrace {
+        if self.trace.is_none() {
+            self.trace = try_box(AtTrace::new());
+        }
+        // Safe: we just ensured it exists, or we're in OOM and will crash anyway
+        self.trace.as_mut().expect("trace should exist")
     }
 
     /// Add the caller's location to the trace.
@@ -326,6 +349,51 @@ impl<E> At<E> {
         self
     }
 
+    /// Add an error as context to the last location (or create one if empty).
+    ///
+    /// Use this to attach a source error that implements `core::error::Error`.
+    /// The error's `.source()` chain is preserved and can be traversed.
+    ///
+    /// ## Example
+    ///
+    /// ```rust
+    /// use errat::at;
+    /// use std::io;
+    ///
+    /// #[derive(Debug)]
+    /// struct MyError;
+    ///
+    /// fn wrap_io_error(io_err: io::Error) -> errat::At<MyError> {
+    ///     at(MyError).at_error(io_err)
+    /// }
+    /// ```
+    #[track_caller]
+    #[inline]
+    pub fn at_error<Err: core::error::Error + Send + Sync + 'static>(
+        mut self,
+        err: Err,
+    ) -> Self {
+        let loc = Location::caller();
+        let Some(boxed_err) = try_box(err) else {
+            return self;
+        };
+        let context = AtContext::Error(boxed_err);
+
+        match &mut self.trace {
+            Some(trace) => {
+                trace.try_add_context(loc, context);
+            }
+            None => {
+                let mut trace = AtTrace::new();
+                trace.try_add_context(loc, context);
+                if let Some(boxed) = try_box(trace) {
+                    self.trace = Some(boxed);
+                }
+            }
+        }
+        self
+    }
+
     /// Add a crate boundary marker to the last location (or create one if empty).
     ///
     /// This marks that subsequent locations belong to a different crate,
@@ -525,6 +593,115 @@ impl<E> At<E> {
     pub fn contexts(&self) -> impl Iterator<Item = AtContextRef<'_>> {
         self.trace.iter().flat_map(|t| t.contexts())
     }
+
+    // ========================================================================
+    // Trace manipulation methods
+    // ========================================================================
+
+    /// Pop the most recent location and its contexts from the trace.
+    ///
+    /// Returns `None` if the trace is empty.
+    pub fn at_pop(&mut self) -> Option<AtTraceSegment> {
+        self.trace.as_mut()?.pop()
+    }
+
+    /// Push a segment (location + contexts) to the end of the trace.
+    pub fn at_push(&mut self, segment: AtTraceSegment) {
+        self.ensure_trace().push(segment);
+    }
+
+    /// Pop the oldest location and its contexts from the trace.
+    ///
+    /// Returns `None` if the trace is empty.
+    pub fn at_first_pop(&mut self) -> Option<AtTraceSegment> {
+        self.trace.as_mut()?.pop_first()
+    }
+
+    /// Insert a segment (location + contexts) at the beginning of the trace.
+    pub fn at_first_insert(&mut self, segment: AtTraceSegment) {
+        self.ensure_trace().push_first(segment);
+    }
+
+    /// Take the entire trace, leaving self with an empty trace.
+    pub fn take_trace(&mut self) -> Option<AtTrace> {
+        self.trace.take().map(|b| *b)
+    }
+
+    /// Set the trace, replacing any existing trace.
+    pub fn set_trace(&mut self, trace: AtTrace) {
+        self.trace = try_box(trace);
+    }
+
+    // ========================================================================
+    // Error conversion methods
+    // ========================================================================
+
+    /// Convert the error type while preserving the trace.
+    ///
+    /// ## Example
+    ///
+    /// ```rust
+    /// use errat::{at, At};
+    ///
+    /// #[derive(Debug)]
+    /// struct Error1;
+    /// #[derive(Debug)]
+    /// struct Error2;
+    ///
+    /// impl From<Error1> for Error2 {
+    ///     fn from(_: Error1) -> Self { Error2 }
+    /// }
+    ///
+    /// let err1: At<Error1> = at(Error1).at_str("context");
+    /// let err2: At<Error2> = err1.map_error(Error2::from);
+    /// assert_eq!(err2.trace_len(), 1);
+    /// ```
+    pub fn map_error<E2, F>(self, f: F) -> At<E2>
+    where
+        F: FnOnce(E) -> E2,
+    {
+        At {
+            error: f(self.error),
+            trace: self.trace,
+        }
+    }
+
+    /// Convert to an `AtTraceable` type, transferring the trace.
+    ///
+    /// The closure receives the inner error and should return an error type
+    /// that implements `AtTraceable`. The trace is then transferred to the
+    /// new error's embedded trace.
+    ///
+    /// ## Example
+    ///
+    /// ```rust
+    /// use errat::{at, At, AtTrace, AtTraceable};
+    ///
+    /// #[derive(Debug)]
+    /// struct Inner;
+    ///
+    /// struct MyError {
+    ///     trace: AtTrace,
+    /// }
+    ///
+    /// impl AtTraceable for MyError {
+    ///     fn trace_mut(&mut self) -> &mut AtTrace { &mut self.trace }
+    /// }
+    ///
+    /// let at_err: At<Inner> = at(Inner).at_str("context");
+    /// let my_err: MyError = at_err.into_traceable(|_| MyError { trace: AtTrace::new() });
+    /// ```
+    pub fn into_traceable<E2, F>(self, f: F) -> E2
+    where
+        F: FnOnce(E) -> E2,
+        E2: crate::trace::AtTraceable,
+    {
+        let mut new_err = f(self.error);
+        if let Some(trace_box) = self.trace {
+            *new_err.trace_mut() = *trace_box;
+        }
+        new_err
+    }
 }
 
 // ============================================================================
@@ -553,6 +730,7 @@ impl<E: fmt::Debug> fmt::Debug for At<E> {
                             AtContext::Text(msg) => writeln!(f, "       ╰─ {}", msg)?,
                             AtContext::Debug(t) => writeln!(f, "       ╰─ {:?}", &**t)?,
                             AtContext::Display(t) => writeln!(f, "       ╰─ {}", &**t)?,
+                            AtContext::Error(e) => writeln!(f, "       ╰─ caused by: {}", e)?,
                             AtContext::Crate(_) => {} // Crate boundaries don't display in basic Debug
                         }
                     }
@@ -648,6 +826,7 @@ impl<E: fmt::Debug> fmt::Display for DisplayWithMeta<'_, E> {
                             AtContext::Text(msg) => writeln!(f, "       ╰─ {}", msg)?,
                             AtContext::Debug(t) => writeln!(f, "       ╰─ {:?}", &**t)?,
                             AtContext::Display(t) => writeln!(f, "       ╰─ {}", &**t)?,
+                            AtContext::Error(e) => writeln!(f, "       ╰─ caused by: {}", e)?,
                             AtContext::Crate(_) => {} // Already handled above
                         }
                     }

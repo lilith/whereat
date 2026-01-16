@@ -122,6 +122,13 @@ pub trait ResultAtExt<T, E> {
         f: impl FnOnce() -> C,
     ) -> Result<T, At<E>>;
 
+    /// Add an error as context to the last location (or create one if empty).
+    #[track_caller]
+    fn at_error<Err: core::error::Error + Send + Sync + 'static>(
+        self,
+        err: Err,
+    ) -> Result<T, At<E>>;
+
     /// Add crate boundary marker to last location (or create one if empty).
     #[track_caller]
     fn at_crate(self, info: &'static AtCrateInfo) -> Result<T, At<E>>;
@@ -179,6 +186,18 @@ impl<T, E> ResultAtExt<T, E> for Result<T, At<E>> {
         match self {
             Ok(v) => Ok(v),
             Err(e) => Err(e.at_debug(f)),
+        }
+    }
+
+    #[track_caller]
+    #[inline]
+    fn at_error<Err: core::error::Error + Send + Sync + 'static>(
+        self,
+        err: Err,
+    ) -> Result<T, At<E>> {
+        match self {
+            Ok(v) => Ok(v),
+            Err(e) => Err(e.at_error(err)),
         }
     }
 
@@ -323,6 +342,10 @@ pub trait ResultAtTraceableExt<T, E: AtTraceable> {
     fn at_debug<C: fmt::Debug + Send + Sync + 'static>(self, f: impl FnOnce() -> C)
     -> Result<T, E>;
 
+    /// Add an error as context to the last location (or create one if empty).
+    #[track_caller]
+    fn at_error<Err: core::error::Error + Send + Sync + 'static>(self, err: Err) -> Result<T, E>;
+
     /// Add crate boundary marker to last location (or create one if empty).
     #[track_caller]
     fn at_crate(self, info: &'static AtCrateInfo) -> Result<T, E>;
@@ -366,6 +389,15 @@ impl<T, E: AtTraceable> ResultAtTraceableExt<T, E> for Result<T, E> {
         f: impl FnOnce() -> C,
     ) -> Result<T, E> {
         self.map_err(|e| e.at_debug(f))
+    }
+
+    #[track_caller]
+    #[inline]
+    fn at_error<Err: core::error::Error + Send + Sync + 'static>(
+        self,
+        err: Err,
+    ) -> Result<T, E> {
+        self.map_err(|e| e.at_error(err))
     }
 
     #[track_caller]

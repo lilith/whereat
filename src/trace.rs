@@ -349,11 +349,265 @@ impl AtTrace {
             .filter(move |(i, _)| *i as usize == idx)
             .map(|(_, ctx)| ctx)
     }
+
+    /// Check if the trace is empty.
+    #[inline]
+    pub fn is_empty(&self) -> bool {
+        self.locations.is_empty()
+    }
+
+    /// Take the entire trace, leaving self empty.
+    ///
+    /// Preserves crate_info in self (not transferred).
+    pub fn take(&mut self) -> AtTrace {
+        AtTrace {
+            locations: core::mem::take(&mut self.locations),
+            crate_info: self.crate_info, // Copy, don't move
+            contexts: core::mem::take(&mut self.contexts),
+        }
+    }
+
+    /// Pop the most recent location and its contexts from the end.
+    ///
+    /// Returns `None` if the trace is empty.
+    pub fn pop(&mut self) -> Option<AtTraceSegment> {
+        if self.locations.is_empty() {
+            return None;
+        }
+
+        let last_idx = (self.locations.len() - 1) as u16;
+        let location = self.locations.pop()?;
+
+        // Collect contexts for this location (they're stored newest-first in usage,
+        // but we need to extract those with matching index)
+        let mut contexts = Vec::new();
+        if let Some(ref mut ctx_vec) = self.contexts {
+            // Remove contexts with matching index from the end
+            while let Some(&(idx, _)) = ctx_vec.last() {
+                if idx == last_idx {
+                    contexts.push(ctx_vec.pop().unwrap().1);
+                } else {
+                    break;
+                }
+            }
+        }
+        contexts.reverse(); // Restore original order
+
+        Some(AtTraceSegment { location, contexts })
+    }
+
+    /// Push a segment (location + contexts) to the end of the trace.
+    pub fn push(&mut self, segment: AtTraceSegment) {
+        let idx = self.locations.len() as u16;
+
+        // Try to push location
+        if !try_push_location(&mut self.locations, segment.location) {
+            return;
+        }
+
+        // Push contexts
+        for ctx in segment.contexts {
+            let _ = try_push_context(&mut self.contexts, (idx, ctx));
+        }
+    }
+
+    /// Pop the oldest location and its contexts from the beginning.
+    ///
+    /// Returns `None` if the trace is empty.
+    ///
+    /// Note: This is O(n) as it shifts all remaining elements.
+    pub fn pop_first(&mut self) -> Option<AtTraceSegment> {
+        if self.locations.is_empty() {
+            return None;
+        }
+
+        let location = self.locations.remove(0);
+
+        // Collect and remove contexts for index 0, decrement remaining indices
+        let mut contexts = Vec::new();
+        if let Some(ref mut ctx_vec) = self.contexts {
+            let mut i = 0;
+            while i < ctx_vec.len() {
+                if ctx_vec[i].0 == 0 {
+                    contexts.push(ctx_vec.remove(i).1);
+                } else {
+                    // Decrement index for remaining contexts
+                    ctx_vec[i].0 -= 1;
+                    i += 1;
+                }
+            }
+        }
+
+        Some(AtTraceSegment { location, contexts })
+    }
+
+    /// Insert a segment (location + contexts) at the beginning of the trace.
+    ///
+    /// Note: This is O(n) as it shifts all existing elements.
+    pub fn push_first(&mut self, segment: AtTraceSegment) {
+        // Shift all existing indices up by 1
+        if let Some(ref mut ctx_vec) = self.contexts {
+            for (idx, _) in ctx_vec.iter_mut() {
+                *idx = idx.saturating_add(1);
+            }
+        }
+
+        // Insert location at beginning
+        self.locations.insert(0, segment.location);
+
+        // Insert contexts at beginning with index 0
+        if !segment.contexts.is_empty() {
+            let ctx_vec = self.contexts.get_or_insert_with(|| Box::new(Vec::new()));
+            for (i, ctx) in segment.contexts.into_iter().enumerate() {
+                ctx_vec.insert(i, (0, ctx));
+            }
+        }
+    }
+
+    /// Append all segments from another trace to the end of this trace.
+    ///
+    /// The source trace is consumed.
+    pub fn append(&mut self, mut other: AtTrace) {
+        while let Some(seg) = other.pop_first() {
+            self.push(seg);
+        }
+    }
+
+    /// Prepend all segments from another trace to the beginning of this trace.
+    ///
+    /// The source trace is consumed.
+    pub fn prepend(&mut self, mut other: AtTrace) {
+        // Pop from other's end and insert at our beginning (reverse order)
+        let mut segments = Vec::new();
+        while let Some(seg) = other.pop() {
+            segments.push(seg);
+        }
+        // Insert in reverse order to maintain original order
+        for seg in segments {
+            self.push_first(seg);
+        }
+    }
 }
 
 impl Default for AtTrace {
     fn default() -> Self {
         Self::new()
+    }
+}
+
+// ============================================================================
+// AtTraceSegment - A single location with its contexts
+// ============================================================================
+
+/// A segment of a trace: one location with its associated contexts.
+///
+/// Used for transferring trace segments between `At<E>` and `AtTraceable` types.
+///
+/// ## Example: Transferring trace segments
+///
+/// ```rust
+/// use errat::{at, At, AtTrace};
+///
+/// #[derive(Debug)]
+/// struct Error1;
+/// #[derive(Debug)]
+/// struct Error2;
+///
+/// let mut err1: At<Error1> = at(Error1).at_str("context");
+/// let mut err2: At<Error2> = at(Error2);
+///
+/// // Transfer most recent segment from err1 to err2
+/// if let Some(seg) = err1.at_pop() {
+///     err2.at_push(seg);
+/// }
+/// ```
+#[derive(Debug)]
+pub struct AtTraceSegment {
+    location: Option<&'static Location<'static>>,
+    contexts: Vec<AtContext>,
+}
+
+impl AtTraceSegment {
+    /// Create a new segment with a location and no contexts.
+    pub fn new(location: Option<&'static Location<'static>>) -> Self {
+        Self {
+            location,
+            contexts: Vec::new(),
+        }
+    }
+
+    /// Create a new segment capturing the caller's location.
+    #[track_caller]
+    pub fn capture() -> Self {
+        Self::new(Some(Location::caller()))
+    }
+
+    /// Get the location (None means skipped frames marker).
+    pub fn location(&self) -> Option<&'static Location<'static>> {
+        self.location
+    }
+
+    /// Check if this is a skipped frames marker.
+    pub fn is_skipped(&self) -> bool {
+        self.location.is_none()
+    }
+
+    /// Iterate over contexts in this segment.
+    pub fn contexts(&self) -> impl Iterator<Item = AtContextRef<'_>> {
+        self.contexts.iter().map(|c| AtContextRef { inner: c })
+    }
+
+    /// Number of contexts in this segment.
+    pub fn context_count(&self) -> usize {
+        self.contexts.len()
+    }
+
+    /// Add a static string context.
+    pub fn with_str(mut self, msg: &'static str) -> Self {
+        self.contexts.push(AtContext::Text(Cow::Borrowed(msg)));
+        self
+    }
+
+    /// Add a dynamic string context.
+    pub fn with_string(mut self, msg: String) -> Self {
+        self.contexts.push(AtContext::Text(Cow::Owned(msg)));
+        self
+    }
+
+    /// Add typed context (Display).
+    pub fn with_data<T: fmt::Display + Send + Sync + 'static>(mut self, data: T) -> Self {
+        if let Some(boxed) = try_box(data) {
+            self.contexts.push(AtContext::Display(boxed));
+        }
+        self
+    }
+
+    /// Add typed context (Debug).
+    pub fn with_debug<T: fmt::Debug + Send + Sync + 'static>(mut self, data: T) -> Self {
+        if let Some(boxed) = try_box(data) {
+            self.contexts.push(AtContext::Debug(boxed));
+        }
+        self
+    }
+
+    /// Add crate boundary marker.
+    pub fn with_crate(mut self, info: &'static AtCrateInfo) -> Self {
+        self.contexts.push(AtContext::Crate(info));
+        self
+    }
+
+    /// Add an error as context.
+    pub fn with_error<E: core::error::Error + Send + Sync + 'static>(mut self, err: E) -> Self {
+        if let Some(boxed) = try_box(err) {
+            self.contexts.push(AtContext::Error(boxed));
+        }
+        self
+    }
+
+    /// Consume and return the raw contexts (internal use).
+    #[allow(dead_code)]
+    pub(crate) fn into_contexts(self) -> Vec<AtContext> {
+        self.contexts
     }
 }
 
@@ -515,6 +769,21 @@ pub trait AtTraceable: Sized {
         self
     }
 
+    /// Add an error as context to the last location (or create one if empty).
+    ///
+    /// Use this to attach a source error that implements `core::error::Error`.
+    #[track_caller]
+    #[inline]
+    fn at_error<E: core::error::Error + Send + Sync + 'static>(mut self, err: E) -> Self {
+        let Some(boxed_err) = try_box(err) else {
+            return self;
+        };
+        let context = AtContext::Error(boxed_err);
+        self.trace_mut()
+            .try_add_context(Location::caller(), context);
+        self
+    }
+
     /// Add a crate boundary marker to the last location (or create one if empty).
     #[track_caller]
     #[inline]
@@ -532,5 +801,61 @@ pub trait AtTraceable: Sized {
         // None in locations vec = skipped frame marker
         let _ = self.trace_mut().try_push_skipped();
         self
+    }
+
+    // ========================================================================
+    // Trace manipulation methods
+    // ========================================================================
+
+    /// Pop the most recent location and its contexts from the trace.
+    #[inline]
+    fn at_pop(&mut self) -> Option<AtTraceSegment> {
+        self.trace_mut().pop()
+    }
+
+    /// Push a segment (location + contexts) to the end of the trace.
+    #[inline]
+    fn at_push(&mut self, segment: AtTraceSegment) {
+        self.trace_mut().push(segment);
+    }
+
+    /// Pop the oldest location and its contexts from the trace.
+    #[inline]
+    fn at_first_pop(&mut self) -> Option<AtTraceSegment> {
+        self.trace_mut().pop_first()
+    }
+
+    /// Insert a segment (location + contexts) at the beginning of the trace.
+    #[inline]
+    fn at_first_insert(&mut self, segment: AtTraceSegment) {
+        self.trace_mut().push_first(segment);
+    }
+
+    // ========================================================================
+    // Error conversion methods
+    // ========================================================================
+
+    /// Convert to another `AtTraceable` type, transferring the trace.
+    ///
+    /// The trace is moved from self to the new error.
+    fn map_traceable<E2, F>(mut self, f: F) -> E2
+    where
+        F: FnOnce(Self) -> E2,
+        E2: AtTraceable,
+    {
+        let trace = self.trace_mut().take();
+        let mut new_err = f(self);
+        *new_err.trace_mut() = trace;
+        new_err
+    }
+
+    /// Convert to `At<E2>`, transferring the trace.
+    fn into_at<E2, F>(mut self, f: F) -> crate::At<E2>
+    where
+        F: FnOnce(Self) -> E2,
+    {
+        let trace = self.trace_mut().take();
+        let error = f(self);
+        crate::At::from_parts(error, trace)
     }
 }

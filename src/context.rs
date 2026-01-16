@@ -84,6 +84,9 @@ pub(crate) enum AtContext {
     /// Crate boundary marker - changes the assumed crate for subsequent locations.
     /// Used for generating correct repository links in cross-crate traces.
     Crate(&'static AtCrateInfo),
+    /// A source error attached as context.
+    /// Allows embedding error chains within the trace.
+    Error(Box<dyn core::error::Error + Send + Sync>),
 }
 
 impl AtContext {
@@ -101,9 +104,16 @@ impl AtContext {
         }
     }
 
+    pub(crate) fn as_error(&self) -> Option<&(dyn core::error::Error + Send + Sync)> {
+        match self {
+            AtContext::Error(e) => Some(&**e),
+            _ => None,
+        }
+    }
+
     pub(crate) fn downcast_ref<T: 'static>(&self) -> Option<&T> {
         match self {
-            AtContext::Text(_) | AtContext::Crate(_) => None,
+            AtContext::Text(_) | AtContext::Crate(_) | AtContext::Error(_) => None,
             // Must use (**b) to call as_any on the trait object, not the Box
             // (Box<dyn AtDebugAny> itself implements AtDebugAny through the blanket impl)
             AtContext::Debug(b) => (**b).as_any().downcast_ref(),
@@ -113,18 +123,22 @@ impl AtContext {
 
     pub(crate) fn type_name(&self) -> Option<&'static str> {
         match self {
-            AtContext::Text(_) | AtContext::Crate(_) => None,
+            AtContext::Text(_) | AtContext::Crate(_) | AtContext::Error(_) => None,
             AtContext::Debug(b) => Some((**b).type_name()),
             AtContext::Display(b) => Some((**b).type_name()),
         }
     }
 
     pub(crate) fn is_display(&self) -> bool {
-        matches!(self, AtContext::Text(_) | AtContext::Display(_))
+        matches!(self, AtContext::Text(_) | AtContext::Display(_) | AtContext::Error(_))
     }
 
     pub(crate) fn is_crate_boundary(&self) -> bool {
         matches!(self, AtContext::Crate(_))
+    }
+
+    pub(crate) fn is_error(&self) -> bool {
+        matches!(self, AtContext::Error(_))
     }
 }
 
@@ -135,6 +149,7 @@ impl fmt::Debug for AtContext {
             AtContext::Debug(t) => write!(f, "{:?}", &**t),
             AtContext::Display(t) => write!(f, "{}", &**t), // Display types use Display even in Debug
             AtContext::Crate(info) => write!(f, "[crate: {}]", info.name()),
+            AtContext::Error(e) => write!(f, "caused by: {}", e),
         }
     }
 }
@@ -146,6 +161,7 @@ impl fmt::Display for AtContext {
             AtContext::Debug(t) => write!(f, "{:?}", &**t), // Debug types use Debug in Display
             AtContext::Display(t) => write!(f, "{}", &**t),
             AtContext::Crate(info) => write!(f, "[crate: {}]", info.name()),
+            AtContext::Error(e) => write!(f, "caused by: {}", e),
         }
     }
 }
@@ -240,6 +256,18 @@ impl<'a> AtContextRef<'a> {
     #[inline]
     pub fn is_crate_boundary(&self) -> bool {
         self.inner.is_crate_boundary()
+    }
+
+    /// Get as an error reference, if this is an error context (from `at_error`).
+    #[inline]
+    pub fn as_error(&self) -> Option<&'a (dyn core::error::Error + Send + Sync)> {
+        self.inner.as_error()
+    }
+
+    /// Check if this is an error context.
+    #[inline]
+    pub fn is_error(&self) -> bool {
+        self.inner.is_error()
     }
 }
 
