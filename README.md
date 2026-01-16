@@ -86,6 +86,49 @@ fn process(id: u64) -> Result<String, At<MyError>> {
 
 For workspace crates, set the path: `errat::define_at_crate_info!(path = "crates/mylib/");`
 
+## Crate Metadata Options
+
+### Compile-time metadata
+
+Add custom key-value pairs at compile time:
+
+```rust
+errat::define_at_crate_info!(
+    path = "crates/mylib/",
+    meta = &[("team", "platform"), ("oncall", "platform@example.com")],
+);
+```
+
+Access metadata via `at_crate_info().get_meta("team")`.
+
+### Runtime metadata (escape hatch)
+
+For runtime-determined values (instance IDs, environment config), define your own `at_crate_info()` getter instead of using the macro:
+
+```rust
+use std::sync::OnceLock;
+use errat::AtCrateInfo;
+
+static CRATE_INFO: OnceLock<AtCrateInfo> = OnceLock::new();
+
+// at!() and at_crate!() call this function
+pub(crate) fn at_crate_info() -> &'static AtCrateInfo {
+    CRATE_INFO.get_or_init(|| {
+        AtCrateInfo::builder()
+            .name(env!("CARGO_PKG_NAME"))
+            .repo(option_env!("CARGO_PKG_REPOSITORY"))
+            .module(module_path!())
+            .meta_owned(vec![
+                ("instance".into(), std::env::var("INSTANCE_ID").unwrap_or_default()),
+                ("env".into(), std::env::var("ENV").unwrap_or("dev".into())),
+            ])
+            .build()
+    })
+}
+```
+
+The `_owned()` builder methods (`name_owned()`, `meta_owned()`, etc.) leak strings via `Box::leak` to get `'static` lifetime - appropriate for one-time initialization.
+
 ## Tinyvec Features
 
 Enable inline storage for traces to avoid heap allocation for short traces:
