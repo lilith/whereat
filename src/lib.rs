@@ -170,6 +170,15 @@ type LocationElem = &'static Location<'static>;
 // In practice, OOM panics are rare and the error itself still propagates
 // (since E is stored inline in At<E>).
 
+/// Default capacity hint for new traces.
+///
+/// Most error traces are 3-6 levels deep (e.g., handler → service → repo → db).
+/// Pre-allocating 6 slots avoids reallocations for typical call stacks.
+/// For deeper traces, the Vec will grow automatically.
+///
+/// Note: This is ignored when tinyvec features are enabled (TinyVec starts inline).
+const DEFAULT_TRACE_CAPACITY: usize = 6;
+
 /// Try to allocate a Box. Returns Some on success.
 /// Note: Box::try_new is not yet stable, so this can panic on OOM.
 /// The error E is stored inline, so even if tracing fails, the error propagates.
@@ -1557,8 +1566,9 @@ impl<E> At<E> {
                 let _ = trace.try_push(loc);
             }
             None => {
-                // Try to create trace with capacity, fall back to no capacity
-                let mut trace = AtTrace::try_with_capacity(6).unwrap_or_default();
+                // Try to create trace with capacity hint, fall back to no capacity
+                let mut trace =
+                    AtTrace::try_with_capacity(DEFAULT_TRACE_CAPACITY).unwrap_or_default();
                 let _ = trace.try_push(loc);
                 if let Some(boxed) = try_box(trace) {
                     self.trace = Some(boxed);
