@@ -24,6 +24,8 @@ tinyvec = { version = "1.9", optional = true, default-features = false, features
 [dev-dependencies]
 static_assertions = "1.1"
 criterion = { version = "0.5", features = ["html_reports"] }
+anyhow = "1.0.100"
+thiserror = "2.0.17"
 
 [[bench]]
 name = "overhead"
