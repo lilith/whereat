@@ -23,29 +23,31 @@ use core::fmt;
 // Error types for comparison
 // ============================================================================
 
-/// Plain enum error (baseline - no derive, manual Display)
-#[derive(Debug, Clone, Copy)]
+/// Plain enum error with owned String (baseline - matches anyhow's allocation)
+#[derive(Debug, Clone)]
 enum LoopError {
-    InnerFailed(u32),
-    OuterFailed(u32),
+    InnerFailed(String),
+    #[allow(dead_code)]
+    OuterFailed(String),
 }
 
 impl fmt::Display for LoopError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            LoopError::InnerFailed(i) => write!(f, "inner loop failed at {}", i),
-            LoopError::OuterFailed(i) => write!(f, "outer loop failed at {}", i),
+            LoopError::InnerFailed(msg) => write!(f, "inner loop failed: {}", msg),
+            LoopError::OuterFailed(msg) => write!(f, "outer loop failed: {}", msg),
         }
     }
 }
 
-/// thiserror-derived error
+/// thiserror-derived error with owned String
 #[derive(Debug, thiserror::Error)]
 enum ThisLoopError {
-    #[error("inner loop failed at {0}")]
-    InnerFailed(u32),
-    #[error("outer loop failed at {0}")]
-    OuterFailed(u32),
+    #[error("inner loop failed: {0}")]
+    InnerFailed(String),
+    #[allow(dead_code)]
+    #[error("outer loop failed: {0}")]
+    OuterFailed(String),
 }
 
 // ============================================================================
@@ -56,7 +58,7 @@ enum ThisLoopError {
 #[inline(never)]
 fn inner_traced(i: u32, fail_at: u32) -> Result<u32, At<LoopError>> {
     if i == fail_at {
-        Err(at(LoopError::InnerFailed(i)))
+        Err(at(LoopError::InnerFailed(format!("at {}", i))))
     } else {
         Ok(i * 2)
     }
@@ -82,10 +84,30 @@ fn outer_traced(i: u32, fail_at: u32) -> Result<u32, At<LoopError>> {
 #[inline(never)]
 fn inner_plain(i: u32, fail_at: u32) -> Result<u32, LoopError> {
     if i == fail_at {
-        Err(LoopError::InnerFailed(i))
+        Err(LoopError::InnerFailed(format!("at {}", i)))
     } else {
         Ok(i * 2)
     }
+}
+
+/// Innermost function - At<E> wrapper only, no frames recorded (0 frames)
+#[inline(never)]
+fn inner_at_no_frames(i: u32, fail_at: u32) -> Result<u32, At<LoopError>> {
+    if i == fail_at {
+        Err(At::from(LoopError::InnerFailed(format!("at {}", i))))
+    } else {
+        Ok(i * 2)
+    }
+}
+
+#[inline(never)]
+fn middle_at_no_frames(i: u32, fail_at: u32) -> Result<u32, At<LoopError>> {
+    inner_at_no_frames(i, fail_at)
+}
+
+#[inline(never)]
+fn outer_at_no_frames(i: u32, fail_at: u32) -> Result<u32, At<LoopError>> {
+    middle_at_no_frames(i, fail_at)
 }
 
 /// Middle function - plain Result passthrough
@@ -136,7 +158,7 @@ fn outer_no_trace(i: u32, fail_at: u32) -> Result<u32, LoopError> {
 #[inline(never)]
 fn inner_thiserror(i: u32, fail_at: u32) -> Result<u32, ThisLoopError> {
     if i == fail_at {
-        Err(ThisLoopError::InnerFailed(i))
+        Err(ThisLoopError::InnerFailed(format!("at {}", i)))
     } else {
         Ok(i * 2)
     }
@@ -211,7 +233,7 @@ impl BacktraceError {
 #[inline(never)]
 fn inner_backtrace(i: u32, fail_at: u32) -> Result<u32, BacktraceError> {
     if i == fail_at {
-        Err(BacktraceError::new(LoopError::InnerFailed(i)))
+        Err(BacktraceError::new(LoopError::InnerFailed(format!("at {}", i))))
     } else {
         Ok(i * 2)
     }
@@ -372,6 +394,45 @@ fn bench_nested_1pct_errors(c: &mut Criterion) {
     group.finish();
 }
 
+fn bench_nested_5pct_errors(c: &mut Criterion) {
+    let mut group = c.benchmark_group("nested_5pct_errors");
+
+    // 100x100 = 10,000 iterations, 5% error rate
+    const OUTER: u32 = 100;
+    const INNER: u32 = 100;
+    const FAIL_EVERY: u32 = 20; // 5% failure rate (1 in 20)
+
+    group.bench_function("plain_enum", |b| {
+        b.iter(|| run_nested_loops(OUTER, INNER, FAIL_EVERY, outer_no_trace))
+    });
+
+    group.bench_function("thiserror", |b| {
+        b.iter(|| run_nested_loops(OUTER, INNER, FAIL_EVERY, outer_thiserror))
+    });
+
+    group.bench_function("errat_0_frames", |b| {
+        b.iter(|| run_nested_loops(OUTER, INNER, FAIL_EVERY, outer_at_no_frames))
+    });
+
+    group.bench_function("anyhow", |b| {
+        b.iter(|| run_nested_loops(OUTER, INNER, FAIL_EVERY, outer_anyhow))
+    });
+
+    group.bench_function("errat_outer", |b| {
+        b.iter(|| run_nested_loops(OUTER, INNER, FAIL_EVERY, outer_late_traced))
+    });
+
+    group.bench_function("errat_inner", |b| {
+        b.iter(|| run_nested_loops(OUTER, INNER, FAIL_EVERY, outer_traced))
+    });
+
+    group.bench_function("errat_outer_ctx", |b| {
+        b.iter(|| run_nested_loops(OUTER, INNER, FAIL_EVERY, outer_with_context))
+    });
+
+    group.finish();
+}
+
 fn bench_nested_10pct_errors(c: &mut Criterion) {
     let mut group = c.benchmark_group("nested_10pct_errors");
 
@@ -437,6 +498,11 @@ fn bench_nested_100pct_errors(c: &mut Criterion) {
 
     group.bench_function("anyhow_dyn_ctx", |b| {
         b.iter(|| run_nested_loops(OUTER, INNER, FAIL_EVERY, outer_anyhow_with_dynamic_context))
+    });
+
+    // errat with 0 frames - just At<E> wrapper overhead
+    group.bench_function("errat_0_frames", |b| {
+        b.iter(|| run_nested_loops(OUTER, INNER, FAIL_EVERY, outer_at_no_frames))
     });
 
     group.bench_function("errat_inner", |b| {
@@ -509,14 +575,16 @@ fn bench_single_error_overhead(c: &mut Criterion) {
     // Measure overhead of a single error creation
     group.bench_function("plain_enum", |b| {
         b.iter(|| {
-            let err: Result<u32, LoopError> = Err(black_box(LoopError::InnerFailed(42)));
+            let err: Result<u32, LoopError> =
+                Err(LoopError::InnerFailed(format!("at {}", black_box(42))));
             black_box(err)
         })
     });
 
     group.bench_function("thiserror", |b| {
         b.iter(|| {
-            let err: Result<u32, ThisLoopError> = Err(black_box(ThisLoopError::InnerFailed(42)));
+            let err: Result<u32, ThisLoopError> =
+                Err(ThisLoopError::InnerFailed(format!("at {}", black_box(42))));
             black_box(err)
         })
     });
@@ -537,9 +605,18 @@ fn bench_single_error_overhead(c: &mut Criterion) {
         })
     });
 
+    // errat with 0 frames (just At<E> wrapper, no location capture)
+    group.bench_function("errat_0_frames", |b| {
+        b.iter(|| {
+            let err = outer_at_no_frames(black_box(0), black_box(0));
+            black_box(err)
+        })
+    });
+
     group.bench_function("errat_1_frame", |b| {
         b.iter(|| {
-            let err: Result<u32, At<LoopError>> = Err(at(black_box(LoopError::InnerFailed(42))));
+            let err: Result<u32, At<LoopError>> =
+                Err(at(LoopError::InnerFailed(format!("at {}", black_box(42)))));
             black_box(err)
         })
     });
@@ -575,7 +652,7 @@ fn bench_single_error_overhead(c: &mut Criterion) {
     // Full backtrace capture
     group.bench_function("backtrace", |b| {
         b.iter(|| {
-            let err = BacktraceError::new(black_box(LoopError::InnerFailed(42)));
+            let err = BacktraceError::new(LoopError::InnerFailed(format!("at {}", black_box(42))));
             black_box(err)
         })
     });
@@ -596,6 +673,7 @@ criterion_group!(
     benches,
     bench_nested_no_errors,
     bench_nested_1pct_errors,
+    bench_nested_5pct_errors,
     bench_nested_10pct_errors,
     bench_nested_100pct_errors,
     bench_trace_strategy_comparison,
