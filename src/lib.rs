@@ -122,18 +122,18 @@ use core::panic::Location;
 // as the element type because tinyvec requires Default, and Option<&T> has the
 // same size as &T due to null pointer optimization.
 
-/// Stack-first location storage with 3 inline slots (tinyvec-64-bytes: sizeof(Trace) = 64).
+/// Stack-first location storage with 3 inline slots (tinyvec-64-bytes: sizeof(AtTrace) = 64).
 #[cfg(all(
     feature = "tinyvec-64-bytes",
     not(any(feature = "tinyvec-128-bytes", feature = "tinyvec-256-bytes"))
 ))]
 type LocationVec = tinyvec::TinyVec<[Option<&'static Location<'static>>; 3]>;
 
-/// Stack-first location storage with 11 inline slots (tinyvec-128-bytes: sizeof(Trace) = 128).
+/// Stack-first location storage with 11 inline slots (tinyvec-128-bytes: sizeof(AtTrace) = 128).
 #[cfg(all(feature = "tinyvec-128-bytes", not(feature = "tinyvec-256-bytes")))]
 type LocationVec = tinyvec::TinyVec<[Option<&'static Location<'static>>; 11]>;
 
-/// Stack-first location storage with 27 inline slots (tinyvec-256-bytes: sizeof(Trace) = 256).
+/// Stack-first location storage with 27 inline slots (tinyvec-256-bytes: sizeof(AtTrace) = 256).
 #[cfg(feature = "tinyvec-256-bytes")]
 type LocationVec = tinyvec::TinyVec<[Option<&'static Location<'static>>; 27]>;
 
@@ -288,7 +288,7 @@ fn unwrap_location(loc: &LocationElem) -> &'static Location<'static> {
 /// ## Note: Avoid `At<At<E>>`
 ///
 /// Nesting `At<At<E>>` is supported but unnecessary and wasteful.
-/// Each `At` has its own trace, so nesting allocates two `Box<Trace>`
+/// Each `At` has its own trace, so nesting allocates two `Box<AtTrace>`
 /// instead of one. Use `.at()` on Results to extend the existing trace:
 ///
 /// ```rust
@@ -310,7 +310,7 @@ fn unwrap_location(loc: &LocationElem) -> &'static Location<'static> {
 /// ```
 pub struct At<E> {
     error: E,
-    trace: Option<Box<Trace>>,
+    trace: Option<Box<AtTrace>>,
 }
 
 // ============================================================================
@@ -1075,11 +1075,42 @@ impl fmt::Display for AtContext {
     }
 }
 
-/// Internal trace storage - boxed to keep At<E> small.
+/// Trace storage for location and context tracking.
 ///
-/// Flat structure: contiguous location array + sparse context associations.
-/// Contexts are associated with locations by index (u16, saturating).
-struct Trace {
+/// Use this type directly when embedding traces in custom error types.
+/// For the common case, use `At<E>` which wraps your error with a boxed trace.
+///
+/// ## Example: Embedding in custom error
+///
+/// ```rust
+/// use errat::{AtTrace, AtTraceable};
+///
+/// struct MyError {
+///     kind: &'static str,
+///     trace: AtTrace,
+/// }
+///
+/// impl AtTraceable for MyError {
+///     fn trace_mut(&mut self) -> &mut AtTrace {
+///         &mut self.trace
+///     }
+/// }
+///
+/// impl MyError {
+///     #[track_caller]
+///     fn new(kind: &'static str) -> Self {
+///         Self {
+///             kind,
+///             trace: AtTrace::capture(),
+///         }
+///     }
+/// }
+///
+/// // Now MyError has all the .at_*() methods from AtTraceable
+/// let err = MyError::new("not_found").at_str("looking up user");
+/// ```
+#[derive(Debug)]
+pub struct AtTrace {
     /// All locations in order (oldest first).
     locations: LocationVec,
     /// AtContext associations: (location_index, context).
@@ -1087,15 +1118,47 @@ struct Trace {
     contexts: Vec<(u16, AtContext)>,
 }
 
-impl Trace {
-    fn new() -> Self {
+impl AtTrace {
+    /// Create an empty trace.
+    ///
+    /// Use [`capture()`](Self::capture) to create a trace with the caller's location.
+    #[inline]
+    pub fn new() -> Self {
         Self {
             locations: LocationVec::new(),
             contexts: Vec::new(),
         }
     }
 
-    /// Try to create a Trace with pre-allocated capacity.
+    /// Create a trace with the caller's location captured.
+    ///
+    /// This is the recommended way to start a trace in error constructors.
+    ///
+    /// ## Example
+    ///
+    /// ```rust
+    /// use errat::AtTrace;
+    ///
+    /// struct MyError {
+    ///     trace: AtTrace,
+    /// }
+    ///
+    /// impl MyError {
+    ///     #[track_caller]
+    ///     fn new() -> Self {
+    ///         Self { trace: AtTrace::capture() }
+    ///     }
+    /// }
+    /// ```
+    #[track_caller]
+    #[inline]
+    pub fn capture() -> Self {
+        let mut trace = Self::new();
+        let _ = trace.try_push(Location::caller());
+        trace
+    }
+
+    /// Try to create a AtTrace with pre-allocated capacity.
     /// Returns None if allocation fails (Vec) or always succeeds (TinyVec).
     fn try_with_capacity(cap: usize) -> Option<Self> {
         Some(Self {
@@ -1164,6 +1227,141 @@ impl Trace {
     }
 }
 
+impl Default for AtTrace {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+// ============================================================================
+// AtTraceable Trait - for embedding traces in custom error types
+// ============================================================================
+
+/// Trait for types that embed an [`AtTrace`] directly.
+///
+/// Implement this trait to get all the `.at_*()` methods on your custom error types.
+/// Only one method is required: [`trace_mut()`](Self::trace_mut).
+///
+/// ## Example
+///
+/// ```rust
+/// use errat::{AtTrace, AtTraceable};
+///
+/// struct MyError {
+///     kind: &'static str,
+///     trace: AtTrace,
+/// }
+///
+/// impl AtTraceable for MyError {
+///     fn trace_mut(&mut self) -> &mut AtTrace {
+///         &mut self.trace
+///     }
+/// }
+///
+/// impl MyError {
+///     #[track_caller]
+///     fn new(kind: &'static str) -> Self {
+///         Self { kind, trace: AtTrace::capture() }
+///     }
+/// }
+///
+/// // Now you can chain .at_*() methods
+/// let err = MyError::new("not_found")
+///     .at_str("looking up user");
+/// ```
+///
+/// ## Why use this over `At<E>`?
+///
+/// Use `AtTraceable` when you want:
+/// - The trace to be inline in your error (not boxed)
+/// - Full control over your error type's layout
+/// - To avoid the 8-byte pointer overhead of `At<E>`
+///
+/// Use `At<E>` when you want:
+/// - Minimal changes to existing code
+/// - The error type to remain small (trace is boxed)
+/// - To wrap errors from external crates
+pub trait AtTraceable: Sized {
+    /// Get a mutable reference to the embedded trace.
+    fn trace_mut(&mut self) -> &mut AtTrace;
+
+    /// Add the caller's location to the trace.
+    #[track_caller]
+    #[inline]
+    fn at(mut self) -> Self {
+        let _ = self.trace_mut().try_push(Location::caller());
+        self
+    }
+
+    /// Add the caller's location and a static string context.
+    #[track_caller]
+    #[inline]
+    fn at_str(mut self, msg: &'static str) -> Self {
+        let context = AtContext::Text(Cow::Borrowed(msg));
+        self.trace_mut()
+            .try_push_with_context(Location::caller(), context);
+        self
+    }
+
+    /// Add the caller's location and a lazily-computed string context.
+    #[track_caller]
+    #[inline]
+    fn at_string(mut self, f: impl FnOnce() -> String) -> Self {
+        let context = AtContext::Text(Cow::Owned(f()));
+        self.trace_mut()
+            .try_push_with_context(Location::caller(), context);
+        self
+    }
+
+    /// Add the caller's location and lazily-computed typed context (Display formatted).
+    #[track_caller]
+    #[inline]
+    fn at_data<T: fmt::Display + Send + Sync + 'static>(mut self, f: impl FnOnce() -> T) -> Self {
+        let ctx = f();
+        let Some(boxed_ctx) = try_box(ctx) else {
+            return self;
+        };
+        let context = AtContext::Display(boxed_ctx);
+        self.trace_mut()
+            .try_push_with_context(Location::caller(), context);
+        self
+    }
+
+    /// Add the caller's location and lazily-computed typed context (Debug formatted).
+    #[track_caller]
+    #[inline]
+    fn at_debug<T: fmt::Debug + Send + Sync + 'static>(mut self, f: impl FnOnce() -> T) -> Self {
+        let ctx = f();
+        let Some(boxed_ctx) = try_box(ctx) else {
+            return self;
+        };
+        let context = AtContext::Debug(boxed_ctx);
+        self.trace_mut()
+            .try_push_with_context(Location::caller(), context);
+        self
+    }
+
+    /// Add a crate boundary marker.
+    #[track_caller]
+    #[inline]
+    fn at_crate(mut self, info: &'static AtCrateInfo) -> Self {
+        let context = AtContext::Crate(info);
+        self.trace_mut()
+            .try_push_with_context(Location::caller(), context);
+        self
+    }
+
+    /// Add a skip marker to indicate skipped frames.
+    #[track_caller]
+    #[inline]
+    fn at_skipped_frames(mut self) -> Self {
+        let context = AtContext::Skipped;
+        self.trace_mut()
+            .try_push_with_context(Location::caller(), context);
+        self
+    }
+}
+
 // ============================================================================
 // At<E> Implementation
 // ============================================================================
@@ -1210,7 +1408,7 @@ impl<E> At<E> {
             }
             None => {
                 // Try to create trace with capacity, fall back to no capacity
-                let mut trace = Trace::try_with_capacity(6).unwrap_or_else(Trace::new);
+                let mut trace = AtTrace::try_with_capacity(6).unwrap_or_default();
                 let _ = trace.try_push(loc);
                 if let Some(boxed) = try_box(trace) {
                     self.trace = Some(boxed);
@@ -1253,7 +1451,7 @@ impl<E> At<E> {
                 trace.try_push_with_context(loc, context);
             }
             None => {
-                let mut trace = Trace::new();
+                let mut trace = AtTrace::new();
                 trace.try_push_with_context(loc, context);
                 if let Some(boxed) = try_box(trace) {
                     self.trace = Some(boxed);
@@ -1297,7 +1495,7 @@ impl<E> At<E> {
                 trace.try_push_with_context(loc, context);
             }
             None => {
-                let mut trace = Trace::new();
+                let mut trace = AtTrace::new();
                 trace.try_push_with_context(loc, context);
                 if let Some(boxed) = try_box(trace) {
                     self.trace = Some(boxed);
@@ -1359,7 +1557,7 @@ impl<E> At<E> {
                 trace.try_push_with_context(loc, context);
             }
             None => {
-                let mut trace = Trace::new();
+                let mut trace = AtTrace::new();
                 trace.try_push_with_context(loc, context);
                 if let Some(boxed) = try_box(trace) {
                     self.trace = Some(boxed);
@@ -1413,7 +1611,7 @@ impl<E> At<E> {
                 trace.try_push_with_context(loc, context);
             }
             None => {
-                let mut trace = Trace::new();
+                let mut trace = AtTrace::new();
                 trace.try_push_with_context(loc, context);
                 if let Some(boxed) = try_box(trace) {
                     self.trace = Some(boxed);
@@ -1428,20 +1626,22 @@ impl<E> At<E> {
     /// This marks that subsequent locations belong to a different crate,
     /// enabling correct GitHub links in cross-crate traces.
     ///
-    /// Use `crate_info!()` to capture the current crate's metadata.
+    /// Requires [`define_at_crate_info!()`] or a custom `at_crate_info()` getter.
     ///
     /// ## Example
     ///
-    /// ```rust
-    /// use errat::{at, At, crate_info};
+    /// ```rust,ignore
+    /// // Requires define_at_crate_info!() setup
+    /// use errat::{at, At};
+    ///
+    /// errat::define_at_crate_info!();
     ///
     /// #[derive(Debug)]
     /// enum MyError { Wrapped(String) }
     ///
-    /// // When receiving an error from a dependency:
     /// fn wrap_external_error(msg: &str) -> At<MyError> {
     ///     at(MyError::Wrapped(msg.into()))
-    ///         .at_crate(crate_info!())  // Mark crate boundary
+    ///         .at_crate(crate::at_crate_info())
     /// }
     /// ```
     #[track_caller]
@@ -1455,7 +1655,7 @@ impl<E> At<E> {
                 trace.try_push_with_context(loc, context);
             }
             None => {
-                let mut trace = Trace::new();
+                let mut trace = AtTrace::new();
                 trace.try_push_with_context(loc, context);
                 if let Some(boxed) = try_box(trace) {
                     self.trace = Some(boxed);
@@ -1495,7 +1695,7 @@ impl<E> At<E> {
                 trace.try_push_with_context(loc, context);
             }
             None => {
-                let mut trace = Trace::new();
+                let mut trace = AtTrace::new();
                 trace.try_push_with_context(loc, context);
                 if let Some(boxed) = try_box(trace) {
                     self.trace = Some(boxed);
@@ -1603,23 +1803,25 @@ impl<E: fmt::Debug> fmt::Debug for At<E> {
 impl<E: fmt::Debug> At<E> {
     /// Format the error with GitHub links using AtCrateInfo from the trace.
     ///
-    /// When you use `at!()` or `.at_crate(crate_info!())`, the crate metadata
-    /// is stored in the trace. This method uses that metadata to generate
-    /// clickable GitHub links for each location.
+    /// When you use `at!()` or `.at_crate()`, the crate metadata is stored in
+    /// the trace. This method uses that metadata to generate clickable GitHub
+    /// links for each location.
     ///
     /// For cross-crate traces, each `at_crate()` call updates the repository
     /// used for subsequent locations until another crate boundary is encountered.
     ///
     /// ## Example
     ///
-    /// ```rust
-    /// use errat::{at, crate_info, At};
+    /// ```rust,ignore
+    /// // Requires define_at_crate_info!() setup
+    /// use errat::{at, At};
+    ///
+    /// errat::define_at_crate_info!();
     ///
     /// #[derive(Debug)]
     /// struct MyError;
     ///
-    /// // Use at() function with manual crate info
-    /// let err = at(MyError).at_crate(crate_info!());
+    /// let err = at!(MyError);
     /// println!("{}", err.display_with_meta());
     /// ```
     pub fn display_with_meta(&self) -> impl fmt::Display + '_ {
@@ -2006,11 +2208,11 @@ mod tests {
 
         // At<E> should be sizeof(E) + 8 (pointer to boxed trace)
         // With alignment, a 1-byte enum becomes 16 bytes total
-        assert_eq!(size_of::<Option<Box<Trace>>>(), 8);
+        assert_eq!(size_of::<Option<Box<AtTrace>>>(), 8);
 
         let traced_size = size_of::<At<TestError>>();
         let error_size = size_of::<TestError>();
-        let pointer_size = size_of::<Option<Box<Trace>>>();
+        let pointer_size = size_of::<Option<Box<AtTrace>>>();
 
         // Should be error + pointer, with possible padding
         assert!(traced_size <= error_size + pointer_size + 8); // Allow for alignment
@@ -2024,12 +2226,12 @@ mod tests {
     fn test_sizeof_trace() {
         use core::mem::size_of;
 
-        let trace_size = size_of::<Trace>();
+        let trace_size = size_of::<AtTrace>();
         let location_vec_size = size_of::<LocationVec>();
         // Print sizes for documentation (visible with cargo test -- --nocapture)
-        // Trace = LocationVec + Vec<(u16, AtContext)>
+        // AtTrace = LocationVec + Vec<(u16, AtContext)>
 
-        // Without tinyvec: LocationVec = Vec = 24, contexts = 24, Trace = 48
+        // Without tinyvec: LocationVec = Vec = 24, contexts = 24, AtTrace = 48
         #[cfg(not(any(
             feature = "tinyvec-64-bytes",
             feature = "tinyvec-128-bytes",
@@ -2042,10 +2244,10 @@ mod tests {
                 contexts_vec_size, 24,
                 "Vec<(u16, AtContext)> should be 24 bytes"
             );
-            assert_eq!(trace_size, 48, "Trace should be 48 bytes without tinyvec");
+            assert_eq!(trace_size, 48, "AtTrace should be 48 bytes without tinyvec");
         }
 
-        // With tinyvec-64-bytes (3 slots): sizeof(Trace) = 64 bytes exactly
+        // With tinyvec-64-bytes (3 slots): sizeof(AtTrace) = 64 bytes exactly
         #[cfg(all(
             feature = "tinyvec-64-bytes",
             not(any(feature = "tinyvec-128-bytes", feature = "tinyvec-256-bytes"))
@@ -2057,11 +2259,11 @@ mod tests {
             );
             assert_eq!(
                 trace_size, 64,
-                "Trace with tinyvec-64-bytes should be exactly 64 bytes"
+                "AtTrace with tinyvec-64-bytes should be exactly 64 bytes"
             );
         }
 
-        // With tinyvec-128-bytes (11 slots): sizeof(Trace) = 128 bytes exactly
+        // With tinyvec-128-bytes (11 slots): sizeof(AtTrace) = 128 bytes exactly
         #[cfg(all(feature = "tinyvec-128-bytes", not(feature = "tinyvec-256-bytes")))]
         {
             assert_eq!(
@@ -2070,11 +2272,11 @@ mod tests {
             );
             assert_eq!(
                 trace_size, 128,
-                "Trace with tinyvec-128-bytes should be exactly 128 bytes"
+                "AtTrace with tinyvec-128-bytes should be exactly 128 bytes"
             );
         }
 
-        // With tinyvec-256-bytes (27 slots): sizeof(Trace) = 256 bytes exactly
+        // With tinyvec-256-bytes (27 slots): sizeof(AtTrace) = 256 bytes exactly
         #[cfg(feature = "tinyvec-256-bytes")]
         {
             assert_eq!(
@@ -2083,7 +2285,7 @@ mod tests {
             );
             assert_eq!(
                 trace_size, 256,
-                "Trace with tinyvec-256-bytes should be exactly 256 bytes"
+                "AtTrace with tinyvec-256-bytes should be exactly 256 bytes"
             );
         }
     }
