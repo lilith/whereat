@@ -49,7 +49,7 @@ src/
 - Add module declarations: `mod context; mod crate_info; mod trace; mod at; mod ext;`
 - Keep: crate docs, `LocationVec` type aliases and helpers, `try_box()`, macros, tests
 - Re-export everything: `pub use context::*; pub use crate_info::*;` etc.
-- Keep `__ERRAT_CRATE_INFO` static and `at_crate_info()` getter
+- Keep the hidden static and `at_crate_info()` getter (for errat's own doctests)
 - Keep all macros (`define_at_crate_info!`, `at!`, `at_crate!`, `__errat_detect_commit!`)
 - Keep `pub fn at<E>(err: E) -> At<E>` function
 

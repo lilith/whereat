@@ -707,7 +707,7 @@ impl Default for AtCrateInfoBuilder {
 
 // errat's own crate info for internal at!() usage in doctests
 #[doc(hidden)]
-pub(crate) static __ERRAT_CRATE_INFO: AtCrateInfo = AtCrateInfo::builder()
+pub(crate) static __AT_CRATE_INFO: AtCrateInfo = AtCrateInfo::builder()
     .name("errat")
     .repo(option_env!("CARGO_PKG_REPOSITORY"))
     .commit(match option_env!("GIT_COMMIT") {
@@ -725,7 +725,7 @@ pub(crate) static __ERRAT_CRATE_INFO: AtCrateInfo = AtCrateInfo::builder()
 
 #[doc(hidden)]
 pub fn at_crate_info() -> &'static AtCrateInfo {
-    &__ERRAT_CRATE_INFO
+    &__AT_CRATE_INFO
 }
 
 /// Internal macro for commit detection chain.
@@ -804,7 +804,7 @@ macro_rules! define_at_crate_info {
     // Base case: no options (uses CRATE_PATH from env if set)
     () => {
         #[doc(hidden)]
-        static __ERRAT_CRATE_INFO: $crate::AtCrateInfo = $crate::AtCrateInfo::builder()
+        static __AT_CRATE_INFO: $crate::AtCrateInfo = $crate::AtCrateInfo::builder()
             .name(env!("CARGO_PKG_NAME"))
             .repo(option_env!("CARGO_PKG_REPOSITORY"))
             .commit($crate::__errat_detect_commit!())
@@ -815,14 +815,14 @@ macro_rules! define_at_crate_info {
         #[doc(hidden)]
         #[allow(dead_code)]
         pub(crate) fn at_crate_info() -> &'static $crate::AtCrateInfo {
-            &__ERRAT_CRATE_INFO
+            &__AT_CRATE_INFO
         }
     };
 
     // With path only
     (path = $path:literal $(,)?) => {
         #[doc(hidden)]
-        static __ERRAT_CRATE_INFO: $crate::AtCrateInfo = $crate::AtCrateInfo::builder()
+        static __AT_CRATE_INFO: $crate::AtCrateInfo = $crate::AtCrateInfo::builder()
             .name(env!("CARGO_PKG_NAME"))
             .repo(option_env!("CARGO_PKG_REPOSITORY"))
             .commit($crate::__errat_detect_commit!())
@@ -833,14 +833,14 @@ macro_rules! define_at_crate_info {
         #[doc(hidden)]
         #[allow(dead_code)]
         pub(crate) fn at_crate_info() -> &'static $crate::AtCrateInfo {
-            &__ERRAT_CRATE_INFO
+            &__AT_CRATE_INFO
         }
     };
 
     // With meta only (uses CRATE_PATH from env if set)
     (meta = $meta:expr $(,)?) => {
         #[doc(hidden)]
-        static __ERRAT_CRATE_INFO: $crate::AtCrateInfo = $crate::AtCrateInfo::builder()
+        static __AT_CRATE_INFO: $crate::AtCrateInfo = $crate::AtCrateInfo::builder()
             .name(env!("CARGO_PKG_NAME"))
             .repo(option_env!("CARGO_PKG_REPOSITORY"))
             .commit($crate::__errat_detect_commit!())
@@ -852,14 +852,14 @@ macro_rules! define_at_crate_info {
         #[doc(hidden)]
         #[allow(dead_code)]
         pub(crate) fn at_crate_info() -> &'static $crate::AtCrateInfo {
-            &__ERRAT_CRATE_INFO
+            &__AT_CRATE_INFO
         }
     };
 
     // With path and meta
     (path = $path:literal, meta = $meta:expr $(,)?) => {
         #[doc(hidden)]
-        static __ERRAT_CRATE_INFO: $crate::AtCrateInfo = $crate::AtCrateInfo::builder()
+        static __AT_CRATE_INFO: $crate::AtCrateInfo = $crate::AtCrateInfo::builder()
             .name(env!("CARGO_PKG_NAME"))
             .repo(option_env!("CARGO_PKG_REPOSITORY"))
             .commit($crate::__errat_detect_commit!())
@@ -871,7 +871,7 @@ macro_rules! define_at_crate_info {
         #[doc(hidden)]
         #[allow(dead_code)]
         pub(crate) fn at_crate_info() -> &'static $crate::AtCrateInfo {
-            &__ERRAT_CRATE_INFO
+            &__AT_CRATE_INFO
         }
     };
 

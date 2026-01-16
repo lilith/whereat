@@ -893,7 +893,7 @@ fn crate_path_without_trailing_slash() {
 
 #[test]
 fn crate_info_static_defines_hidden_static() {
-    // __ERRAT_CRATE_INFO is defined by define_at_crate_info!() at top of file
+    // __AT_CRATE_INFO is defined by define_at_crate_info!() at top of file
     // at!() references it
     let err = at!(TestError);
 

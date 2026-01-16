@@ -6,7 +6,7 @@
 
 use errat::{At, ErrorAtExt, ResultAtExt, ResultStartAtExt, at, at_crate};
 
-// Required for at!() and at_crate!() macros - defines __ERRAT_CRATE_INFO
+// Required for at!() and at_crate!() macros - defines at_crate_info() getter
 errat::define_at_crate_info!();
 
 // ============================================================================
