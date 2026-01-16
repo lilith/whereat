@@ -26,9 +26,14 @@ static_assertions = "1.1"
 criterion = { version = "0.5", features = ["html_reports"] }
 anyhow = "1.0.100"
 thiserror = "2.0.17"
+backtrace = "0.3"
 
 [[bench]]
 name = "overhead"
+harness = false
+
+[[bench]]
+name = "nested_loops"
 harness = false
 
 [lints.rust]

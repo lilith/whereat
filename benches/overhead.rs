@@ -3,8 +3,8 @@
 //! Run with: cargo bench
 //! Run specific benchmark: cargo bench --bench overhead -- "hot_loop"
 
-use criterion::{black_box, criterion_group, criterion_main, Criterion, BenchmarkId};
-use errat::{at, At, ResultAtExt, ResultStartAtExt};
+use criterion::{BenchmarkId, Criterion, black_box, criterion_group, criterion_main};
+use errat::{At, ResultAtExt, ResultStartAtExt, at};
 
 use core::fmt;
 
@@ -83,7 +83,11 @@ fn at_result_with_many_contexts(_n: u64) -> Result<u64, At<BenchError>> {
 
 fn chain_plain_3_levels(n: u64) -> Result<u64, BenchError> {
     fn level_2(n: u64) -> Result<u64, BenchError> {
-        if n == 0 { Err(BenchError::NotFound) } else { Ok(n) }
+        if n == 0 {
+            Err(BenchError::NotFound)
+        } else {
+            Ok(n)
+        }
     }
     fn level_1(n: u64) -> Result<u64, BenchError> {
         level_2(n)
@@ -93,7 +97,11 @@ fn chain_plain_3_levels(n: u64) -> Result<u64, BenchError> {
 
 fn chain_at_3_levels(n: u64) -> Result<u64, At<BenchError>> {
     fn level_2(n: u64) -> Result<u64, At<BenchError>> {
-        if n == 0 { Err(at(BenchError::NotFound)) } else { Ok(n) }
+        if n == 0 {
+            Err(at(BenchError::NotFound))
+        } else {
+            Ok(n)
+        }
     }
     fn level_1(n: u64) -> Result<u64, At<BenchError>> {
         level_2(n).at()
@@ -104,7 +112,11 @@ fn chain_at_3_levels(n: u64) -> Result<u64, At<BenchError>> {
 fn chain_at_10_levels(n: u64) -> Result<u64, At<BenchError>> {
     fn level(depth: u32, n: u64) -> Result<u64, At<BenchError>> {
         if depth == 0 {
-            if n == 0 { Err(at(BenchError::NotFound)) } else { Ok(n) }
+            if n == 0 {
+                Err(at(BenchError::NotFound))
+            } else {
+                Ok(n)
+            }
         } else {
             level(depth - 1, n).at()
         }
@@ -122,25 +134,17 @@ fn bench_happy_path(c: &mut Criterion) {
     // Input that succeeds (n=1)
     let n = 1u64;
 
-    group.bench_function("baseline", |b| {
-        b.iter(|| baseline_no_error(black_box(n)))
-    });
+    group.bench_function("baseline", |b| b.iter(|| baseline_no_error(black_box(n))));
 
-    group.bench_function("plain_result", |b| {
-        b.iter(|| plain_result_ok(black_box(n)))
-    });
+    group.bench_function("plain_result", |b| b.iter(|| plain_result_ok(black_box(n))));
 
-    group.bench_function("at_result", |b| {
-        b.iter(|| at_result_ok(black_box(n)))
-    });
+    group.bench_function("at_result", |b| b.iter(|| at_result_ok(black_box(n))));
 
     group.bench_function("chain_plain_3", |b| {
         b.iter(|| chain_plain_3_levels(black_box(n)))
     });
 
-    group.bench_function("chain_at_3", |b| {
-        b.iter(|| chain_at_3_levels(black_box(n)))
-    });
+    group.bench_function("chain_at_3", |b| b.iter(|| chain_at_3_levels(black_box(n))));
 
     group.bench_function("chain_at_10", |b| {
         b.iter(|| chain_at_10_levels(black_box(n)))
@@ -283,27 +287,35 @@ fn bench_context_count(c: &mut Criterion) {
     let mut group = c.benchmark_group("context_count");
 
     for count in [0, 1, 5, 10, 20] {
-        group.bench_with_input(BenchmarkId::new("static_str", count), &count, |b, &count| {
-            b.iter(|| {
-                let mut err = at(BenchError::NotFound);
-                for _ in 0..count {
-                    err = err.at_str("context");
-                }
-                black_box(err)
-            })
-        });
+        group.bench_with_input(
+            BenchmarkId::new("static_str", count),
+            &count,
+            |b, &count| {
+                b.iter(|| {
+                    let mut err = at(BenchError::NotFound);
+                    for _ in 0..count {
+                        err = err.at_str("context");
+                    }
+                    black_box(err)
+                })
+            },
+        );
     }
 
     for count in [0, 1, 5, 10, 20] {
-        group.bench_with_input(BenchmarkId::new("dynamic_string", count), &count, |b, &count| {
-            b.iter(|| {
-                let mut err = at(BenchError::NotFound);
-                for i in 0..count {
-                    err = err.at_string(|| format!("context {}", i));
-                }
-                black_box(err)
-            })
-        });
+        group.bench_with_input(
+            BenchmarkId::new("dynamic_string", count),
+            &count,
+            |b, &count| {
+                b.iter(|| {
+                    let mut err = at(BenchError::NotFound);
+                    for i in 0..count {
+                        err = err.at_string(|| format!("context {}", i));
+                    }
+                    black_box(err)
+                })
+            },
+        );
     }
 
     group.finish();
@@ -324,7 +336,11 @@ fn bench_display_format(c: &mut Criterion) {
     // Error with 5-level trace
     fn make_deep() -> At<BenchError> {
         fn level(d: u32) -> Result<(), At<BenchError>> {
-            if d == 0 { Err(at(BenchError::NotFound)) } else { level(d - 1).at() }
+            if d == 0 {
+                Err(at(BenchError::NotFound))
+            } else {
+                level(d - 1).at()
+            }
         }
         level(4).unwrap_err()
     }

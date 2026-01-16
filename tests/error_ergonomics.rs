@@ -10,7 +10,9 @@
 // Allow large error types in tests - we're demonstrating API usage, not optimizing for size
 #![allow(clippy::result_large_err)]
 
-use errat::{at, At, AtTrace, AtTraceable, BoxedTrace, ResultAtExt, ResultAtTraceableExt, ResultStartAtExt};
+use errat::{
+    At, AtTrace, AtTraceBoxed, AtTraceable, ResultAtExt, ResultAtTraceableExt, ResultStartAtExt, at,
+};
 use std::error::Error;
 use std::fmt;
 use std::io;
@@ -57,13 +59,13 @@ enum OuterThiserror {
 }
 
 // ============================================================================
-// 3. AtTraceable implementation with BoxedTrace (small footprint)
+// 3. AtTraceable implementation with AtTraceBoxed (small footprint)
 // ============================================================================
 
 #[derive(Debug)]
 struct TraceableError {
     kind: TraceableKind,
-    trace: BoxedTrace,  // 8 bytes, not 24-256!
+    trace: AtTraceBoxed, // 8 bytes, not 24-256!
 }
 
 #[derive(Debug)]
@@ -76,6 +78,17 @@ impl AtTraceable for TraceableError {
     fn trace_mut(&mut self) -> &mut AtTrace {
         self.trace.get_or_insert_mut()
     }
+
+    fn trace(&self) -> Option<&AtTrace> {
+        self.trace.as_ref()
+    }
+
+    fn fmt_message(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self.kind {
+            TraceableKind::Parse => write!(f, "parse error"),
+            TraceableKind::Network => write!(f, "network error"),
+        }
+    }
 }
 
 impl TraceableError {
@@ -83,7 +96,7 @@ impl TraceableError {
     fn parse() -> Self {
         Self {
             kind: TraceableKind::Parse,
-            trace: BoxedTrace::capture(),
+            trace: AtTraceBoxed::capture(),
         }
     }
 
@@ -91,7 +104,7 @@ impl TraceableError {
     fn network() -> Self {
         Self {
             kind: TraceableKind::Network,
-            trace: BoxedTrace::capture(),
+            trace: AtTraceBoxed::capture(),
         }
     }
 
@@ -99,7 +112,7 @@ impl TraceableError {
     fn lazy(kind: TraceableKind) -> Self {
         Self {
             kind,
-            trace: BoxedTrace::new(),
+            trace: AtTraceBoxed::new(),
         }
     }
 }
@@ -140,7 +153,10 @@ fn plain_enum_with_at() {
     // Display only shows the error message (from Display impl)
     let display = format!("{}", err);
     println!("Display:\n{}", display);
-    assert!(display.contains("not found"), "Display should show error message");
+    assert!(
+        display.contains("not found"),
+        "Display should show error message"
+    );
 
     // Debug shows the full trace with contexts (error uses Debug format)
     let debug = format!("{:?}", err);
@@ -150,8 +166,16 @@ fn plain_enum_with_at() {
         "Debug should show error variant: {}",
         debug
     );
-    assert!(debug.contains("loading config"), "Debug should show context: {}", debug);
-    assert!(debug.contains("error_ergonomics.rs"), "Debug should show file: {}", debug);
+    assert!(
+        debug.contains("loading config"),
+        "Debug should show context: {}",
+        debug
+    );
+    assert!(
+        debug.contains("error_ergonomics.rs"),
+        "Debug should show file: {}",
+        debug
+    );
 
     // Check we have locations:
     // - at() in inner() creates first location
@@ -215,11 +239,17 @@ fn thiserror_source_chain_with_at_error() {
 
     // Display shows the error message
     let display = format!("{}", err);
-    assert!(display.contains("io error"), "Display should show thiserror message");
+    assert!(
+        display.contains("io error"),
+        "Display should show thiserror message"
+    );
 
     // Debug shows the context
     let debug = format!("{:?}", err);
-    assert!(debug.contains("reading config file"), "Debug should show context");
+    assert!(
+        debug.contains("reading config file"),
+        "Debug should show context"
+    );
 }
 
 // ============================================================================
@@ -314,7 +344,10 @@ fn at_error_embeds_source() {
     // Display only shows the main error
     let display = format!("{}", err);
     println!("Display:\n{}", display);
-    assert!(display.contains("not found"), "Display should show main error");
+    assert!(
+        display.contains("not found"),
+        "Display should show main error"
+    );
 
     // Debug shows the embedded error (uses Debug format for error)
     let debug = format!("{:?}", err);
@@ -413,8 +446,14 @@ fn map_error_preserves_trace() {
 
     // Debug shows both contexts preserved
     let debug = format!("{:?}", err);
-    assert!(debug.contains("in inner"), "Debug should preserve inner context");
-    assert!(debug.contains("in outer"), "Debug should have outer context");
+    assert!(
+        debug.contains("in inner"),
+        "Debug should preserve inner context"
+    );
+    assert!(
+        debug.contains("in outer"),
+        "Debug should have outer context"
+    );
 }
 
 // ============================================================================
@@ -466,12 +505,18 @@ fn at_error_with_anyhow() {
     // Display shows the error message (which includes the anyhow message)
     let display = format!("{}", err);
     println!("Display:\n{}", display);
-    assert!(display.contains("anyhow failure"), "Display should capture anyhow msg");
+    assert!(
+        display.contains("anyhow failure"),
+        "Display should capture anyhow msg"
+    );
 
     // Debug shows the context
     let debug = format!("{:?}", err);
     println!("Debug:\n{}", debug);
-    assert!(debug.contains("during anyhow op"), "Debug should have context");
+    assert!(
+        debug.contains("during anyhow op"),
+        "Debug should have context"
+    );
 }
 
 // ============================================================================
@@ -508,12 +553,18 @@ fn multiple_at_error_chain() {
     let debug = format!("{:?}", err);
     println!("Chained errors (Debug):\n{}", debug);
 
-    assert!(debug.contains("not found") || debug.contains("NotFound"), "Main error");
+    assert!(
+        debug.contains("not found") || debug.contains("NotFound"),
+        "Main error"
+    );
     assert!(debug.contains("step 1"), "Context 1");
     assert!(debug.contains("step 2"), "Context 2");
     assert!(debug.contains("error A"), "Error A should appear");
     assert!(debug.contains("error B"), "Error B should appear");
-    assert!(debug.contains("caused by"), "Should have 'caused by' prefixes");
+    assert!(
+        debug.contains("caused by"),
+        "Should have 'caused by' prefixes"
+    );
 
     // Count error contexts
     let error_count = err.contexts().filter(|c| c.is_error()).count();
@@ -635,30 +686,30 @@ fn nested_errors_format_correctly() {
 }
 
 // ============================================================================
-// Test: BoxedTrace keeps error types small
+// Test: AtTraceBoxed keeps error types small
 // ============================================================================
 
 #[test]
 fn boxed_trace_small_footprint() {
-    // BoxedTrace should be exactly pointer-sized (8 bytes on 64-bit)
+    // AtTraceBoxed should be exactly pointer-sized (8 bytes on 64-bit)
     assert_eq!(
-        std::mem::size_of::<BoxedTrace>(),
+        std::mem::size_of::<AtTraceBoxed>(),
         std::mem::size_of::<*const ()>(),
-        "BoxedTrace should be pointer-sized"
+        "AtTraceBoxed should be pointer-sized"
     );
 
-    // TraceableError with BoxedTrace should be small
+    // TraceableError with AtTraceBoxed should be small
     let traceable_size = std::mem::size_of::<TraceableError>();
     assert!(
         traceable_size <= 24,
-        "TraceableError with BoxedTrace should be ≤24 bytes, got {}",
+        "TraceableError with AtTraceBoxed should be ≤24 bytes, got {}",
         traceable_size
     );
 }
 
 #[test]
 fn boxed_trace_lazy_allocation() {
-    // Empty BoxedTrace - no allocation
+    // Empty AtTraceBoxed - no allocation
     let err = TraceableError::lazy(TraceableKind::Parse);
     assert!(err.trace.is_empty(), "Lazy trace should be empty initially");
 
@@ -670,7 +721,10 @@ fn boxed_trace_lazy_allocation() {
 #[test]
 fn boxed_trace_capture() {
     let err = TraceableError::parse();
-    assert!(!err.trace.is_empty(), "Capture should create non-empty trace");
+    assert!(
+        !err.trace.is_empty(),
+        "Capture should create non-empty trace"
+    );
     assert_eq!(err.trace.frame_count(), 1, "Should have one frame");
 }
 
@@ -697,7 +751,11 @@ fn frames_api_on_at() {
     // Second frame has "step 2" context
     let second = &frames[1];
     let second_contexts: Vec<_> = second.contexts().collect();
-    assert!(second_contexts.iter().any(|c| c.as_text() == Some("step 2")));
+    assert!(
+        second_contexts
+            .iter()
+            .any(|c| c.as_text() == Some("step 2"))
+    );
 }
 
 #[test]
@@ -713,28 +771,29 @@ fn frames_api_on_attraceable() {
 
     let err = outer().unwrap_err();
 
-    // Use frames() on BoxedTrace
+    // Use frames() on AtTraceBoxed
     let frames: Vec<_> = err.trace.frames().collect();
     assert!(frames.len() >= 2, "Should have 2+ frames");
 
     // Check first frame has context
-    let has_parsing_ctx = frames.iter().any(|f| {
-        f.contexts().any(|c| c.as_text() == Some("parsing"))
-    });
+    let has_parsing_ctx = frames
+        .iter()
+        .any(|f| f.contexts().any(|c| c.as_text() == Some("parsing")));
     assert!(has_parsing_ctx, "Should find 'parsing' context");
 }
 
 #[test]
 fn frames_with_skipped_marker() {
-    let err = at(PlainError::NotFound)
-        .at_skipped_frames()
-        .at();
+    let err = at(PlainError::NotFound).at_skipped_frames().at();
 
     let frames: Vec<_> = err.frames().collect();
     assert_eq!(frames.len(), 3, "Should have 3 frames");
 
     // Middle frame should be skipped marker
-    assert!(frames[1].is_skipped(), "Middle frame should be skipped marker");
+    assert!(
+        frames[1].is_skipped(),
+        "Middle frame should be skipped marker"
+    );
     assert!(frames[1].location().is_none());
 }
 

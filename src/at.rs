@@ -11,7 +11,7 @@ use core::panic::Location;
 
 use crate::AtCrateInfo;
 use crate::context::{AtContext, AtContextRef};
-use crate::trace::{AtFrame, AtTrace, AtTraceSegment, DEFAULT_TRACE_CAPACITY, try_box};
+use crate::trace::{AtFrame, AtTrace, AtTraceBoxed, AtTraceSegment};
 
 // ============================================================================
 // At<E> - Core wrapper type
@@ -63,7 +63,7 @@ use crate::trace::{AtFrame, AtTrace, AtTraceSegment, DEFAULT_TRACE_CAPACITY, try
 /// ```
 pub struct At<E> {
     error: E,
-    trace: Option<Box<AtTrace>>,
+    trace: AtTraceBoxed,
 }
 
 // ============================================================================
@@ -77,30 +77,27 @@ impl<E> At<E> {
     /// on the error directly.
     #[inline]
     pub const fn new(error: E) -> Self {
-        Self { error, trace: None }
+        Self {
+            error,
+            trace: AtTraceBoxed::new(),
+        }
     }
 
     /// Create an `At<E>` from an error and an existing trace.
     ///
     /// Used for transferring traces between error types.
     pub fn from_parts(error: E, trace: AtTrace) -> Self {
+        let mut boxed = AtTraceBoxed::new();
+        boxed.set(trace);
         Self {
             error,
-            trace: if trace.is_empty() {
-                None
-            } else {
-                try_box(trace)
-            },
+            trace: boxed,
         }
     }
 
     /// Ensure trace exists, creating it if necessary.
     fn ensure_trace(&mut self) -> &mut AtTrace {
-        if self.trace.is_none() {
-            self.trace = try_box(AtTrace::new());
-        }
-        // Safe: we just ensured it exists, or we're in OOM and will crash anyway
-        self.trace.as_mut().expect("trace should exist")
+        self.trace.get_or_insert_mut()
     }
 
     /// Add the caller's location to the trace.
@@ -128,21 +125,8 @@ impl<E> At<E> {
     #[inline]
     pub fn at(mut self) -> Self {
         let loc = Location::caller();
-        match &mut self.trace {
-            Some(trace) => {
-                // Silently ignore if push fails
-                let _ = trace.try_push(loc);
-            }
-            None => {
-                // Try to create trace with capacity hint, fall back to no capacity
-                let mut trace =
-                    AtTrace::try_with_capacity(DEFAULT_TRACE_CAPACITY).unwrap_or_default();
-                let _ = trace.try_push(loc);
-                if let Some(boxed) = try_box(trace) {
-                    self.trace = Some(boxed);
-                }
-            }
-        }
+        let trace = self.trace.get_or_insert_mut();
+        let _ = trace.try_push(loc);
         self
     }
 
@@ -173,19 +157,8 @@ impl<E> At<E> {
     pub fn at_str(mut self, msg: &'static str) -> Self {
         let loc = Location::caller();
         let context = AtContext::Text(Cow::Borrowed(msg));
-
-        match &mut self.trace {
-            Some(trace) => {
-                trace.try_add_context(loc, context);
-            }
-            None => {
-                let mut trace = AtTrace::new();
-                trace.try_add_context(loc, context);
-                if let Some(boxed) = try_box(trace) {
-                    self.trace = Some(boxed);
-                }
-            }
-        }
+        let trace = self.trace.get_or_insert_mut();
+        trace.try_add_context(loc, context);
         self
     }
 
@@ -217,19 +190,8 @@ impl<E> At<E> {
     pub fn at_string(mut self, f: impl FnOnce() -> String) -> Self {
         let loc = Location::caller();
         let context = AtContext::Text(Cow::Owned(f()));
-
-        match &mut self.trace {
-            Some(trace) => {
-                trace.try_add_context(loc, context);
-            }
-            None => {
-                let mut trace = AtTrace::new();
-                trace.try_add_context(loc, context);
-                if let Some(boxed) = try_box(trace) {
-                    self.trace = Some(boxed);
-                }
-            }
-        }
+        let trace = self.trace.get_or_insert_mut();
+        trace.try_add_context(loc, context);
         self
     }
 
@@ -275,23 +237,9 @@ impl<E> At<E> {
     ) -> Self {
         let loc = Location::caller();
         let ctx = f();
-        let Some(boxed_ctx) = try_box(ctx) else {
-            return self;
-        };
-        let context = AtContext::Display(boxed_ctx);
-
-        match &mut self.trace {
-            Some(trace) => {
-                trace.try_add_context(loc, context);
-            }
-            None => {
-                let mut trace = AtTrace::new();
-                trace.try_add_context(loc, context);
-                if let Some(boxed) = try_box(trace) {
-                    self.trace = Some(boxed);
-                }
-            }
-        }
+        let context = AtContext::Display(Box::new(ctx));
+        let trace = self.trace.get_or_insert_mut();
+        trace.try_add_context(loc, context);
         self
     }
 
@@ -329,23 +277,9 @@ impl<E> At<E> {
     ) -> Self {
         let loc = Location::caller();
         let ctx = f();
-        let Some(boxed_ctx) = try_box(ctx) else {
-            return self;
-        };
-        let context = AtContext::Debug(boxed_ctx);
-
-        match &mut self.trace {
-            Some(trace) => {
-                trace.try_add_context(loc, context);
-            }
-            None => {
-                let mut trace = AtTrace::new();
-                trace.try_add_context(loc, context);
-                if let Some(boxed) = try_box(trace) {
-                    self.trace = Some(boxed);
-                }
-            }
-        }
+        let context = AtContext::Debug(Box::new(ctx));
+        let trace = self.trace.get_or_insert_mut();
+        trace.try_add_context(loc, context);
         self
     }
 
@@ -369,28 +303,11 @@ impl<E> At<E> {
     /// ```
     #[track_caller]
     #[inline]
-    pub fn at_error<Err: core::error::Error + Send + Sync + 'static>(
-        mut self,
-        err: Err,
-    ) -> Self {
+    pub fn at_error<Err: core::error::Error + Send + Sync + 'static>(mut self, err: Err) -> Self {
         let loc = Location::caller();
-        let Some(boxed_err) = try_box(err) else {
-            return self;
-        };
-        let context = AtContext::Error(boxed_err);
-
-        match &mut self.trace {
-            Some(trace) => {
-                trace.try_add_context(loc, context);
-            }
-            None => {
-                let mut trace = AtTrace::new();
-                trace.try_add_context(loc, context);
-                if let Some(boxed) = try_box(trace) {
-                    self.trace = Some(boxed);
-                }
-            }
-        }
+        let context = AtContext::Error(Box::new(err));
+        let trace = self.trace.get_or_insert_mut();
+        trace.try_add_context(loc, context);
         self
     }
 
@@ -423,19 +340,8 @@ impl<E> At<E> {
     pub fn at_crate(mut self, info: &'static AtCrateInfo) -> Self {
         let loc = Location::caller();
         let context = AtContext::Crate(info);
-
-        match &mut self.trace {
-            Some(trace) => {
-                trace.try_add_context(loc, context);
-            }
-            None => {
-                let mut trace = AtTrace::new();
-                trace.try_add_context(loc, context);
-                if let Some(boxed) = try_box(trace) {
-                    self.trace = Some(boxed);
-                }
-            }
-        }
+        let trace = self.trace.get_or_insert_mut();
+        trace.try_add_context(loc, context);
         self
     }
 
@@ -460,19 +366,8 @@ impl<E> At<E> {
     /// ```
     #[inline]
     pub fn at_skipped_frames(mut self) -> Self {
-        // None in locations vec = skipped frame marker
-        match &mut self.trace {
-            Some(trace) => {
-                let _ = trace.try_push_skipped();
-            }
-            None => {
-                let mut trace = AtTrace::new();
-                let _ = trace.try_push_skipped();
-                if let Some(boxed) = try_box(trace) {
-                    self.trace = Some(boxed);
-                }
-            }
-        }
+        let trace = self.trace.get_or_insert_mut();
+        let _ = trace.try_push_skipped();
         self
     }
 
@@ -496,18 +391,8 @@ impl<E> At<E> {
     /// ```
     #[inline]
     pub fn set_crate_info(mut self, info: &'static AtCrateInfo) -> Self {
-        match &mut self.trace {
-            Some(trace) => {
-                trace.set_crate_info(info);
-            }
-            None => {
-                let mut trace = AtTrace::new();
-                trace.set_crate_info(info);
-                if let Some(boxed) = try_box(trace) {
-                    self.trace = Some(boxed);
-                }
-            }
-        }
+        let trace = self.trace.get_or_insert_mut();
+        trace.set_crate_info(info);
         self
     }
 
@@ -544,7 +429,7 @@ impl<E> At<E> {
     /// Check if the trace is empty.
     #[inline]
     pub fn trace_is_empty(&self) -> bool {
-        self.trace.is_none()
+        self.trace.is_empty()
     }
 
     /// Iterate over all traced locations, oldest first.
@@ -553,7 +438,11 @@ impl<E> At<E> {
     /// Use `Debug` formatting to see the full trace with skip markers.
     #[inline]
     pub fn trace_iter(&self) -> impl Iterator<Item = &'static Location<'static>> + '_ {
-        self.trace.iter().flat_map(|t| t.iter()).flatten() // Filter out None (skipped frame markers)
+        self.trace
+            .as_ref()
+            .into_iter()
+            .flat_map(|t| t.iter())
+            .flatten() // Filter out None (skipped frame markers)
     }
 
     /// Get the first (oldest) location in the trace, if any.
@@ -594,7 +483,7 @@ impl<E> At<E> {
     /// assert_eq!(texts, vec!["initializing", "loading config"]); // newest first
     /// ```
     pub fn contexts(&self) -> impl Iterator<Item = AtContextRef<'_>> {
-        self.trace.iter().flat_map(|t| t.contexts())
+        self.trace.as_ref().into_iter().flat_map(|t| t.contexts())
     }
 
     /// Iterate over frames (location + contexts pairs), oldest first.
@@ -624,7 +513,7 @@ impl<E> At<E> {
     /// }
     /// ```
     pub fn frames(&self) -> impl Iterator<Item = AtFrame<'_>> {
-        self.trace.iter().flat_map(|t| t.frames())
+        self.trace.frames()
     }
 
     /// Get the number of frames in the trace.
@@ -663,12 +552,12 @@ impl<E> At<E> {
 
     /// Take the entire trace, leaving self with an empty trace.
     pub fn take_trace(&mut self) -> Option<AtTrace> {
-        self.trace.take().map(|b| *b)
+        self.trace.take()
     }
 
     /// Set the trace, replacing any existing trace.
     pub fn set_trace(&mut self, trace: AtTrace) {
-        self.trace = try_box(trace);
+        self.trace.set(trace);
     }
 
     // ========================================================================
@@ -725,19 +614,23 @@ impl<E> At<E> {
     ///
     /// impl AtTraceable for MyError {
     ///     fn trace_mut(&mut self) -> &mut AtTrace { &mut self.trace }
+    ///     fn trace(&self) -> Option<&AtTrace> { Some(&self.trace) }
+    ///     fn fmt_message(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+    ///         write!(f, "my error")
+    ///     }
     /// }
     ///
     /// let at_err: At<Inner> = at(Inner).at_str("context");
     /// let my_err: MyError = at_err.into_traceable(|_| MyError { trace: AtTrace::new() });
     /// ```
-    pub fn into_traceable<E2, F>(self, f: F) -> E2
+    pub fn into_traceable<E2, F>(mut self, f: F) -> E2
     where
         F: FnOnce(E) -> E2,
         E2: crate::trace::AtTraceable,
     {
         let mut new_err = f(self.error);
-        if let Some(trace_box) = self.trace {
-            *new_err.trace_mut() = *trace_box;
+        if let Some(trace) = self.trace.take() {
+            *new_err.trace_mut() = trace;
         }
         new_err
     }
@@ -752,7 +645,7 @@ impl<E: fmt::Debug> fmt::Debug for At<E> {
         // Error header
         writeln!(f, "Error: {:?}", self.error)?;
 
-        let Some(trace) = &self.trace else {
+        let Some(trace) = self.trace.as_ref() else {
             return Ok(());
         };
 
@@ -827,7 +720,7 @@ impl<E: fmt::Debug> fmt::Display for DisplayWithMeta<'_, E> {
         // Error header
         writeln!(f, "Error: {:?}", self.traced.error)?;
 
-        let Some(trace) = &self.traced.trace else {
+        let Some(trace) = self.traced.trace.as_ref() else {
             return Ok(());
         };
 
@@ -906,6 +799,164 @@ fn write_location_meta(
         writeln!(f, "       {}{}#L{}", base, file, loc.line())?;
     }
     Ok(())
+}
+
+// ============================================================================
+// Formatting methods for At<E>
+// ============================================================================
+
+impl<E: fmt::Display> At<E> {
+    /// Format with full trace (message + locations + all contexts).
+    ///
+    /// Returns a formatter that displays:
+    /// - The error message (via `Display`)
+    /// - All trace frame locations
+    /// - All context strings at each location
+    ///
+    /// ## Example
+    ///
+    /// ```rust
+    /// use errat::{at, At};
+    ///
+    /// #[derive(Debug)]
+    /// struct MyError(&'static str);
+    ///
+    /// impl std::fmt::Display for MyError {
+    ///     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+    ///         write!(f, "{}", self.0)
+    ///     }
+    /// }
+    ///
+    /// let err: At<MyError> = at(MyError("failed")).at_str("loading config");
+    /// println!("{}", err.full_trace());
+    /// // Output:
+    /// // failed
+    /// //     at src/main.rs:10:1
+    /// //         loading config
+    /// ```
+    pub fn full_trace(&self) -> impl fmt::Display + '_ {
+        AtFullTraceDisplay { at: self }
+    }
+
+    /// Format with trace locations only (message + locations, no context strings).
+    ///
+    /// Returns a formatter that displays:
+    /// - The error message (via `Display`)
+    /// - All trace frame locations
+    /// - NO context strings (for compact output)
+    ///
+    /// ## Example
+    ///
+    /// ```rust
+    /// use errat::{at, At};
+    ///
+    /// #[derive(Debug)]
+    /// struct MyError(&'static str);
+    ///
+    /// impl std::fmt::Display for MyError {
+    ///     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+    ///         write!(f, "{}", self.0)
+    ///     }
+    /// }
+    ///
+    /// let err: At<MyError> = at(MyError("failed")).at_str("loading config");
+    /// println!("{}", err.last_error_trace());
+    /// // Output:
+    /// // failed
+    /// //     at src/main.rs:10:1
+    /// ```
+    pub fn last_error_trace(&self) -> impl fmt::Display + '_ {
+        AtLastErrorTraceDisplay { at: self }
+    }
+
+    /// Format just the error message (no trace).
+    ///
+    /// Returns a formatter that only displays the error message via `Display`.
+    /// Use this when you want to show the error without any trace information.
+    ///
+    /// This is equivalent to using the `Display` impl directly.
+    pub fn last_error(&self) -> impl fmt::Display + '_ {
+        AtLastErrorDisplay { at: self }
+    }
+}
+
+/// Formatter that shows error message + full trace with all contexts.
+struct AtFullTraceDisplay<'a, E> {
+    at: &'a At<E>,
+}
+
+impl<E: fmt::Display> fmt::Display for AtFullTraceDisplay<'_, E> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        // Show the error message
+        write!(f, "{}", self.at.error)?;
+
+        // Show trace frames
+        if let Some(trace) = self.at.trace.as_ref() {
+            for frame in trace.frames() {
+                if let Some(loc) = frame.location() {
+                    write!(f, "\n    at {}:{}:{}", loc.file(), loc.line(), loc.column())?;
+                } else {
+                    write!(f, "\n    [...]")?;
+                }
+
+                // Show contexts for this frame
+                for ctx in frame.contexts() {
+                    if let Some(text) = ctx.as_text() {
+                        write!(f, "\n        {}", text)?;
+                    } else if let Some(err) = ctx.as_error() {
+                        write!(f, "\n        caused by: {}", err)?;
+                        // Write nested error chain
+                        let mut source = err.source();
+                        let mut depth = 2;
+                        while let Some(src) = source {
+                            let indent = "    ".repeat(depth);
+                            write!(f, "\n{}caused by: {}", indent, src)?;
+                            source = src.source();
+                            depth += 1;
+                        }
+                    } else {
+                        write!(f, "\n        {}", ctx)?;
+                    }
+                }
+            }
+        }
+        Ok(())
+    }
+}
+
+/// Formatter that shows error message + trace locations only (no contexts).
+struct AtLastErrorTraceDisplay<'a, E> {
+    at: &'a At<E>,
+}
+
+impl<E: fmt::Display> fmt::Display for AtLastErrorTraceDisplay<'_, E> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        // Show the error message
+        write!(f, "{}", self.at.error)?;
+
+        // Show trace frames (locations only, no contexts)
+        if let Some(trace) = self.at.trace.as_ref() {
+            for frame in trace.frames() {
+                if let Some(loc) = frame.location() {
+                    write!(f, "\n    at {}:{}:{}", loc.file(), loc.line(), loc.column())?;
+                } else {
+                    write!(f, "\n    [...]")?;
+                }
+            }
+        }
+        Ok(())
+    }
+}
+
+/// Formatter that shows just the error message (no trace).
+struct AtLastErrorDisplay<'a, E> {
+    at: &'a At<E>,
+}
+
+impl<E: fmt::Display> fmt::Display for AtLastErrorDisplay<'_, E> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{}", self.at.error)
+    }
 }
 
 // ============================================================================

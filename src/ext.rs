@@ -299,6 +299,10 @@ impl<T, E> ResultStartAtExt<T, E> for Result<T, E> {
 ///
 /// impl AtTraceable for MyError {
 ///     fn trace_mut(&mut self) -> &mut AtTrace { &mut self.trace }
+///     fn trace(&self) -> Option<&AtTrace> { Some(&self.trace) }
+///     fn fmt_message(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+///         write!(f, "{}", self.msg)
+///     }
 /// }
 ///
 /// impl MyError {
@@ -393,10 +397,7 @@ impl<T, E: AtTraceable> ResultAtTraceableExt<T, E> for Result<T, E> {
 
     #[track_caller]
     #[inline]
-    fn at_error<Err: core::error::Error + Send + Sync + 'static>(
-        self,
-        err: Err,
-    ) -> Result<T, E> {
+    fn at_error<Err: core::error::Error + Send + Sync + 'static>(self, err: Err) -> Result<T, E> {
         self.map_err(|e| e.at_error(err))
     }
 

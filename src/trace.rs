@@ -75,15 +75,6 @@ type ContextVec = Option<Box<Vec<ContextEntry>>>;
 // In practice, OOM panics are rare and the error itself still propagates
 // (since E is stored inline in At<E>).
 
-/// Default capacity hint for new traces.
-///
-/// Most error traces are 3-6 levels deep (e.g., handler → service → repo → db).
-/// Pre-allocating 6 slots avoids reallocations for typical call stacks.
-/// For deeper traces, the Vec will grow automatically.
-///
-/// Note: This is ignored when tinyvec features are enabled (TinyVec starts inline).
-pub(crate) const DEFAULT_TRACE_CAPACITY: usize = 6;
-
 /// Try to allocate a Box. Returns Some on success.
 /// Note: Box::try_new is not yet stable, so this can panic on OOM.
 /// The error E is stored inline, so even if tracing fails, the error propagates.
@@ -120,33 +111,6 @@ fn try_push_location(vec: &mut LocationVec, elem: LocationElem) -> bool {
 fn try_push_location(vec: &mut LocationVec, elem: LocationElem) -> bool {
     vec.push(elem);
     true
-}
-
-/// Try to create a LocationVec with the given capacity hint, returning None on failure.
-/// For Vec: allocates capacity.
-#[cfg(not(any(
-    feature = "tinyvec-64-bytes",
-    feature = "tinyvec-128-bytes",
-    feature = "tinyvec-256-bytes"
-)))]
-#[inline]
-fn try_location_vec_with_capacity(capacity: usize) -> Option<LocationVec> {
-    let mut vec = LocationVec::new();
-    if vec.try_reserve(capacity).is_err() {
-        return None;
-    }
-    Some(vec)
-}
-
-/// Try to create a LocationVec. For TinyVec, always succeeds (starts on stack).
-#[cfg(any(
-    feature = "tinyvec-64-bytes",
-    feature = "tinyvec-128-bytes",
-    feature = "tinyvec-256-bytes"
-))]
-#[inline]
-fn try_location_vec_with_capacity(_capacity: usize) -> Option<LocationVec> {
-    Some(LocationVec::new())
 }
 
 // ============================================================================
@@ -196,18 +160,17 @@ fn context_iter(vec: &ContextVec) -> impl DoubleEndedIterator<Item = &ContextEnt
 /// }
 ///
 /// impl AtTraceable for MyError {
-///     fn trace_mut(&mut self) -> &mut AtTrace {
-///         &mut self.trace
+///     fn trace_mut(&mut self) -> &mut AtTrace { &mut self.trace }
+///     fn trace(&self) -> Option<&AtTrace> { Some(&self.trace) }
+///     fn fmt_message(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+///         write!(f, "{}", self.kind)
 ///     }
 /// }
 ///
 /// impl MyError {
 ///     #[track_caller]
 ///     fn new(kind: &'static str) -> Self {
-///         Self {
-///             kind,
-///             trace: AtTrace::capture(),
-///         }
+///         Self { kind, trace: AtTrace::capture() }
 ///     }
 /// }
 ///
@@ -265,16 +228,6 @@ impl AtTrace {
         let mut trace = Self::new();
         let _ = trace.try_push(Location::caller());
         trace
-    }
-
-    /// Try to create a AtTrace with pre-allocated capacity.
-    /// Returns None if allocation fails (Vec) or always succeeds (TinyVec).
-    pub(crate) fn try_with_capacity(cap: usize) -> Option<Self> {
-        Some(Self {
-            locations: try_location_vec_with_capacity(cap)?,
-            crate_info: None,
-            contexts: context_vec_new(),
-        })
     }
 
     /// Set the crate info for this trace.
@@ -735,7 +688,7 @@ impl fmt::Debug for AtFrame<'_> {
 }
 
 // ============================================================================
-// BoxedTrace - Boxed optional trace for small error footprint
+// AtTraceBoxed - Boxed optional trace for small error footprint
 // ============================================================================
 
 /// A boxed optional trace for keeping error types small.
@@ -746,27 +699,29 @@ impl fmt::Debug for AtFrame<'_> {
 /// ## Example
 ///
 /// ```rust
-/// use errat::{BoxedTrace, AtTrace, AtTraceable};
+/// use errat::{AtTraceBoxed, AtTrace, AtTraceable};
 ///
 /// struct MyError {
 ///     kind: &'static str,
-///     trace: BoxedTrace,  // 8 bytes, not 24-256
+///     trace: AtTraceBoxed,  // 8 bytes, not 24-256
 /// }
 ///
 /// impl AtTraceable for MyError {
-///     fn trace_mut(&mut self) -> &mut AtTrace {
-///         self.trace.get_or_insert_mut()
+///     fn trace_mut(&mut self) -> &mut AtTrace { self.trace.get_or_insert_mut() }
+///     fn trace(&self) -> Option<&AtTrace> { self.trace.as_ref() }
+///     fn fmt_message(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+///         write!(f, "{}", self.kind)
 ///     }
 /// }
 ///
 /// impl MyError {
 ///     fn new(kind: &'static str) -> Self {
-///         Self { kind, trace: BoxedTrace::new() }
+///         Self { kind, trace: AtTraceBoxed::new() }
 ///     }
 ///
 ///     #[track_caller]
 ///     fn with_trace(kind: &'static str) -> Self {
-///         Self { kind, trace: BoxedTrace::capture() }
+///         Self { kind, trace: AtTraceBoxed::capture() }
 ///     }
 /// }
 ///
@@ -779,9 +734,9 @@ impl fmt::Debug for AtFrame<'_> {
 /// assert!(!err.trace.is_empty());
 /// ```
 #[derive(Default)]
-pub struct BoxedTrace(Option<Box<AtTrace>>);
+pub struct AtTraceBoxed(Option<Box<AtTrace>>);
 
-impl BoxedTrace {
+impl AtTraceBoxed {
     /// Create an empty boxed trace (no allocation).
     #[inline]
     pub const fn new() -> Self {
@@ -857,16 +812,16 @@ impl BoxedTrace {
     }
 }
 
-impl fmt::Debug for BoxedTrace {
+impl fmt::Debug for AtTraceBoxed {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match &self.0 {
             Some(trace) => fmt::Debug::fmt(trace, f),
-            None => write!(f, "BoxedTrace(empty)"),
+            None => write!(f, "AtTraceBoxed(empty)"),
         }
     }
 }
 
-impl From<AtTrace> for BoxedTrace {
+impl From<AtTrace> for AtTraceBoxed {
     fn from(trace: AtTrace) -> Self {
         if trace.is_empty() {
             Self(None)
@@ -876,8 +831,8 @@ impl From<AtTrace> for BoxedTrace {
     }
 }
 
-impl From<BoxedTrace> for Option<AtTrace> {
-    fn from(boxed: BoxedTrace) -> Self {
+impl From<AtTraceBoxed> for Option<AtTrace> {
+    fn from(boxed: AtTraceBoxed) -> Self {
         boxed.0.map(|b| *b)
     }
 }
@@ -889,12 +844,16 @@ impl From<BoxedTrace> for Option<AtTrace> {
 /// Trait for types that embed an [`AtTrace`] directly.
 ///
 /// Implement this trait to get all the `.at_*()` methods on your custom error types.
-/// Only one method is required: [`trace_mut()`](Self::trace_mut).
+/// Three methods are required:
+/// - [`trace_mut()`](Self::trace_mut) - mutable access to trace
+/// - [`trace()`](Self::trace) - immutable access to trace
+/// - [`fmt_message()`](Self::fmt_message) - format the error message
 ///
 /// ## Example: Inline trace
 ///
 /// ```rust
 /// use errat::{AtTrace, AtTraceable};
+/// use std::fmt;
 ///
 /// struct MyError {
 ///     kind: &'static str,
@@ -902,8 +861,10 @@ impl From<BoxedTrace> for Option<AtTrace> {
 /// }
 ///
 /// impl AtTraceable for MyError {
-///     fn trace_mut(&mut self) -> &mut AtTrace {
-///         &mut self.trace
+///     fn trace_mut(&mut self) -> &mut AtTrace { &mut self.trace }
+///     fn trace(&self) -> Option<&AtTrace> { Some(&self.trace) }
+///     fn fmt_message(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+///         write!(f, "{}", self.kind)
 ///     }
 /// }
 ///
@@ -915,14 +876,14 @@ impl From<BoxedTrace> for Option<AtTrace> {
 /// }
 ///
 /// // Now you can chain .at_*() methods
-/// let err = MyError::new("not_found")
-///     .at_str("looking up user");
+/// let err = MyError::new("not_found").at_str("looking up user");
 /// ```
 ///
 /// ## Example: Boxed trace (smaller error type)
 ///
 /// ```rust
 /// use errat::{AtTrace, AtTraceable};
+/// use std::fmt;
 ///
 /// struct MyError {
 ///     kind: &'static str,
@@ -930,8 +891,10 @@ impl From<BoxedTrace> for Option<AtTrace> {
 /// }
 ///
 /// impl AtTraceable for MyError {
-///     fn trace_mut(&mut self) -> &mut AtTrace {
-///         &mut self.trace
+///     fn trace_mut(&mut self) -> &mut AtTrace { &mut self.trace }
+///     fn trace(&self) -> Option<&AtTrace> { Some(&self.trace) }
+///     fn fmt_message(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+///         write!(f, "{}", self.kind)
 ///     }
 /// }
 ///
@@ -947,6 +910,7 @@ impl From<BoxedTrace> for Option<AtTrace> {
 ///
 /// ```rust
 /// use errat::{AtTrace, AtTraceable};
+/// use std::fmt;
 ///
 /// struct MyError {
 ///     kind: &'static str,
@@ -956,6 +920,10 @@ impl From<BoxedTrace> for Option<AtTrace> {
 /// impl AtTraceable for MyError {
 ///     fn trace_mut(&mut self) -> &mut AtTrace {
 ///         self.trace.get_or_insert_with(|| Box::new(AtTrace::new()))
+///     }
+///     fn trace(&self) -> Option<&AtTrace> { self.trace.as_deref() }
+///     fn fmt_message(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+///         write!(f, "{}", self.kind)
 ///     }
 /// }
 ///
@@ -983,6 +951,48 @@ impl From<BoxedTrace> for Option<AtTrace> {
 pub trait AtTraceable: Sized {
     /// Get a mutable reference to the embedded trace.
     fn trace_mut(&mut self) -> &mut AtTrace;
+
+    /// Get an immutable reference to the trace, if allocated.
+    ///
+    /// Returns `None` if no trace has been allocated yet (for lazy storage patterns).
+    /// For inline storage, this always returns `Some`.
+    fn trace(&self) -> Option<&AtTrace>;
+
+    /// Format just the error message (without trace).
+    ///
+    /// This is used by the trace formatters to show the error message
+    /// separately from the trace. Typically delegates to your error kind's Display.
+    ///
+    /// ## Example
+    ///
+    /// ```rust
+    /// use errat::{AtTrace, AtTraceable};
+    /// use std::fmt;
+    ///
+    /// #[derive(Debug)]
+    /// enum ErrorKind {
+    ///     NotFound,
+    ///     InvalidInput(String),
+    /// }
+    ///
+    /// struct MyError {
+    ///     kind: ErrorKind,
+    ///     trace: AtTrace,
+    /// }
+    ///
+    /// impl AtTraceable for MyError {
+    ///     fn trace_mut(&mut self) -> &mut AtTrace { &mut self.trace }
+    ///     fn trace(&self) -> Option<&AtTrace> { Some(&self.trace) }
+    ///
+    ///     fn fmt_message(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+    ///         match &self.kind {
+    ///             ErrorKind::NotFound => write!(f, "not found"),
+    ///             ErrorKind::InvalidInput(s) => write!(f, "invalid input: {}", s),
+    ///         }
+    ///     }
+    /// }
+    /// ```
+    fn fmt_message(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result;
 
     /// Add the caller's location to the trace.
     #[track_caller]
@@ -1128,5 +1138,189 @@ pub trait AtTraceable: Sized {
         let trace = self.trace_mut().take();
         let error = f(self);
         crate::At::from_parts(error, trace)
+    }
+
+    // ========================================================================
+    // Formatting methods
+    // ========================================================================
+
+    /// Format with full trace (message + all frames with contexts).
+    ///
+    /// Returns a formatter that displays:
+    /// - The error message (via `fmt_message`)
+    /// - All trace frames with locations
+    /// - All context strings attached to each frame
+    /// - Nested error chains for error contexts
+    ///
+    /// ## Example
+    ///
+    /// ```rust
+    /// use errat::{AtTrace, AtTraceable};
+    /// use std::fmt;
+    ///
+    /// struct MyError {
+    ///     msg: &'static str,
+    ///     trace: AtTrace,
+    /// }
+    ///
+    /// impl AtTraceable for MyError {
+    ///     fn trace_mut(&mut self) -> &mut AtTrace { &mut self.trace }
+    ///     fn trace(&self) -> Option<&AtTrace> { Some(&self.trace) }
+    ///     fn fmt_message(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+    ///         write!(f, "{}", self.msg)
+    ///     }
+    /// }
+    ///
+    /// impl MyError {
+    ///     #[track_caller]
+    ///     fn new(msg: &'static str) -> Self {
+    ///         Self { msg, trace: AtTrace::capture() }
+    ///     }
+    /// }
+    ///
+    /// let err = MyError::new("something failed").at_str("while loading");
+    /// println!("{}", err.full_trace());
+    /// // Output:
+    /// // something failed
+    /// //     at src/main.rs:10:15
+    /// //         while loading
+    /// ```
+    fn full_trace(&self) -> impl fmt::Display + '_ {
+        FullTraceDisplay { error: self }
+    }
+
+    /// Format with trace locations only (message + locations, no context strings).
+    ///
+    /// Returns a formatter that displays:
+    /// - The error message (via `fmt_message`)
+    /// - All trace frame locations
+    /// - NO context strings (for compact output)
+    ///
+    /// ## Example
+    ///
+    /// ```rust
+    /// use errat::{AtTrace, AtTraceable};
+    /// use std::fmt;
+    ///
+    /// struct MyError {
+    ///     msg: &'static str,
+    ///     trace: AtTrace,
+    /// }
+    ///
+    /// impl AtTraceable for MyError {
+    ///     fn trace_mut(&mut self) -> &mut AtTrace { &mut self.trace }
+    ///     fn trace(&self) -> Option<&AtTrace> { Some(&self.trace) }
+    ///     fn fmt_message(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+    ///         write!(f, "{}", self.msg)
+    ///     }
+    /// }
+    ///
+    /// impl MyError {
+    ///     #[track_caller]
+    ///     fn new(msg: &'static str) -> Self {
+    ///         Self { msg, trace: AtTrace::capture() }
+    ///     }
+    /// }
+    ///
+    /// let err = MyError::new("something failed").at_str("while loading");
+    /// println!("{}", err.last_error_trace());
+    /// // Output:
+    /// // something failed
+    /// //     at src/main.rs:10:15
+    /// // (note: "while loading" context is omitted)
+    /// ```
+    fn last_error_trace(&self) -> impl fmt::Display + '_ {
+        LastErrorTraceDisplay { error: self }
+    }
+
+    /// Format just the error message (no trace).
+    ///
+    /// Returns a formatter that only displays the error message via `fmt_message`.
+    /// Use this when you want to show the error without any trace information.
+    fn last_error(&self) -> impl fmt::Display + '_ {
+        LastErrorDisplay { error: self }
+    }
+}
+
+// ============================================================================
+// Trace formatters for AtTraceable
+// ============================================================================
+
+/// Formatter that shows error message + full trace with all contexts.
+struct FullTraceDisplay<'a, E: AtTraceable> {
+    error: &'a E,
+}
+
+impl<E: AtTraceable> fmt::Display for FullTraceDisplay<'_, E> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        // Show the error message
+        self.error.fmt_message(f)?;
+
+        // Show trace frames
+        if let Some(trace) = self.error.trace() {
+            for frame in trace.frames() {
+                if let Some(loc) = frame.location() {
+                    write!(f, "\n    at {}:{}:{}", loc.file(), loc.line(), loc.column())?;
+                } else {
+                    write!(f, "\n    [...]")?;
+                }
+
+                // Show contexts for this frame
+                for ctx in frame.contexts() {
+                    if let Some(text) = ctx.as_text() {
+                        write!(f, "\n        {}", text)?;
+                    } else if let Some(err) = ctx.as_error() {
+                        write!(f, "\n        caused by: {}", err)?;
+                        // Write nested error chain
+                        let mut source = err.source();
+                        let mut depth = 2;
+                        while let Some(src) = source {
+                            let indent = "    ".repeat(depth);
+                            write!(f, "\n{}caused by: {}", indent, src)?;
+                            source = src.source();
+                            depth += 1;
+                        }
+                    } else {
+                        write!(f, "\n        {}", ctx)?;
+                    }
+                }
+            }
+        }
+        Ok(())
+    }
+}
+
+/// Formatter that shows error message + trace locations only (no contexts).
+struct LastErrorTraceDisplay<'a, E: AtTraceable> {
+    error: &'a E,
+}
+
+impl<E: AtTraceable> fmt::Display for LastErrorTraceDisplay<'_, E> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        // Show the error message
+        self.error.fmt_message(f)?;
+
+        // Show trace frames (locations only, no contexts)
+        if let Some(trace) = self.error.trace() {
+            for frame in trace.frames() {
+                if let Some(loc) = frame.location() {
+                    write!(f, "\n    at {}:{}:{}", loc.file(), loc.line(), loc.column())?;
+                } else {
+                    write!(f, "\n    [...]")?;
+                }
+            }
+        }
+        Ok(())
+    }
+}
+
+/// Formatter that shows just the error message (no trace).
+struct LastErrorDisplay<'a, E: AtTraceable> {
+    error: &'a E,
+}
+
+impl<E: AtTraceable> fmt::Display for LastErrorDisplay<'_, E> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        self.error.fmt_message(f)
     }
 }

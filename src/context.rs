@@ -130,7 +130,10 @@ impl AtContext {
     }
 
     pub(crate) fn is_display(&self) -> bool {
-        matches!(self, AtContext::Text(_) | AtContext::Display(_) | AtContext::Error(_))
+        matches!(
+            self,
+            AtContext::Text(_) | AtContext::Display(_) | AtContext::Error(_)
+        )
     }
 
     pub(crate) fn is_crate_boundary(&self) -> bool {

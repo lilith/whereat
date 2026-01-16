@@ -3,7 +3,7 @@
 //! These tests explore edge cases and problematic patterns to ensure
 //! the library behaves correctly under stress and misuse.
 
-use errat::{at, At, ResultAtExt, ResultStartAtExt};
+use errat::{At, ResultAtExt, ResultStartAtExt, at};
 
 #[allow(dead_code)]
 #[derive(Debug, Clone, PartialEq)]
@@ -245,10 +245,7 @@ fn helper_from_loop_same_location() {
     }
 
     // Multiple calls from same line - each is a distinct error
-    let results: Vec<_> = [-1, -2, -3]
-        .iter()
-        .map(|&v| validate(v))
-        .collect();
+    let results: Vec<_> = [-1, -2, -3].iter().map(|&v| validate(v)).collect();
 
     for (i, result) in results.iter().enumerate() {
         let err = result.as_ref().unwrap_err();

@@ -7,8 +7,8 @@
 //! - Common pitfalls and how to avoid them
 //! - Performance implications of different approaches
 
-use errat::{at, At, ResultAtExt, ResultStartAtExt};
 use core::fmt;
+use errat::{At, ResultAtExt, ResultStartAtExt, at};
 
 // =============================================================================
 // Error Types
@@ -83,8 +83,10 @@ mod good_patterns {
 
     /// Pattern 4: Converting external errors with start_at
     pub fn wrap_external_error() -> Result<String, At<AppError>> {
-        let io_result: Result<String, std::io::Error> =
-            Err(std::io::Error::new(std::io::ErrorKind::NotFound, "file not found"));
+        let io_result: Result<String, std::io::Error> = Err(std::io::Error::new(
+            std::io::ErrorKind::NotFound,
+            "file not found",
+        ));
 
         // Convert std::io::Error to AppError, then start tracing
         io_result
@@ -320,7 +322,8 @@ fn main() {
     }
 
     println!("\n=== PERFORMANCE NOTES ===");
-    println!("
+    println!(
+        "
 - Happy path (no errors): Near-zero overhead (~0.2ns)
 - Error creation (at()): ~23ns (dominated by allocation)
 - Per context (at_str): ~23ns additional
@@ -333,5 +336,6 @@ Guidelines:
 3. Use .at_str() for context (doesn't create new location)
 4. Avoid at() in tight loops - validate first, error once
 5. Use start_at_late() when wrapping untraced errors
-");
+"
+    );
 }

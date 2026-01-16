@@ -113,10 +113,10 @@ mod ext;
 mod trace;
 
 pub use at::At;
-pub use context::{AtContextRef, AtDebugAny, AtDisplayAny};
+pub use context::AtContextRef;
 pub use crate_info::{AtCrateInfo, AtCrateInfoBuilder};
 pub use ext::{ErrorAtExt, ResultAtExt, ResultAtTraceableExt, ResultStartAtExt};
-pub use trace::{AtFrame, AtTrace, AtTraceable, AtTraceSegment, BoxedTrace};
+pub use trace::{AtFrame, AtTrace, AtTraceBoxed, AtTraceSegment, AtTraceable};
 
 // ============================================================================
 // Crate-level error tracking info (for errat's own at!() / at_crate!() usage)
