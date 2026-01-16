@@ -336,7 +336,8 @@ impl AtTrace {
         self.locations.iter().copied()
     }
 
-    /// Iterate over all context entries, newest first.
+    /// Iterate over all context entries, newest first (loses location association).
+    /// Prefer `frames()` for unified iteration.
     pub(crate) fn contexts(&self) -> impl Iterator<Item = AtContextRef<'_>> {
         context_iter(&self.contexts)
             .rev()
@@ -348,6 +349,48 @@ impl AtTrace {
         context_iter(&self.contexts)
             .filter(move |(i, _)| *i as usize == idx)
             .map(|(_, ctx)| ctx)
+    }
+
+    /// Iterate over frames (location + contexts pairs), oldest first.
+    ///
+    /// This is the recommended way to traverse a trace. Each frame contains
+    /// a location (or None for skipped-frames marker) and its associated contexts.
+    ///
+    /// ## Example
+    ///
+    /// ```rust
+    /// use errat::at;
+    ///
+    /// #[derive(Debug)]
+    /// struct MyError;
+    ///
+    /// let err = at(MyError)
+    ///     .at_str("loading config")
+    ///     .at();
+    ///
+    /// for frame in err.frames() {
+    ///     if let Some(loc) = frame.location() {
+    ///         println!("at {}:{}", loc.file(), loc.line());
+    ///     } else {
+    ///         println!("[...]");
+    ///     }
+    ///     for ctx in frame.contexts() {
+    ///         println!("  - {}", ctx);
+    ///     }
+    /// }
+    /// ```
+    pub fn frames(&self) -> impl Iterator<Item = AtFrame<'_>> {
+        self.locations.iter().enumerate().map(|(idx, loc)| AtFrame {
+            location: *loc,
+            trace: self,
+            index: idx,
+        })
+    }
+
+    /// Get the number of frames in the trace.
+    #[inline]
+    pub fn frame_count(&self) -> usize {
+        self.locations.len()
     }
 
     /// Check if the trace is empty.
@@ -608,6 +651,234 @@ impl AtTraceSegment {
     #[allow(dead_code)]
     pub(crate) fn into_contexts(self) -> Vec<AtContext> {
         self.contexts
+    }
+}
+
+// ============================================================================
+// AtFrame - A single frame in a trace (for iteration)
+// ============================================================================
+
+/// A single frame in a trace: location with its associated contexts.
+///
+/// Returned by [`AtTrace::frames()`] and [`At::frames()`](crate::At::frames).
+/// Unlike [`AtTraceSegment`] which owns its data, this is a view into the trace.
+///
+/// ## Example
+///
+/// ```rust
+/// use errat::at;
+///
+/// #[derive(Debug)]
+/// struct MyError;
+///
+/// let err = at(MyError).at_str("loading");
+///
+/// for frame in err.frames() {
+///     if let Some(loc) = frame.location() {
+///         println!("{}:{}", loc.file(), loc.line());
+///     }
+///     for ctx in frame.contexts() {
+///         if let Some(text) = ctx.as_text() {
+///             println!("  context: {}", text);
+///         }
+///     }
+/// }
+/// ```
+#[derive(Clone, Copy)]
+pub struct AtFrame<'a> {
+    location: Option<&'static Location<'static>>,
+    trace: &'a AtTrace,
+    index: usize,
+}
+
+impl<'a> AtFrame<'a> {
+    /// Get the source location, or None if this is a skipped-frames marker.
+    #[inline]
+    pub fn location(&self) -> Option<&'static Location<'static>> {
+        self.location
+    }
+
+    /// Check if this frame is a skipped-frames marker (`[...]`).
+    #[inline]
+    pub fn is_skipped(&self) -> bool {
+        self.location.is_none()
+    }
+
+    /// Iterate over contexts attached to this frame.
+    pub fn contexts(&self) -> impl Iterator<Item = AtContextRef<'a>> {
+        let idx = self.index;
+        context_iter(&self.trace.contexts)
+            .filter(move |(i, _)| *i as usize == idx)
+            .map(|(_, ctx)| AtContextRef { inner: ctx })
+    }
+
+    /// Check if this frame has any contexts.
+    pub fn has_contexts(&self) -> bool {
+        let idx = self.index;
+        context_iter(&self.trace.contexts).any(|(i, _)| *i as usize == idx)
+    }
+}
+
+impl fmt::Debug for AtFrame<'_> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self.location {
+            Some(loc) => {
+                write!(f, "at {}:{}", loc.file(), loc.line())?;
+                for ctx in self.contexts() {
+                    write!(f, " ({:?})", ctx)?;
+                }
+                Ok(())
+            }
+            None => write!(f, "[...]"),
+        }
+    }
+}
+
+// ============================================================================
+// BoxedTrace - Boxed optional trace for small error footprint
+// ============================================================================
+
+/// A boxed optional trace for keeping error types small.
+///
+/// This type is always 8 bytes (one pointer) regardless of trace size.
+/// The trace is allocated lazily on first mutation.
+///
+/// ## Example
+///
+/// ```rust
+/// use errat::{BoxedTrace, AtTrace, AtTraceable};
+///
+/// struct MyError {
+///     kind: &'static str,
+///     trace: BoxedTrace,  // 8 bytes, not 24-256
+/// }
+///
+/// impl AtTraceable for MyError {
+///     fn trace_mut(&mut self) -> &mut AtTrace {
+///         self.trace.get_or_insert_mut()
+///     }
+/// }
+///
+/// impl MyError {
+///     fn new(kind: &'static str) -> Self {
+///         Self { kind, trace: BoxedTrace::new() }
+///     }
+///
+///     #[track_caller]
+///     fn with_trace(kind: &'static str) -> Self {
+///         Self { kind, trace: BoxedTrace::capture() }
+///     }
+/// }
+///
+/// // No allocation until .at_*() is called
+/// let err = MyError::new("not_found");
+/// assert!(err.trace.is_empty());
+///
+/// // With trace captured immediately
+/// let err = MyError::with_trace("not_found");
+/// assert!(!err.trace.is_empty());
+/// ```
+#[derive(Default)]
+pub struct BoxedTrace(Option<Box<AtTrace>>);
+
+impl BoxedTrace {
+    /// Create an empty boxed trace (no allocation).
+    #[inline]
+    pub const fn new() -> Self {
+        Self(None)
+    }
+
+    /// Create a boxed trace with the caller's location captured.
+    #[track_caller]
+    #[inline]
+    pub fn capture() -> Self {
+        Self(Some(Box::new(AtTrace::capture())))
+    }
+
+    /// Check if the trace is empty (None or inner is empty).
+    #[inline]
+    pub fn is_empty(&self) -> bool {
+        self.0.as_ref().is_none_or(|t| t.is_empty())
+    }
+
+    /// Get immutable reference to the trace, if allocated.
+    #[inline]
+    pub fn as_ref(&self) -> Option<&AtTrace> {
+        self.0.as_deref()
+    }
+
+    /// Get mutable reference to the trace, if allocated.
+    #[inline]
+    pub fn as_mut(&mut self) -> Option<&mut AtTrace> {
+        self.0.as_deref_mut()
+    }
+
+    /// Get mutable reference, allocating if needed.
+    ///
+    /// Use this in `AtTraceable::trace_mut()` implementations.
+    #[inline]
+    pub fn get_or_insert_mut(&mut self) -> &mut AtTrace {
+        self.0.get_or_insert_with(|| Box::new(AtTrace::new()))
+    }
+
+    /// Take the trace, leaving self empty.
+    #[inline]
+    pub fn take(&mut self) -> Option<AtTrace> {
+        self.0.take().map(|b| *b)
+    }
+
+    /// Set the trace from an existing AtTrace.
+    #[inline]
+    pub fn set(&mut self, trace: AtTrace) {
+        if trace.is_empty() {
+            self.0 = None;
+        } else {
+            self.0 = Some(Box::new(trace));
+        }
+    }
+
+    /// Iterate over frames (location + contexts pairs), oldest first.
+    ///
+    /// Returns an empty iterator if the trace hasn't been allocated.
+    pub fn frames(&self) -> impl Iterator<Item = AtFrame<'_>> {
+        self.0.iter().flat_map(|t| t.frames())
+    }
+
+    /// Get the number of frames in the trace.
+    #[inline]
+    pub fn frame_count(&self) -> usize {
+        self.0.as_ref().map_or(0, |t| t.frame_count())
+    }
+
+    /// Get crate info, if set.
+    #[inline]
+    pub fn crate_info(&self) -> Option<&'static AtCrateInfo> {
+        self.0.as_ref().and_then(|t| t.crate_info())
+    }
+}
+
+impl fmt::Debug for BoxedTrace {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match &self.0 {
+            Some(trace) => fmt::Debug::fmt(trace, f),
+            None => write!(f, "BoxedTrace(empty)"),
+        }
+    }
+}
+
+impl From<AtTrace> for BoxedTrace {
+    fn from(trace: AtTrace) -> Self {
+        if trace.is_empty() {
+            Self(None)
+        } else {
+            Self(Some(Box::new(trace)))
+        }
+    }
+}
+
+impl From<BoxedTrace> for Option<AtTrace> {
+    fn from(boxed: BoxedTrace) -> Self {
+        boxed.0.map(|b| *b)
     }
 }
 

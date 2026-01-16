@@ -11,7 +11,7 @@ use core::panic::Location;
 
 use crate::AtCrateInfo;
 use crate::context::{AtContext, AtContextRef};
-use crate::trace::{AtTrace, AtTraceSegment, DEFAULT_TRACE_CAPACITY, try_box};
+use crate::trace::{AtFrame, AtTrace, AtTraceSegment, DEFAULT_TRACE_CAPACITY, try_box};
 
 // ============================================================================
 // At<E> - Core wrapper type
@@ -573,6 +573,9 @@ impl<E> At<E> {
     /// Each call to `at_str()`, `at_string()`, `at_data()`, or `at_debug()` creates
     /// a context entry. Use [`AtContextRef`] methods to inspect context data.
     ///
+    /// **Note:** Prefer [`frames()`](Self::frames) for unified iteration over
+    /// locations with their contexts.
+    ///
     /// ## Example
     ///
     /// ```rust
@@ -592,6 +595,42 @@ impl<E> At<E> {
     /// ```
     pub fn contexts(&self) -> impl Iterator<Item = AtContextRef<'_>> {
         self.trace.iter().flat_map(|t| t.contexts())
+    }
+
+    /// Iterate over frames (location + contexts pairs), oldest first.
+    ///
+    /// This is the recommended way to traverse a trace. Each frame contains
+    /// a location (or None for skipped-frames marker) and its associated contexts.
+    ///
+    /// ## Example
+    ///
+    /// ```rust
+    /// use errat::at;
+    ///
+    /// #[derive(Debug)]
+    /// struct MyError;
+    ///
+    /// let err = at(MyError)
+    ///     .at_str("loading config")
+    ///     .at();
+    ///
+    /// for frame in err.frames() {
+    ///     if let Some(loc) = frame.location() {
+    ///         println!("at {}:{}", loc.file(), loc.line());
+    ///     }
+    ///     for ctx in frame.contexts() {
+    ///         println!("  - {}", ctx);
+    ///     }
+    /// }
+    /// ```
+    pub fn frames(&self) -> impl Iterator<Item = AtFrame<'_>> {
+        self.trace.iter().flat_map(|t| t.frames())
+    }
+
+    /// Get the number of frames in the trace.
+    #[inline]
+    pub fn frame_count(&self) -> usize {
+        self.trace.as_ref().map_or(0, |t| t.frame_count())
     }
 
     // ========================================================================

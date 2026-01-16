@@ -10,7 +10,7 @@
 // Allow large error types in tests - we're demonstrating API usage, not optimizing for size
 #![allow(clippy::result_large_err)]
 
-use errat::{at, At, AtTrace, AtTraceable, ResultAtExt, ResultAtTraceableExt, ResultStartAtExt};
+use errat::{at, At, AtTrace, AtTraceable, BoxedTrace, ResultAtExt, ResultAtTraceableExt, ResultStartAtExt};
 use std::error::Error;
 use std::fmt;
 use std::io;
@@ -57,13 +57,13 @@ enum OuterThiserror {
 }
 
 // ============================================================================
-// 3. AtTraceable implementation (embedded trace)
+// 3. AtTraceable implementation with BoxedTrace (small footprint)
 // ============================================================================
 
 #[derive(Debug)]
 struct TraceableError {
     kind: TraceableKind,
-    trace: AtTrace,
+    trace: BoxedTrace,  // 8 bytes, not 24-256!
 }
 
 #[derive(Debug)]
@@ -74,7 +74,7 @@ enum TraceableKind {
 
 impl AtTraceable for TraceableError {
     fn trace_mut(&mut self) -> &mut AtTrace {
-        &mut self.trace
+        self.trace.get_or_insert_mut()
     }
 }
 
@@ -83,7 +83,7 @@ impl TraceableError {
     fn parse() -> Self {
         Self {
             kind: TraceableKind::Parse,
-            trace: AtTrace::capture(),
+            trace: BoxedTrace::capture(),
         }
     }
 
@@ -91,7 +91,15 @@ impl TraceableError {
     fn network() -> Self {
         Self {
             kind: TraceableKind::Network,
-            trace: AtTrace::capture(),
+            trace: BoxedTrace::capture(),
+        }
+    }
+
+    /// Create without trace (lazy allocation)
+    fn lazy(kind: TraceableKind) -> Self {
+        Self {
+            kind,
+            trace: BoxedTrace::new(),
         }
     }
 }
@@ -624,4 +632,145 @@ fn nested_errors_format_correctly() {
         "Debug should prefix nested errors with 'caused by'!\nActual output:\n{}",
         debug
     );
+}
+
+// ============================================================================
+// Test: BoxedTrace keeps error types small
+// ============================================================================
+
+#[test]
+fn boxed_trace_small_footprint() {
+    // BoxedTrace should be exactly pointer-sized (8 bytes on 64-bit)
+    assert_eq!(
+        std::mem::size_of::<BoxedTrace>(),
+        std::mem::size_of::<*const ()>(),
+        "BoxedTrace should be pointer-sized"
+    );
+
+    // TraceableError with BoxedTrace should be small
+    let traceable_size = std::mem::size_of::<TraceableError>();
+    assert!(
+        traceable_size <= 24,
+        "TraceableError with BoxedTrace should be ≤24 bytes, got {}",
+        traceable_size
+    );
+}
+
+#[test]
+fn boxed_trace_lazy_allocation() {
+    // Empty BoxedTrace - no allocation
+    let err = TraceableError::lazy(TraceableKind::Parse);
+    assert!(err.trace.is_empty(), "Lazy trace should be empty initially");
+
+    // Adding context triggers allocation
+    let err = err.at_str("context");
+    assert!(!err.trace.is_empty(), "Trace should exist after at_str");
+}
+
+#[test]
+fn boxed_trace_capture() {
+    let err = TraceableError::parse();
+    assert!(!err.trace.is_empty(), "Capture should create non-empty trace");
+    assert_eq!(err.trace.frame_count(), 1, "Should have one frame");
+}
+
+// ============================================================================
+// Test: frames() unified iteration API
+// ============================================================================
+
+#[test]
+fn frames_api_on_at() {
+    let err = at(PlainError::NotFound)
+        .at_str("step 1")
+        .at()
+        .at_str("step 2");
+
+    let frames: Vec<_> = err.frames().collect();
+    assert_eq!(frames.len(), 2, "Should have 2 frames");
+
+    // First frame (oldest) has "step 1" context
+    let first = &frames[0];
+    assert!(first.location().is_some(), "Should have location");
+    let first_contexts: Vec<_> = first.contexts().collect();
+    assert!(first_contexts.iter().any(|c| c.as_text() == Some("step 1")));
+
+    // Second frame has "step 2" context
+    let second = &frames[1];
+    let second_contexts: Vec<_> = second.contexts().collect();
+    assert!(second_contexts.iter().any(|c| c.as_text() == Some("step 2")));
+}
+
+#[test]
+fn frames_api_on_attraceable() {
+    fn inner() -> Result<(), TraceableError> {
+        Err(TraceableError::parse().at_str("parsing"))
+    }
+
+    fn outer() -> Result<(), TraceableError> {
+        inner().at()?;
+        Ok(())
+    }
+
+    let err = outer().unwrap_err();
+
+    // Use frames() on BoxedTrace
+    let frames: Vec<_> = err.trace.frames().collect();
+    assert!(frames.len() >= 2, "Should have 2+ frames");
+
+    // Check first frame has context
+    let has_parsing_ctx = frames.iter().any(|f| {
+        f.contexts().any(|c| c.as_text() == Some("parsing"))
+    });
+    assert!(has_parsing_ctx, "Should find 'parsing' context");
+}
+
+#[test]
+fn frames_with_skipped_marker() {
+    let err = at(PlainError::NotFound)
+        .at_skipped_frames()
+        .at();
+
+    let frames: Vec<_> = err.frames().collect();
+    assert_eq!(frames.len(), 3, "Should have 3 frames");
+
+    // Middle frame should be skipped marker
+    assert!(frames[1].is_skipped(), "Middle frame should be skipped marker");
+    assert!(frames[1].location().is_none());
+}
+
+#[test]
+fn frames_with_error_context() {
+    #[derive(Debug)]
+    struct SourceErr;
+    impl fmt::Display for SourceErr {
+        fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+            write!(f, "source error")
+        }
+    }
+    impl std::error::Error for SourceErr {}
+
+    let err = at(PlainError::NotFound)
+        .at_error(SourceErr)
+        .at_str("with context");
+
+    for frame in err.frames() {
+        for ctx in frame.contexts() {
+            if ctx.is_error() {
+                assert!(ctx.as_error().unwrap().to_string().contains("source"));
+            }
+        }
+    }
+}
+
+// ============================================================================
+// Test: frame_count() convenience method
+// ============================================================================
+
+#[test]
+fn frame_count_api() {
+    let err = at(PlainError::NotFound);
+    assert_eq!(err.frame_count(), 1);
+
+    let err = err.at().at().at();
+    assert_eq!(err.frame_count(), 4);
 }
