@@ -320,6 +320,16 @@ impl AtTrace {
         let _ = try_push_context(&mut self.contexts, (idx, context));
     }
 
+    /// Try to add context to the most recent location (without adding a new location).
+    /// Returns false if trace is empty or allocation fails.
+    pub(crate) fn try_add_context(&mut self, context: AtContext) -> bool {
+        if self.locations.is_empty() {
+            return false;
+        }
+        let idx = (self.locations.len() - 1).min(u16::MAX as usize) as u16;
+        try_push_context(&mut self.contexts, (idx, context))
+    }
+
     /// Get the number of entries in the trace (locations + skipped markers).
     #[inline]
     pub(crate) fn len(&self) -> usize {
@@ -339,15 +349,11 @@ impl AtTrace {
             .map(|(_, ctx)| AtContextRef { inner: ctx })
     }
 
-    /// Get context at a specific location index, if any.
-    pub(crate) fn context_at(&self, idx: usize) -> Option<&AtContext> {
-        if idx > u16::MAX as usize {
-            return None;
-        }
-        let idx = idx as u16;
-        // Linear search is fine - contexts vec is typically tiny (0-3 entries)
+    /// Get all contexts at a specific location index.
+    pub(crate) fn contexts_at(&self, idx: usize) -> impl Iterator<Item = &AtContext> {
+        // Filter closure captures idx to compare with each context's index
         context_iter(&self.contexts)
-            .find(|(i, _)| *i == idx)
+            .filter(move |(i, _)| *i as usize == idx)
             .map(|(_, ctx)| ctx)
     }
 }
@@ -532,6 +538,69 @@ pub trait AtTraceable: Sized {
     fn at_skipped_frames(mut self) -> Self {
         // None in locations vec = skipped frame marker
         let _ = self.trace_mut().try_push_skipped();
+        self
+    }
+
+    // ========================================================================
+    // with_* methods - add context to the current location (no new location)
+    // ========================================================================
+
+    /// Add a static string context to the current location (without adding a new location).
+    ///
+    /// Use this to attach multiple contexts to the same stack frame.
+    /// If the trace is empty, the context is silently dropped.
+    ///
+    /// ## Example
+    ///
+    /// ```rust
+    /// use errat::{AtTrace, AtTraceable};
+    ///
+    /// struct MyError { trace: AtTrace }
+    /// impl AtTraceable for MyError {
+    ///     fn trace_mut(&mut self) -> &mut AtTrace { &mut self.trace }
+    /// }
+    ///
+    /// // One location with two contexts:
+    /// let err = MyError { trace: AtTrace::capture() }
+    ///     .at_str("loading config")
+    ///     .with_str("for production environment");
+    /// ```
+    #[inline]
+    fn with_str(mut self, msg: &'static str) -> Self {
+        let context = AtContext::Text(Cow::Borrowed(msg));
+        let _ = self.trace_mut().try_add_context(context);
+        self
+    }
+
+    /// Add a lazily-computed string context to the current location.
+    #[inline]
+    fn with_string(mut self, f: impl FnOnce() -> String) -> Self {
+        let context = AtContext::Text(Cow::Owned(f()));
+        let _ = self.trace_mut().try_add_context(context);
+        self
+    }
+
+    /// Add lazily-computed typed context (Display formatted) to the current location.
+    #[inline]
+    fn with_data<T: fmt::Display + Send + Sync + 'static>(mut self, f: impl FnOnce() -> T) -> Self {
+        let ctx = f();
+        let Some(boxed_ctx) = try_box(ctx) else {
+            return self;
+        };
+        let context = AtContext::Display(boxed_ctx);
+        let _ = self.trace_mut().try_add_context(context);
+        self
+    }
+
+    /// Add lazily-computed typed context (Debug formatted) to the current location.
+    #[inline]
+    fn with_debug<T: fmt::Debug + Send + Sync + 'static>(mut self, f: impl FnOnce() -> T) -> Self {
+        let ctx = f();
+        let Some(boxed_ctx) = try_box(ctx) else {
+            return self;
+        };
+        let context = AtContext::Debug(boxed_ctx);
+        let _ = self.trace_mut().try_add_context(context);
         self
     }
 }
