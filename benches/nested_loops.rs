@@ -13,9 +13,12 @@
 //! Run with: cargo bench --bench nested_loops
 //! Compare tinyvec: cargo bench --bench nested_loops --features tinyvec-64-bytes
 
-use criterion::{black_box, criterion_group, criterion_main, BenchmarkId, Criterion};
-use errat::{at, At, ResultAtExt, ResultStartAtExt};
-use std::panic::{catch_unwind, AssertUnwindSafe};
+// Allow unused functions - these are kept for potential future frame-depth comparison benchmarks
+#![allow(dead_code)]
+
+use criterion::{BenchmarkId, Criterion, black_box, criterion_group, criterion_main};
+use errat::{At, ResultAtExt, ResultStartAtExt, at};
+use std::panic::{AssertUnwindSafe, catch_unwind};
 
 use core::fmt;
 
@@ -400,7 +403,10 @@ impl BacktraceError {
 #[inline(never)]
 fn inner_backtrace(i: u32, fail_at: u32) -> Result<u32, BacktraceError> {
     if i == fail_at {
-        Err(BacktraceError::new(StringError::InnerFailed(format!("at {}", i))))
+        Err(BacktraceError::new(StringError::InnerFailed(format!(
+            "at {}",
+            i
+        ))))
     } else {
         Ok(i * 2)
     }
@@ -750,8 +756,10 @@ fn bench_single_error_overhead(c: &mut Criterion) {
 
     group.bench_function("thiserror", |b| {
         b.iter(|| {
-            let err: Result<u32, ThisStringError> =
-                Err(ThisStringError::InnerFailed(format!("at {}", black_box(42))));
+            let err: Result<u32, ThisStringError> = Err(ThisStringError::InnerFailed(format!(
+                "at {}",
+                black_box(42)
+            )));
             black_box(err)
         })
     });
@@ -766,8 +774,8 @@ fn bench_single_error_overhead(c: &mut Criterion) {
     group.bench_function("anyhow_ctx", |b| {
         b.iter(|| {
             use anyhow::Context;
-            let err: anyhow::Result<u32> = Err(anyhow::anyhow!("inner loop failed"))
-                .context("processing");
+            let err: anyhow::Result<u32> =
+                Err(anyhow::anyhow!("inner loop failed")).context("processing");
             black_box(err)
         })
     });
@@ -782,8 +790,10 @@ fn bench_single_error_overhead(c: &mut Criterion) {
 
     group.bench_function("errat_1_frame", |b| {
         b.iter(|| {
-            let err: Result<u32, At<StringError>> =
-                Err(at(StringError::InnerFailed(format!("at {}", black_box(42)))));
+            let err: Result<u32, At<StringError>> = Err(at(StringError::InnerFailed(format!(
+                "at {}",
+                black_box(42)
+            ))));
             black_box(err)
         })
     });
@@ -819,7 +829,8 @@ fn bench_single_error_overhead(c: &mut Criterion) {
     // Full backtrace capture
     group.bench_function("backtrace", |b| {
         b.iter(|| {
-            let err = BacktraceError::new(StringError::InnerFailed(format!("at {}", black_box(42))));
+            let err =
+                BacktraceError::new(StringError::InnerFailed(format!("at {}", black_box(42))));
             black_box(err)
         })
     });
@@ -1014,7 +1025,9 @@ fn outer_at_fn(i: u32, fail_at: u32) -> Result<u32, At<U64Error>> {
 #[inline(never)]
 fn inner_at_str(i: u32, fail_at: u32) -> Result<u32, At<U64Error>> {
     if i == fail_at {
-        Err(at(U64Error::InnerFailed(i as u64, fail_at as u64)).at().at_str("inner_at_str"))
+        Err(at(U64Error::InnerFailed(i as u64, fail_at as u64))
+            .at()
+            .at_str("inner_at_str"))
     } else {
         Ok(i * 2)
     }
@@ -1072,7 +1085,8 @@ fn bench_single_at_vs_at_fn(c: &mut Criterion) {
     // Just creating an error (no trace)
     group.bench_function("plain_u64", |b| {
         b.iter(|| {
-            let err: Result<u32, U64Error> = Err(U64Error::InnerFailed(black_box(42), black_box(0)));
+            let err: Result<u32, U64Error> =
+                Err(U64Error::InnerFailed(black_box(42), black_box(0)));
             black_box(err)
         })
     });
@@ -1138,3 +1152,264 @@ criterion_group!(
 );
 
 criterion_main!(benches);
+
+// ============================================================================
+// Fair comparison: Same frame depth for backtrace vs errat
+// ============================================================================
+
+// 10-level deep call chain for backtrace
+#[inline(never)]
+fn bt_level_10(i: u32, fail_at: u32) -> Result<u32, BacktraceError> {
+    if i == fail_at {
+        Err(BacktraceError::new(StringError::InnerFailed(format!(
+            "at {}",
+            i
+        ))))
+    } else {
+        Ok(i * 2)
+    }
+}
+
+#[inline(never)]
+fn bt_level_9(i: u32, fail_at: u32) -> Result<u32, BacktraceError> {
+    bt_level_10(i, fail_at).map(|x| black_box(x + 1))
+}
+#[inline(never)]
+fn bt_level_8(i: u32, fail_at: u32) -> Result<u32, BacktraceError> {
+    bt_level_9(i, fail_at).map(|x| black_box(x + 1))
+}
+#[inline(never)]
+fn bt_level_7(i: u32, fail_at: u32) -> Result<u32, BacktraceError> {
+    bt_level_8(i, fail_at).map(|x| black_box(x + 1))
+}
+#[inline(never)]
+fn bt_level_6(i: u32, fail_at: u32) -> Result<u32, BacktraceError> {
+    bt_level_7(i, fail_at).map(|x| black_box(x + 1))
+}
+#[inline(never)]
+fn bt_level_5(i: u32, fail_at: u32) -> Result<u32, BacktraceError> {
+    bt_level_6(i, fail_at).map(|x| black_box(x + 1))
+}
+#[inline(never)]
+fn bt_level_4(i: u32, fail_at: u32) -> Result<u32, BacktraceError> {
+    bt_level_5(i, fail_at).map(|x| black_box(x + 1))
+}
+#[inline(never)]
+fn bt_level_3(i: u32, fail_at: u32) -> Result<u32, BacktraceError> {
+    bt_level_4(i, fail_at).map(|x| black_box(x + 1))
+}
+#[inline(never)]
+fn bt_level_2(i: u32, fail_at: u32) -> Result<u32, BacktraceError> {
+    bt_level_3(i, fail_at).map(|x| black_box(x + 1))
+}
+#[inline(never)]
+fn bt_level_1(i: u32, fail_at: u32) -> Result<u32, BacktraceError> {
+    bt_level_2(i, fail_at).map(|x| black_box(x + 1))
+}
+
+// 10-level deep call chain for errat at_fn()
+#[inline(never)]
+fn atfn_level_10(i: u32, fail_at: u32) -> Result<u32, At<U64Error>> {
+    if i == fail_at {
+        Err(at(U64Error::InnerFailed(i as u64, fail_at as u64)).at_fn(|| {}))
+    } else {
+        Ok(i * 2)
+    }
+}
+
+#[inline(never)]
+fn atfn_level_9(i: u32, fail_at: u32) -> Result<u32, At<U64Error>> {
+    atfn_level_10(i, fail_at)
+        .at_fn(|| {})
+        .map(|x| black_box(x + 1))
+}
+#[inline(never)]
+fn atfn_level_8(i: u32, fail_at: u32) -> Result<u32, At<U64Error>> {
+    atfn_level_9(i, fail_at)
+        .at_fn(|| {})
+        .map(|x| black_box(x + 1))
+}
+#[inline(never)]
+fn atfn_level_7(i: u32, fail_at: u32) -> Result<u32, At<U64Error>> {
+    atfn_level_8(i, fail_at)
+        .at_fn(|| {})
+        .map(|x| black_box(x + 1))
+}
+#[inline(never)]
+fn atfn_level_6(i: u32, fail_at: u32) -> Result<u32, At<U64Error>> {
+    atfn_level_7(i, fail_at)
+        .at_fn(|| {})
+        .map(|x| black_box(x + 1))
+}
+#[inline(never)]
+fn atfn_level_5(i: u32, fail_at: u32) -> Result<u32, At<U64Error>> {
+    atfn_level_6(i, fail_at)
+        .at_fn(|| {})
+        .map(|x| black_box(x + 1))
+}
+#[inline(never)]
+fn atfn_level_4(i: u32, fail_at: u32) -> Result<u32, At<U64Error>> {
+    atfn_level_5(i, fail_at)
+        .at_fn(|| {})
+        .map(|x| black_box(x + 1))
+}
+#[inline(never)]
+fn atfn_level_3(i: u32, fail_at: u32) -> Result<u32, At<U64Error>> {
+    atfn_level_4(i, fail_at)
+        .at_fn(|| {})
+        .map(|x| black_box(x + 1))
+}
+#[inline(never)]
+fn atfn_level_2(i: u32, fail_at: u32) -> Result<u32, At<U64Error>> {
+    atfn_level_3(i, fail_at)
+        .at_fn(|| {})
+        .map(|x| black_box(x + 1))
+}
+#[inline(never)]
+fn atfn_level_1(i: u32, fail_at: u32) -> Result<u32, At<U64Error>> {
+    atfn_level_2(i, fail_at)
+        .at_fn(|| {})
+        .map(|x| black_box(x + 1))
+}
+
+// 10-level deep call chain for errat at() only
+#[inline(never)]
+fn at_level_10(i: u32, fail_at: u32) -> Result<u32, At<U64Error>> {
+    if i == fail_at {
+        Err(at(U64Error::InnerFailed(i as u64, fail_at as u64)))
+    } else {
+        Ok(i * 2)
+    }
+}
+
+#[inline(never)]
+fn at_level_9(i: u32, fail_at: u32) -> Result<u32, At<U64Error>> {
+    at_level_10(i, fail_at).at().map(|x| black_box(x + 1))
+}
+#[inline(never)]
+fn at_level_8(i: u32, fail_at: u32) -> Result<u32, At<U64Error>> {
+    at_level_9(i, fail_at).at().map(|x| black_box(x + 1))
+}
+#[inline(never)]
+fn at_level_7(i: u32, fail_at: u32) -> Result<u32, At<U64Error>> {
+    at_level_8(i, fail_at).at().map(|x| black_box(x + 1))
+}
+#[inline(never)]
+fn at_level_6(i: u32, fail_at: u32) -> Result<u32, At<U64Error>> {
+    at_level_7(i, fail_at).at().map(|x| black_box(x + 1))
+}
+#[inline(never)]
+fn at_level_5(i: u32, fail_at: u32) -> Result<u32, At<U64Error>> {
+    at_level_6(i, fail_at).at().map(|x| black_box(x + 1))
+}
+#[inline(never)]
+fn at_level_4(i: u32, fail_at: u32) -> Result<u32, At<U64Error>> {
+    at_level_5(i, fail_at).at().map(|x| black_box(x + 1))
+}
+#[inline(never)]
+fn at_level_3(i: u32, fail_at: u32) -> Result<u32, At<U64Error>> {
+    at_level_4(i, fail_at).at().map(|x| black_box(x + 1))
+}
+#[inline(never)]
+fn at_level_2(i: u32, fail_at: u32) -> Result<u32, At<U64Error>> {
+    at_level_3(i, fail_at).at().map(|x| black_box(x + 1))
+}
+#[inline(never)]
+fn at_level_1(i: u32, fail_at: u32) -> Result<u32, At<U64Error>> {
+    at_level_2(i, fail_at).at().map(|x| black_box(x + 1))
+}
+
+// Plain Result (no tracing) for baseline
+#[inline(never)]
+fn plain_level_10(i: u32, fail_at: u32) -> Result<u32, U64Error> {
+    if i == fail_at {
+        Err(U64Error::InnerFailed(i as u64, fail_at as u64))
+    } else {
+        Ok(i * 2)
+    }
+}
+
+#[inline(never)]
+fn plain_level_9(i: u32, fail_at: u32) -> Result<u32, U64Error> {
+    plain_level_10(i, fail_at).map(|x| black_box(x + 1))
+}
+#[inline(never)]
+fn plain_level_8(i: u32, fail_at: u32) -> Result<u32, U64Error> {
+    plain_level_9(i, fail_at).map(|x| black_box(x + 1))
+}
+#[inline(never)]
+fn plain_level_7(i: u32, fail_at: u32) -> Result<u32, U64Error> {
+    plain_level_8(i, fail_at).map(|x| black_box(x + 1))
+}
+#[inline(never)]
+fn plain_level_6(i: u32, fail_at: u32) -> Result<u32, U64Error> {
+    plain_level_7(i, fail_at).map(|x| black_box(x + 1))
+}
+#[inline(never)]
+fn plain_level_5(i: u32, fail_at: u32) -> Result<u32, U64Error> {
+    plain_level_6(i, fail_at).map(|x| black_box(x + 1))
+}
+#[inline(never)]
+fn plain_level_4(i: u32, fail_at: u32) -> Result<u32, U64Error> {
+    plain_level_5(i, fail_at).map(|x| black_box(x + 1))
+}
+#[inline(never)]
+fn plain_level_3(i: u32, fail_at: u32) -> Result<u32, U64Error> {
+    plain_level_4(i, fail_at).map(|x| black_box(x + 1))
+}
+#[inline(never)]
+fn plain_level_2(i: u32, fail_at: u32) -> Result<u32, U64Error> {
+    plain_level_3(i, fail_at).map(|x| black_box(x + 1))
+}
+#[inline(never)]
+fn plain_level_1(i: u32, fail_at: u32) -> Result<u32, U64Error> {
+    plain_level_2(i, fail_at).map(|x| black_box(x + 1))
+}
+
+/// Fair comparison: 10 frames deep, same call structure
+fn bench_fair_10_frames(c: &mut Criterion) {
+    let mut group = c.benchmark_group("fair_10fr");
+
+    const OUTER: u32 = 100;
+    const INNER: u32 = 100;
+
+    // === 100% error rate (worst case for tracing) ===
+    const FAIL_ALL: u32 = 1;
+
+    group.bench_function("err_plain", |b| {
+        b.iter(|| run_nested_loops(OUTER, INNER, FAIL_ALL, plain_level_1))
+    });
+
+    group.bench_function("err_at_10fr", |b| {
+        b.iter(|| run_nested_loops(OUTER, INNER, FAIL_ALL, at_level_1))
+    });
+
+    group.bench_function("err_at_fn_10fr", |b| {
+        b.iter(|| run_nested_loops(OUTER, INNER, FAIL_ALL, atfn_level_1))
+    });
+
+    group.bench_function("err_backtrace", |b| {
+        b.iter(|| run_nested_loops(OUTER, INNER, FAIL_ALL, bt_level_1))
+    });
+
+    // === 0% error rate (happy path) ===
+    const FAIL_NONE: u32 = 0;
+
+    group.bench_function("ok_plain", |b| {
+        b.iter(|| run_nested_loops(OUTER, INNER, FAIL_NONE, plain_level_1))
+    });
+
+    group.bench_function("ok_at_10fr", |b| {
+        b.iter(|| run_nested_loops(OUTER, INNER, FAIL_NONE, at_level_1))
+    });
+
+    group.bench_function("ok_at_fn_10fr", |b| {
+        b.iter(|| run_nested_loops(OUTER, INNER, FAIL_NONE, atfn_level_1))
+    });
+
+    group.bench_function("ok_backtrace", |b| {
+        b.iter(|| run_nested_loops(OUTER, INNER, FAIL_NONE, bt_level_1))
+    });
+
+    group.finish();
+}

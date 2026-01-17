@@ -66,7 +66,7 @@ fn panic_level_1() {
 // 4. errat - #[track_caller] locations
 // ============================================================================
 
-use errat::{at, At, ResultAtExt};
+use errat::{At, ResultAtExt, at};
 
 #[derive(Debug)]
 struct MyError(&'static str);
@@ -84,17 +84,17 @@ impl std::fmt::Display for MyError {
 
 #[inline(never)]
 fn errat_level_3() -> Result<(), At<MyError>> {
-    Err(at(MyError("error at level 3")))  // Line captured here
+    Err(at(MyError("error at level 3"))) // Line captured here
 }
 
 #[inline(never)]
 fn errat_level_2() -> Result<(), At<MyError>> {
-    errat_level_3().at()  // Line captured here
+    errat_level_3().at() // Line captured here
 }
 
 #[inline(never)]
 fn errat_level_1() -> Result<(), At<MyError>> {
-    errat_level_2().at()  // Line captured here
+    errat_level_2().at() // Line captured here
 }
 
 fn main() {
@@ -111,8 +111,10 @@ fn main() {
     println!("  ... ({} total frames)", total_frames);
 
     println!();
-    println!("=== ANYHOW (RUST_BACKTRACE={}) ===",
-             std::env::var("RUST_BACKTRACE").unwrap_or_else(|_| "unset".into()));
+    println!(
+        "=== ANYHOW (RUST_BACKTRACE={}) ===",
+        std::env::var("RUST_BACKTRACE").unwrap_or_else(|_| "unset".into())
+    );
     println!("Captures: Backtrace only if RUST_BACKTRACE=1");
     println!();
     let err = anyhow_level_1().unwrap_err();
@@ -134,6 +136,7 @@ fn main() {
     println!("=== PANIC + CATCH_UNWIND ===");
     println!("Captures: Panic message + location, backtrace via RUST_BACKTRACE");
     println!();
+    #[allow(clippy::redundant_closure)] // Closure needed for UnwindSafe
     let result = catch_unwind(|| panic_level_1());
     match result {
         Err(payload) => {
