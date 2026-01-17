@@ -51,10 +51,11 @@ This means you can:
 
 - **Small sizeof**: `At<E>` is only `sizeof(E) + 8` bytes (one pointer for boxed trace)
 - **Zero allocation on Ok path**: No heap allocation until an error occurs
-- **Ergonomic API**: `.start_at()` on errors, `.at()` on Results
-- **Context options**: `.at_str("context")` for strings, `.at_debug(|| data)` for typed context
+- **Ergonomic API**: `.start_at()` on errors, `.at()` on Results, `.map_err_at()` for conversions
+- **Context options**: `.at_str("msg")`, `.at_named("phase")`, `.at_fn(|| {})`, `.at_debug(|| data)`
 - **Cross-crate tracing**: `at!()` macro captures crate info for GitHub links
-- **no_std compatible**: Works with just `core` + `alloc`, `std` is optional
+- **Equality/Hashing**: `PartialEq`, `Eq`, `Hash` compare only the error, not the trace
+- **no_std compatible**: Works with just `core` + `alloc`
 - **Mostly fallible allocations**: Vec/String ops use `try_reserve` and silently fail on OOM
 
 ## Quick Start
@@ -79,7 +80,7 @@ fn find_user(id: u64) -> Result<String, At<MyError>> {
 }
 
 fn process(id: u64) -> Result<String, At<MyError>> {
-    find_user(id).at_str("looking up user")?;  // Adds context + location
+    find_user(id).at_str("looking up user")?;  // Adds context to existing frame
     Ok("done".into())
 }
 ```
@@ -148,6 +149,7 @@ Instead of wrapping errors with `At<E>`, you can embed the trace directly in you
 
 ```rust
 use errat::{AtTrace, AtTraceable, ResultAtTraceableExt};
+use std::fmt;
 
 struct MyError {
     kind: ErrorKind,
@@ -159,6 +161,17 @@ enum ErrorKind { NotFound, InvalidInput }
 impl AtTraceable for MyError {
     fn trace_mut(&mut self) -> &mut AtTrace {
         &mut self.trace
+    }
+
+    fn trace(&self) -> Option<&AtTrace> {
+        Some(&self.trace)
+    }
+
+    fn fmt_message(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self.kind {
+            ErrorKind::NotFound => write!(f, "not found"),
+            ErrorKind::InvalidInput => write!(f, "invalid input"),
+        }
     }
 }
 
