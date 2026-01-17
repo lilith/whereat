@@ -45,6 +45,10 @@ example-meta:
 example-patterns:
     cargo run --example patterns
 
+# Run pretty output example (terminal colors and HTML)
+example-pretty:
+    cargo run --example pretty_output --features "_termcolor,_html"
+
 # Run benchmarks
 bench:
     cargo bench --bench overhead
