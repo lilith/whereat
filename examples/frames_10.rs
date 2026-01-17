@@ -1,9 +1,9 @@
 //! Benchmark 10-frame deep traces
 //! Run: cargo run --release --example frames_10
 
-use whereat::{At, ResultAtExt, at};
 use std::hint::black_box;
 use std::time::Instant;
+use whereat::{At, ResultAtExt, at};
 
 #[derive(Debug, Clone, Copy)]
 struct E(u64, u64);

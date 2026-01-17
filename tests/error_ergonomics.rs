@@ -10,12 +10,12 @@
 // Allow large error types in tests - we're demonstrating API usage, not optimizing for size
 #![allow(clippy::result_large_err)]
 
-use whereat::{
-    At, AtTrace, AtTraceBoxed, AtTraceable, ResultAtExt, ResultAtTraceableExt, ResultStartAtExt, at,
-};
 use std::error::Error;
 use std::fmt;
 use std::io;
+use whereat::{
+    At, AtTrace, AtTraceBoxed, AtTraceable, ResultAtExt, ResultAtTraceableExt, ResultStartAtExt, at,
+};
 
 // ============================================================================
 // 1. Regular enum errors (no external crate)
@@ -181,7 +181,10 @@ fn plain_enum_with_at() {
     // - at() in inner() creates first location
     // - at_str() in middle() adds context to same location (no new frame)
     // - at() in outer() creates second location
-    assert!(err.trace_iter().count() >= 2, "Should have 2+ locations");
+    assert!(
+        err.frames().filter_map(|f| f.location()).count() >= 2,
+        "Should have 2+ locations"
+    );
 }
 
 // ============================================================================

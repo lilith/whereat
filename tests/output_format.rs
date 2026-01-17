@@ -446,12 +446,12 @@ fn nested_at_errors() {
     let outer_traced: At<At<IoError>> = at(inner_traced);
 
     assert_eq!(
-        outer_traced.trace_len(),
+        outer_traced.frame_count(),
         1,
         "Outer should have its own trace"
     );
     assert_eq!(
-        outer_traced.error().trace_len(),
+        outer_traced.error().frame_count(),
         1,
         "Inner should have its own trace"
     );

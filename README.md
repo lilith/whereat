@@ -15,7 +15,7 @@ Compatible with plain enums, errors, structs, thiserror, anyhow, or any type wit
 
 Just `use whereat::*` and `Err(at!(MyEnum::Problem))` to get an `Err(At<MyEnum>)`. 
 
-At<YourErr> is maximally minimal, and only adds 8 bytes to the stack plus a boxed (under 64 byte) struct for traces. It's `no_std+alloc`, and offers `tinyvec` features to cut total allocs down from 2 to 1. 
+At<YourErr> is maximally minimal, and only adds 8 bytes to the stack plus a boxed 40-byte struct for traces. It's `no_std+alloc`, and offers `tinyvec` features to cut total allocs down from 2 to 1. 
 
 Add arbitrary debug info at any time with `at_debug(|| impls_debug)`, `at_data(|| impls_display)`, `at_string(|| String)`, or `at_str("user_cursor_is_here")` on `Result` or `At<_>`, for one additional allocation each. 
 
@@ -26,7 +26,7 @@ Add arbitrary debug info at any time with `at_debug(|| impls_debug)`, `at_data(|
 
 **DO: Halve allocations with tinyvec**
 
-We suggest the features `tinyvec-128-bytes` or `tinyvec-256-bytes` to give you 11 or 27  stacktrace lines (8 bytes each on 64-bit systems) *without* a 2nd allocation.
+We suggest the features `tinyvec-128-bytes` or `tinyvec-256-bytes` to give you 12 or 28 inline stacktrace slots (8 bytes each on 64-bit systems) *without* a 2nd allocation.
 
 **DO: Use `at_crate!()` when consuming a result or error from another crate**
 This will ensure backtrace lines specify the crate name (no more confusing `src/lib.rs:305` lines!). Requires `whereat::define_at_crate_info!()` once in your crate root.
@@ -134,9 +134,10 @@ The `_owned()` builder methods (`name_owned()`, `meta_owned()`, etc.) leak strin
 
 Enable inline storage for traces to avoid heap allocation for short traces:
 
-- `tinyvec-64-bytes`: 3 inline slots before heap spill
-- `tinyvec-128-bytes`: 11 inline slots before heap spill
-- `tinyvec-256-bytes`: 27 inline slots before heap spill
+- `tinyvec-64-bytes`: 4 inline slots before heap spill
+- `tinyvec-128-bytes`: 12 inline slots before heap spill
+- `tinyvec-256-bytes`: 28 inline slots before heap spill
+- `tinyvec-512-bytes`: 60 inline slots before heap spill
 
 ```toml
 [dependencies]
@@ -197,7 +198,7 @@ fn process(id: u64) -> Result<String, MyError> {
 
 | Field Type | Size | When to use |
 |------------|------|-------------|
-| `AtTrace` | ~48 bytes | Trace always captured at construction |
+| `AtTrace` | 40 bytes | Trace always captured at construction |
 | `Box<AtTrace>` | 8 bytes | Smaller error, trace always allocated |
 | `Option<Box<AtTrace>>` | 8 bytes | Lazy allocation on first `.at_*()` call |
 

@@ -242,16 +242,16 @@ fn sizeof_at_is_error_plus_pointer() {
 }
 
 #[test]
-fn sizeof_crate_info_is_six_fields() {
-    // AtCrateInfo has 6 fields: name, repo, commit, crate_path, module, meta
-    // 5 are &'static str or Option<&'static str> (16 bytes each)
+fn sizeof_crate_info_is_seven_fields() {
+    // AtCrateInfo has 7 fields: name, repo, commit, crate_path, module, meta, link_format
+    // 6 are &'static str or Option<&'static str> (16 bytes each)
     // 1 is &'static [(&'static str, &'static str)] (16 bytes: ptr + len)
     let info_size = size_of::<AtCrateInfo>();
-    let expected = 6 * size_of::<Option<&'static str>>();
+    let expected = 7 * size_of::<Option<&'static str>>();
 
     assert_eq!(
         info_size, expected,
-        "AtCrateInfo should be 6 fields ({} bytes). Got: {}",
+        "AtCrateInfo should be 7 fields ({} bytes). Got: {}",
         expected, info_size
     );
 }
@@ -552,8 +552,8 @@ fn nested_at_is_wasteful() {
     let outer: At<At<Inner>> = whereat::at(inner);
 
     // Both have their own traces - wasteful!
-    assert_eq!(outer.trace_len(), 1, "Outer has its own trace");
-    assert_eq!(outer.error().trace_len(), 1, "Inner has its own trace");
+    assert_eq!(outer.frame_count(), 1, "Outer has its own trace");
+    assert_eq!(outer.error().frame_count(), 1, "Inner has its own trace");
 
     // Total overhead: 2 Box<Trace> allocations instead of 1
     // This is why you should use .at() on Result, not wrap At<At<E>>
@@ -571,7 +571,7 @@ fn prefer_result_at_over_nested_at() {
     }
 
     let good_err = good_outer().unwrap_err();
-    assert_eq!(good_err.trace_len(), 2, "Single trace with 2 locations");
+    assert_eq!(good_err.frame_count(), 2, "Single trace with 2 locations");
 
     // BAD: Wrapping At in At
     fn bad_outer() -> At<At<TestError>> {
@@ -580,8 +580,8 @@ fn prefer_result_at_over_nested_at() {
 
     let bad_err = bad_outer();
     // Two separate traces - wasteful
-    assert_eq!(bad_err.trace_len(), 1);
-    assert_eq!(bad_err.error().trace_len(), 1);
+    assert_eq!(bad_err.frame_count(), 1);
+    assert_eq!(bad_err.error().frame_count(), 1);
 }
 
 // ============================================================================

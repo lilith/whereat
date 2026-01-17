@@ -1,9 +1,9 @@
 //! Benchmark 25-frame deep traces (fits in 28 slots without spill)
 //! Run: cargo run --release --example frames_25
 
-use whereat::{At, ResultAtExt, at};
 use std::hint::black_box;
 use std::time::Instant;
+use whereat::{At, ResultAtExt, at};
 
 #[derive(Debug, Clone, Copy)]
 struct E(u64, u64);

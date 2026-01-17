@@ -298,12 +298,6 @@ impl AtTrace {
         let _ = try_push_context(&mut self.contexts, (idx, context));
     }
 
-    /// Get the number of entries in the trace (locations + skipped markers).
-    #[inline]
-    pub(crate) fn len(&self) -> usize {
-        self.locations.len()
-    }
-
     /// Iterate over all location entries, oldest first.
     /// Returns Option where None = skipped frame marker.
     pub(crate) fn iter(&self) -> impl Iterator<Item = Option<&'static Location<'static>>> + '_ {
@@ -387,7 +381,7 @@ impl AtTrace {
     /// Pop the most recent location and its contexts from the end.
     ///
     /// Returns `None` if the trace is empty.
-    pub fn pop(&mut self) -> Option<AtTraceSegment> {
+    pub fn pop(&mut self) -> Option<AtFrameOwned> {
         if self.locations.is_empty() {
             return None;
         }
@@ -410,11 +404,11 @@ impl AtTrace {
         }
         contexts.reverse(); // Restore original order
 
-        Some(AtTraceSegment { location, contexts })
+        Some(AtFrameOwned { location, contexts })
     }
 
     /// Push a segment (location + contexts) to the end of the trace.
-    pub fn push(&mut self, segment: AtTraceSegment) {
+    pub fn push(&mut self, segment: AtFrameOwned) {
         let idx = self.locations.len() as u16;
 
         // Try to push location
@@ -433,7 +427,7 @@ impl AtTrace {
     /// Returns `None` if the trace is empty.
     ///
     /// Note: This is O(n) as it shifts all remaining elements.
-    pub fn pop_first(&mut self) -> Option<AtTraceSegment> {
+    pub fn pop_first(&mut self) -> Option<AtFrameOwned> {
         if self.locations.is_empty() {
             return None;
         }
@@ -455,13 +449,13 @@ impl AtTrace {
             }
         }
 
-        Some(AtTraceSegment { location, contexts })
+        Some(AtFrameOwned { location, contexts })
     }
 
     /// Insert a segment (location + contexts) at the beginning of the trace.
     ///
     /// Note: This is O(n) as it shifts all existing elements.
-    pub fn push_first(&mut self, segment: AtTraceSegment) {
+    pub fn push_first(&mut self, segment: AtFrameOwned) {
         // Shift all existing indices up by 1
         if let Some(ref mut ctx_vec) = self.contexts {
             for (idx, _) in ctx_vec.iter_mut() {
@@ -513,38 +507,23 @@ impl Default for AtTrace {
 }
 
 // ============================================================================
-// AtTraceSegment - A single location with its contexts
+// AtFrameOwned - Owned frame data (one location + contexts)
 // ============================================================================
 
 /// A segment of a trace: one location with its associated contexts.
 ///
-/// Used for transferring trace segments between `At<E>` and `AtTraceable` types.
+/// Used for transferring trace segments between `At<E>` and `AtTraceable` types
+/// via [`at_pop()`](AtTraceable::at_pop) and [`at_push()`](AtTraceable::at_push).
 ///
-/// ## Example: Transferring trace segments
-///
-/// ```rust
-/// use whereat::{at, At, AtTrace};
-///
-/// #[derive(Debug)]
-/// struct Error1;
-/// #[derive(Debug)]
-/// struct Error2;
-///
-/// let mut err1: At<Error1> = at(Error1).at_str("context");
-/// let mut err2: At<Error2> = at(Error2);
-///
-/// // Transfer most recent segment from err1 to err2
-/// if let Some(seg) = err1.at_pop() {
-///     err2.at_push(seg);
-/// }
-/// ```
+/// This is an advanced API for trace manipulation. Most users don't need this.
+#[doc(hidden)]
 #[derive(Debug)]
-pub struct AtTraceSegment {
+pub struct AtFrameOwned {
     location: Option<&'static Location<'static>>,
     contexts: Vec<AtContext>,
 }
 
-impl AtTraceSegment {
+impl AtFrameOwned {
     /// Create a new segment with a location and no contexts.
     pub fn new(location: Option<&'static Location<'static>>) -> Self {
         Self {
@@ -635,7 +614,7 @@ impl AtTraceSegment {
 /// A single frame in a trace: location with its associated contexts.
 ///
 /// Returned by [`AtTrace::frames()`] and [`At::frames()`](crate::At::frames).
-/// Unlike [`AtTraceSegment`] which owns its data, this is a view into the trace.
+/// Unlike [`AtFrameOwned`] which owns its data, this is a view into the trace.
 ///
 /// ## Example
 ///
@@ -717,43 +696,9 @@ impl fmt::Debug for AtFrame<'_> {
 /// This type is always 8 bytes (one pointer) regardless of trace size.
 /// The trace is allocated lazily on first mutation.
 ///
-/// ## Example
-///
-/// ```rust
-/// use whereat::{AtTraceBoxed, AtTrace, AtTraceable};
-///
-/// struct MyError {
-///     kind: &'static str,
-///     trace: AtTraceBoxed,  // 8 bytes, not 24-256
-/// }
-///
-/// impl AtTraceable for MyError {
-///     fn trace_mut(&mut self) -> &mut AtTrace { self.trace.get_or_insert_mut() }
-///     fn trace(&self) -> Option<&AtTrace> { self.trace.as_ref() }
-///     fn fmt_message(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-///         write!(f, "{}", self.kind)
-///     }
-/// }
-///
-/// impl MyError {
-///     fn new(kind: &'static str) -> Self {
-///         Self { kind, trace: AtTraceBoxed::new() }
-///     }
-///
-///     #[track_caller]
-///     fn with_trace(kind: &'static str) -> Self {
-///         Self { kind, trace: AtTraceBoxed::capture() }
-///     }
-/// }
-///
-/// // No allocation until .at_*() is called
-/// let err = MyError::new("not_found");
-/// assert!(err.trace.is_empty());
-///
-/// // With trace captured immediately
-/// let err = MyError::with_trace("not_found");
-/// assert!(!err.trace.is_empty());
-/// ```
+/// This is an advanced API. Most users should use `Option<Box<AtTrace>>` directly
+/// or embed `AtTrace` inline in their error types.
+#[doc(hidden)]
 #[derive(Default)]
 pub struct AtTraceBoxed(Option<Box<AtTrace>>);
 
@@ -1176,25 +1121,25 @@ pub trait AtTraceable: Sized {
 
     /// Pop the most recent location and its contexts from the trace.
     #[inline]
-    fn at_pop(&mut self) -> Option<AtTraceSegment> {
+    fn at_pop(&mut self) -> Option<AtFrameOwned> {
         self.trace_mut().pop()
     }
 
     /// Push a segment (location + contexts) to the end of the trace.
     #[inline]
-    fn at_push(&mut self, segment: AtTraceSegment) {
+    fn at_push(&mut self, segment: AtFrameOwned) {
         self.trace_mut().push(segment);
     }
 
     /// Pop the oldest location and its contexts from the trace.
     #[inline]
-    fn at_first_pop(&mut self) -> Option<AtTraceSegment> {
+    fn at_first_pop(&mut self) -> Option<AtFrameOwned> {
         self.trace_mut().pop_first()
     }
 
     /// Insert a segment (location + contexts) at the beginning of the trace.
     #[inline]
-    fn at_first_insert(&mut self, segment: AtTraceSegment) {
+    fn at_first_insert(&mut self, segment: AtFrameOwned) {
         self.trace_mut().push_first(segment);
     }
 

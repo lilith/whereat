@@ -1,7 +1,16 @@
 //! Crate metadata for cross-crate error tracing with repository links.
 //!
 //! This module provides [`AtCrateInfo`] and [`AtCrateInfoBuilder`] for capturing
-//! static metadata about crates, enabling clickable GitHub links in error traces.
+//! static metadata about crates, enabling clickable links in error traces.
+//!
+//! ## Link Format
+//!
+//! By default, links use GitHub's format: `{repo}/blob/{commit}/{path}{file}#L{line}`
+//!
+//! For other forges, use `.link_format()`:
+//! - **GitLab**: `{repo}/-/blob/{commit}/{path}{file}#L{line}`
+//! - **Gitea/Forgejo**: `{repo}/src/commit/{commit}/{path}{file}#L{line}`
+//! - **Bitbucket**: `{repo}/src/{commit}/{path}{file}#lines-{line}`
 
 use alloc::boxed::Box;
 use alloc::string::String;
@@ -39,6 +48,22 @@ use alloc::vec::Vec;
 ///     .meta(&[("team", "platform"), ("service", "auth")])
 ///     .build();
 /// ```
+/// Default link format for GitHub: `{repo}/blob/{commit}/{path}{file}#L{line}`
+#[doc(hidden)]
+pub const GITHUB_LINK_FORMAT: &str = "{repo}/blob/{commit}/{path}{file}#L{line}";
+
+/// Link format for GitLab: `{repo}/-/blob/{commit}/{path}{file}#L{line}`
+#[doc(hidden)]
+pub const GITLAB_LINK_FORMAT: &str = "{repo}/-/blob/{commit}/{path}{file}#L{line}";
+
+/// Link format for Gitea/Forgejo: `{repo}/src/commit/{commit}/{path}{file}#L{line}`
+#[doc(hidden)]
+pub const GITEA_LINK_FORMAT: &str = "{repo}/src/commit/{commit}/{path}{file}#L{line}";
+
+/// Link format for Bitbucket: `{repo}/src/{commit}/{path}{file}#lines-{line}`
+#[doc(hidden)]
+pub const BITBUCKET_LINK_FORMAT: &str = "{repo}/src/{commit}/{path}{file}#lines-{line}";
+
 #[derive(Debug, Clone, Copy)]
 pub struct AtCrateInfo {
     name: &'static str,
@@ -47,6 +72,8 @@ pub struct AtCrateInfo {
     crate_path: Option<&'static str>,
     module: &'static str,
     meta: &'static [(&'static str, &'static str)],
+    /// Link format string with placeholders: `{repo}`, `{commit}`, `{path}`, `{file}`, `{line}`
+    link_format: &'static str,
 }
 
 impl AtCrateInfo {
@@ -96,6 +123,15 @@ impl AtCrateInfo {
     /// Custom key-value metadata slice.
     pub const fn meta(&self) -> &'static [(&'static str, &'static str)] {
         self.meta
+    }
+
+    /// Link format string for generating repository links.
+    ///
+    /// Contains placeholders: `{repo}`, `{commit}`, `{path}`, `{file}`, `{line}`
+    ///
+    /// Default is [`GITHUB_LINK_FORMAT`].
+    pub const fn link_format(&self) -> &'static str {
+        self.link_format
     }
 
     /// Look up a custom metadata value by key.
@@ -168,6 +204,7 @@ pub struct AtCrateInfoBuilder {
     crate_path: Option<&'static str>,
     module: &'static str,
     meta: &'static [(&'static str, &'static str)],
+    link_format: &'static str,
 }
 
 impl AtCrateInfoBuilder {
@@ -180,6 +217,7 @@ impl AtCrateInfoBuilder {
             crate_path: None,
             module: "",
             meta: &[],
+            link_format: GITHUB_LINK_FORMAT,
         }
     }
 
@@ -234,6 +272,38 @@ impl AtCrateInfoBuilder {
         self
     }
 
+    /// Set the link format for repository URLs.
+    ///
+    /// The format string can contain these placeholders:
+    /// - `{repo}` - Repository URL (trailing slash stripped)
+    /// - `{commit}` - Git commit hash or tag
+    /// - `{path}` - Crate path within repo (e.g., `crates/mylib/`)
+    /// - `{file}` - Source file path (e.g., `src/lib.rs`)
+    /// - `{line}` - Line number
+    ///
+    /// ## Predefined formats
+    ///
+    /// - [`GITHUB_LINK_FORMAT`] (default)
+    /// - [`GITLAB_LINK_FORMAT`]
+    /// - [`GITEA_LINK_FORMAT`]
+    /// - [`BITBUCKET_LINK_FORMAT`]
+    ///
+    /// ## Example
+    ///
+    /// ```rust
+    /// use whereat::{AtCrateInfo, GITLAB_LINK_FORMAT};
+    ///
+    /// static INFO: AtCrateInfo = AtCrateInfo::builder()
+    ///     .name("mylib")
+    ///     .repo(Some("https://gitlab.com/org/repo"))
+    ///     .link_format(GITLAB_LINK_FORMAT)
+    ///     .build();
+    /// ```
+    pub const fn link_format(mut self, format: &'static str) -> Self {
+        self.link_format = format;
+        self
+    }
+
     /// Build the final AtCrateInfo.
     pub const fn build(self) -> AtCrateInfo {
         AtCrateInfo {
@@ -243,6 +313,7 @@ impl AtCrateInfoBuilder {
             crate_path: self.crate_path,
             module: self.module,
             meta: self.meta,
+            link_format: self.link_format,
         }
     }
 
@@ -327,6 +398,63 @@ impl AtCrateInfoBuilder {
         );
         self.meta = leaked;
         self
+    }
+
+    /// Set the link format from an owned string (leaks memory for static lifetime).
+    pub fn link_format_owned(mut self, format: String) -> Self {
+        self.link_format = Box::leak(format.into_boxed_str());
+        self
+    }
+
+    /// Auto-detect the link format based on the repository URL.
+    ///
+    /// This inspects the repo URL set via `.repo()` or `.repo_owned()` and selects
+    /// the appropriate format:
+    /// - URLs containing `github.com` → [`GITHUB_LINK_FORMAT`]
+    /// - URLs containing `gitlab.com` or `gitlab.` → [`GITLAB_LINK_FORMAT`]
+    /// - URLs containing `gitea.` or `forgejo.` or `codeberg.org` → [`GITEA_LINK_FORMAT`]
+    /// - URLs containing `bitbucket.org` → [`BITBUCKET_LINK_FORMAT`]
+    /// - Unknown hosts → [`GITHUB_LINK_FORMAT`] (default)
+    ///
+    /// ## Example
+    ///
+    /// ```rust
+    /// use whereat::AtCrateInfo;
+    ///
+    /// // Auto-detects GitLab format from URL
+    /// let info = AtCrateInfo::builder()
+    ///     .name("mylib")
+    ///     .repo(Some("https://gitlab.com/org/repo"))
+    ///     .link_format_auto()
+    ///     .build();
+    /// ```
+    pub fn link_format_auto(mut self) -> Self {
+        self.link_format = match self.repo {
+            Some(url) => detect_link_format(url),
+            None => GITHUB_LINK_FORMAT,
+        };
+        self
+    }
+}
+
+/// Detect the appropriate link format based on repository URL.
+fn detect_link_format(repo_url: &str) -> &'static str {
+    let url_lower = repo_url.to_lowercase();
+
+    if url_lower.contains("github.com") || url_lower.contains("github.") {
+        GITHUB_LINK_FORMAT
+    } else if url_lower.contains("gitlab.com") || url_lower.contains("gitlab.") {
+        GITLAB_LINK_FORMAT
+    } else if url_lower.contains("gitea.")
+        || url_lower.contains("forgejo.")
+        || url_lower.contains("codeberg.org")
+    {
+        GITEA_LINK_FORMAT
+    } else if url_lower.contains("bitbucket.org") || url_lower.contains("bitbucket.") {
+        BITBUCKET_LINK_FORMAT
+    } else {
+        // Default to GitHub format for unknown hosts
+        GITHUB_LINK_FORMAT
     }
 }
 

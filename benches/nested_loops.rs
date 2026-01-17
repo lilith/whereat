@@ -17,8 +17,8 @@
 #![allow(dead_code)]
 
 use criterion::{BenchmarkId, Criterion, black_box, criterion_group, criterion_main};
-use whereat::{At, ResultAtExt, ResultStartAtExt, at};
 use std::panic::{AssertUnwindSafe, catch_unwind};
+use whereat::{At, ResultAtExt, ResultStartAtExt, at};
 
 use core::fmt;
 

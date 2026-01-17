@@ -5,14 +5,14 @@
 
 use alloc::borrow::Cow;
 use alloc::boxed::Box;
-use alloc::string::String;
+use alloc::string::{String, ToString};
 use core::fmt;
 use core::hash::{Hash, Hasher};
 use core::panic::Location;
 
 use crate::AtCrateInfo;
 use crate::context::{AtContext, AtContextRef};
-use crate::trace::{AtFrame, AtTrace, AtTraceBoxed, AtTraceSegment};
+use crate::trace::{AtFrame, AtFrameOwned, AtTrace, AtTraceBoxed};
 
 // ============================================================================
 // At<E> - Core wrapper type
@@ -56,7 +56,7 @@ use crate::trace::{AtFrame, AtTrace, AtTraceBoxed, AtTraceSegment};
 ///
 /// // Create a traced error using at() function
 /// let err: At<MyError> = at(MyError::Oops);
-/// assert_eq!(err.trace_len(), 1);
+/// assert_eq!(err.frame_count(), 1);
 /// ```
 ///
 /// ## Note: Avoid `At<At<E>>`
@@ -244,11 +244,11 @@ impl<E> At<E> {
     ///
     /// // One frame with two contexts
     /// let e = at(E).at_str("a").at_str("b");
-    /// assert_eq!(e.trace_len(), 1);
+    /// assert_eq!(e.frame_count(), 1);
     ///
     /// // Two frames: first from at(), second gets the context
     /// let e = at(E).at().at_str("on second frame");
-    /// assert_eq!(e.trace_len(), 2);
+    /// assert_eq!(e.frame_count(), 2);
     /// ```
     ///
     /// ## Example
@@ -557,24 +557,19 @@ impl<E> At<E> {
         self.error
     }
 
-    /// Get the number of locations in the trace.
-    #[inline]
-    pub fn trace_len(&self) -> usize {
-        self.trace.as_ref().map_or(0, |t| t.len())
-    }
-
     /// Check if the trace is empty.
     #[inline]
-    pub fn trace_is_empty(&self) -> bool {
+    pub fn is_empty(&self) -> bool {
         self.trace.is_empty()
     }
 
     /// Iterate over all traced locations, oldest first.
     ///
     /// Skipped frame markers (`[...]`) are not included in this iteration.
-    /// Use `Debug` formatting to see the full trace with skip markers.
+    /// Use [`frames()`](Self::frames) for full iteration including contexts.
     #[inline]
-    pub fn trace_iter(&self) -> impl Iterator<Item = &'static Location<'static>> + '_ {
+    #[allow(dead_code)] // Used in tests
+    pub(crate) fn locations(&self) -> impl Iterator<Item = &'static Location<'static>> + '_ {
         self.trace
             .as_ref()
             .into_iter()
@@ -584,14 +579,16 @@ impl<E> At<E> {
 
     /// Get the first (oldest) location in the trace, if any.
     #[inline]
-    pub fn first_location(&self) -> Option<&'static Location<'static>> {
-        self.trace_iter().next()
+    #[allow(dead_code)] // Used in tests
+    pub(crate) fn first_location(&self) -> Option<&'static Location<'static>> {
+        self.locations().next()
     }
 
     /// Get the last (most recent) location in the trace, if any.
     #[inline]
-    pub fn last_location(&self) -> Option<&'static Location<'static>> {
-        self.trace_iter().last()
+    #[allow(dead_code)] // Used in tests
+    pub(crate) fn last_location(&self) -> Option<&'static Location<'static>> {
+        self.locations().last()
     }
 
     /// Iterate over all context entries, newest first.
@@ -666,24 +663,24 @@ impl<E> At<E> {
     /// Pop the most recent location and its contexts from the trace.
     ///
     /// Returns `None` if the trace is empty.
-    pub fn at_pop(&mut self) -> Option<AtTraceSegment> {
+    pub fn at_pop(&mut self) -> Option<AtFrameOwned> {
         self.trace.as_mut()?.pop()
     }
 
     /// Push a segment (location + contexts) to the end of the trace.
-    pub fn at_push(&mut self, segment: AtTraceSegment) {
+    pub fn at_push(&mut self, segment: AtFrameOwned) {
         self.ensure_trace().push(segment);
     }
 
     /// Pop the oldest location and its contexts from the trace.
     ///
     /// Returns `None` if the trace is empty.
-    pub fn at_first_pop(&mut self) -> Option<AtTraceSegment> {
+    pub fn at_first_pop(&mut self) -> Option<AtFrameOwned> {
         self.trace.as_mut()?.pop_first()
     }
 
     /// Insert a segment (location + contexts) at the beginning of the trace.
-    pub fn at_first_insert(&mut self, segment: AtTraceSegment) {
+    pub fn at_first_insert(&mut self, segment: AtFrameOwned) {
         self.ensure_trace().push_first(segment);
     }
 
@@ -719,7 +716,7 @@ impl<E> At<E> {
     ///
     /// let err1: At<Error1> = at(Error1).at_str("context");
     /// let err2: At<Error2> = err1.map_error(Error2::from);
-    /// assert_eq!(err2.trace_len(), 1);
+    /// assert_eq!(err2.frame_count(), 1);
     /// ```
     pub fn map_error<E2, F>(self, f: F) -> At<E2>
     where
@@ -874,7 +871,7 @@ impl<E: fmt::Debug> fmt::Display for DisplayWithMeta<'_, E> {
         writeln!(f)?;
 
         // Cache GitHub base URL - rebuild when crate boundary changes
-        let mut github_base: Option<String> = initial_crate.and_then(build_github_base);
+        let mut link_template: Option<String> = initial_crate.and_then(build_link_base);
 
         // Walk locations, updating GitHub base when we encounter crate boundaries
         // None = skipped frame marker
@@ -882,13 +879,13 @@ impl<E: fmt::Debug> fmt::Display for DisplayWithMeta<'_, E> {
             // Check for crate boundary at this location - rebuild URL only when crate changes
             for context in trace.contexts_at(i) {
                 if let AtContext::Crate(info) = context {
-                    github_base = build_github_base(info);
+                    link_template = build_link_base(info);
                 }
             }
 
             match loc_opt {
                 Some(loc) => {
-                    write_location_meta(f, loc, github_base.as_deref())?;
+                    write_location_meta(f, loc, link_template.as_deref())?;
 
                     // Show non-crate contexts
                     for context in trace.contexts_at(i) {
@@ -912,30 +909,76 @@ impl<E: fmt::Debug> fmt::Display for DisplayWithMeta<'_, E> {
     }
 }
 
-/// Build GitHub blob URL base from crate info.
-/// Returns `{repo}/blob/{commit}/{crate_path}` or None if repo/commit unavailable.
-fn build_github_base(info: &AtCrateInfo) -> Option<String> {
+/// Build URL base from crate info using the configured link format.
+/// Returns the formatted URL base or None if repo/commit unavailable.
+///
+/// The format string can contain placeholders: `{repo}`, `{commit}`, `{path}`.
+/// The `{file}` and `{line}` placeholders are handled by `write_location_meta`.
+fn build_link_base(info: &AtCrateInfo) -> Option<String> {
     match (info.repo(), info.commit()) {
         (Some(repo), Some(commit)) => {
             let repo = repo.trim_end_matches('/');
-            let crate_path = info.crate_path().unwrap_or("");
-            Some(alloc::format!("{}/blob/{}/{}", repo, commit, crate_path))
+            let path = info.crate_path().unwrap_or("");
+            let format = info.link_format();
+
+            // Build the base URL by replacing {repo}, {commit}, {path}
+            // Leave {file} and {line} for write_location_meta
+            let mut result =
+                String::with_capacity(format.len() + repo.len() + commit.len() + path.len());
+            let mut chars = format.chars().peekable();
+
+            while let Some(c) = chars.next() {
+                if c == '{' {
+                    // Look for placeholder
+                    let mut placeholder = String::new();
+                    while let Some(&next) = chars.peek() {
+                        if next == '}' {
+                            chars.next(); // consume '}'
+                            break;
+                        }
+                        placeholder.push(chars.next().unwrap());
+                    }
+                    match placeholder.as_str() {
+                        "repo" => result.push_str(repo),
+                        "commit" => result.push_str(commit),
+                        "path" => result.push_str(path),
+                        // Keep {file} and {line} as-is for later substitution
+                        other => {
+                            result.push('{');
+                            result.push_str(other);
+                            result.push('}');
+                        }
+                    }
+                } else {
+                    result.push(c);
+                }
+            }
+            Some(result)
         }
         _ => None,
     }
 }
 
-/// Helper to write a location with optional GitHub link.
+/// Helper to write a location with optional repository link.
+///
+/// The `link_template` should have {repo}, {commit}, {path} already substituted,
+/// but {file} and {line} still present as placeholders.
 fn write_location_meta(
     f: &mut fmt::Formatter<'_>,
     loc: &'static Location<'static>,
-    github_base: Option<&str>,
+    link_template: Option<&str>,
 ) -> fmt::Result {
     writeln!(f, "    at {}:{}", loc.file(), loc.line())?;
-    if let Some(base) = github_base {
+    if let Some(template) = link_template {
         // Convert backslashes to forward slashes for Windows paths
         let file = loc.file().replace('\\', "/");
-        writeln!(f, "       {}{}#L{}", base, file, loc.line())?;
+        let line = loc.line();
+
+        // Replace {file} and {line} placeholders
+        let link = template
+            .replace("{file}", &file)
+            .replace("{line}", &line.to_string());
+        writeln!(f, "       {}", link)?;
     }
     Ok(())
 }

@@ -34,9 +34,9 @@ fn nested_at_at_compiles_but_wasteful() {
 
     let err = outer_bad().unwrap_err();
     // The outer At has its own trace
-    assert!(err.trace_len() >= 1);
+    assert!(err.frame_count() >= 1);
     // The inner At (now the error value) also has a trace
-    assert!(err.error().trace_len() >= 1);
+    assert!(err.error().frame_count() >= 1);
 }
 
 /// Correct pattern: use .at() to extend existing trace
@@ -51,7 +51,7 @@ fn correct_pattern_extends_trace() {
     }
 
     let err = outer_good().unwrap_err();
-    assert_eq!(err.trace_len(), 2); // inner + outer
+    assert_eq!(err.frame_count(), 2); // inner + outer
 }
 
 // ============================================================================
@@ -70,7 +70,7 @@ fn deep_call_stack_20_levels() {
     }
 
     let err = level(19).unwrap_err();
-    assert_eq!(err.trace_len(), 20);
+    assert_eq!(err.frame_count(), 20);
 }
 
 /// 100-level deep call stack (stress test)
@@ -85,7 +85,7 @@ fn deep_call_stack_100_levels() {
     }
 
     let err = level(99).unwrap_err();
-    assert_eq!(err.trace_len(), 100);
+    assert_eq!(err.frame_count(), 100);
 }
 
 // ============================================================================
@@ -108,7 +108,7 @@ fn many_contexts_single_location() {
         .at_str("context 10");
 
     // Only 1 location (from at()), all contexts attach to it
-    assert_eq!(err.trace_len(), 1);
+    assert_eq!(err.frame_count(), 1);
 
     // All 10 contexts should be present
     let contexts: Vec<_> = err.contexts().collect();
@@ -128,7 +128,7 @@ fn mixed_contexts_single_location() {
         .at_debug(|| RequestId(12345))
         .at_data(|| "display data");
 
-    assert_eq!(err.trace_len(), 1);
+    assert_eq!(err.frame_count(), 1);
     assert_eq!(err.contexts().count(), 4);
 }
 
@@ -154,7 +154,7 @@ fn hot_loop_all_errors() {
     assert_eq!(errors.len(), 1000);
     // Each error has its own trace
     for err in &errors {
-        assert_eq!(err.trace_len(), 1);
+        assert_eq!(err.frame_count(), 1);
     }
 }
 
@@ -207,7 +207,7 @@ fn recursive_descent_traced() {
     // - etc...
     // All at_str calls add to the same location (the one from at())
     // So we get 1 location with 6 contexts
-    assert_eq!(err.trace_len(), 1);
+    assert_eq!(err.frame_count(), 1);
     assert_eq!(err.contexts().count(), 6); // 1 from error + 5 from recursion
 }
 
@@ -224,7 +224,7 @@ fn recursive_descent_explicit_at() {
 
     let err = parse_nested(0, 5).unwrap_err();
     // 6 locations: 1 from at() + 5 from .at() calls
-    assert_eq!(err.trace_len(), 6);
+    assert_eq!(err.frame_count(), 6);
 }
 
 // ============================================================================
@@ -250,7 +250,7 @@ fn helper_from_loop_same_location() {
     for (i, result) in results.iter().enumerate() {
         let err = result.as_ref().unwrap_err();
         // Each error has its own trace and context
-        assert_eq!(err.trace_len(), 1);
+        assert_eq!(err.frame_count(), 1);
         // Context contains the negative value
         let ctx = err.contexts().next().unwrap();
         let value = ctx.downcast_ref::<i32>().unwrap();
@@ -278,7 +278,7 @@ fn large_error_type() {
     };
 
     let err = at(large);
-    assert_eq!(err.trace_len(), 1);
+    assert_eq!(err.frame_count(), 1);
     assert_eq!(err.error().data.len(), 256);
 }
 
@@ -302,7 +302,7 @@ fn start_at_external_errors() {
     }
 
     let err = outer().unwrap_err();
-    assert_eq!(err.trace_len(), 2); // start_at + at
+    assert_eq!(err.frame_count(), 2); // start_at + at
     assert_eq!(*err.error(), "external error");
 }
 
@@ -334,7 +334,7 @@ fn mixed_start_at_and_at() {
     // level_2: at() creates location
     // level_3: at_str adds context to level_2's location (no new location!)
     // level_4: at() creates location
-    assert_eq!(err.trace_len(), 3);
+    assert_eq!(err.frame_count(), 3);
 }
 
 // ============================================================================
@@ -397,5 +397,5 @@ fn error_across_threads() {
 
     let result = handle.join().unwrap();
     let err = result.unwrap_err();
-    assert_eq!(err.trace_len(), 1);
+    assert_eq!(err.frame_count(), 1);
 }

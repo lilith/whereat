@@ -276,14 +276,14 @@ fn main() {
     println!("Pattern 2: Add context with at_str (no new location)");
     if let Err(e) = good_patterns::with_context() {
         println!("Error: {}", e);
-        println!("Trace len: {} (should be 1)\n", e.trace_len());
+        println!("Trace len: {} (should be 1)\n", e.frame_count());
     }
 
     // Pattern 3: Explicit location then context
     println!("Pattern 3: Explicit .at() then .at_str()");
     if let Err(e) = good_patterns::location_then_context() {
         println!("Error: {}", e);
-        println!("Trace len: {} (should be 2)\n", e.trace_len());
+        println!("Trace len: {} (should be 2)\n", e.frame_count());
     }
 
     // Pattern 4: Wrapping external errors
@@ -303,7 +303,7 @@ fn main() {
     println!("Pattern 6: Multiple contexts on same location");
     if let Err(e) = good_patterns::rich_context() {
         println!("Error: {}", e);
-        println!("Trace len: {} (should be 1)", e.trace_len());
+        println!("Trace len: {} (should be 1)", e.frame_count());
         println!("Context count: {}\n", e.contexts().count());
         println!("Debug:\n{:?}\n", e);
     }
@@ -313,12 +313,12 @@ fn main() {
     // Compare at_instead_of_at_str vs correct_multiple_contexts
     println!("Bad: at() when you meant at_str()");
     if let Err(e) = bad_patterns::at_instead_of_at_str() {
-        println!("  Trace len: {} (wasteful!)", e.trace_len());
+        println!("  Trace len: {} (wasteful!)", e.frame_count());
     }
 
     println!("Good: at_str() for context");
     if let Err(e) = bad_patterns::correct_multiple_contexts() {
-        println!("  Trace len: {} (efficient)", e.trace_len());
+        println!("  Trace len: {} (efficient)", e.frame_count());
     }
 
     println!("\n=== PERFORMANCE NOTES ===");
