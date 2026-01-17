@@ -1,9 +1,9 @@
 # whereat
 
-[![CI](https://github.com/imazen/whereat/actions/workflows/ci.yml/badge.svg)](https://github.com/imazen/whereat/actions/workflows/ci.yml)
+[![CI](https://github.com/lilith/whereat/actions/workflows/ci.yml/badge.svg)](https://github.com/lilith/whereat/actions/workflows/ci.yml)
 [![Crates.io](https://img.shields.io/crates/v/whereat.svg)](https://crates.io/crates/whereat)
 [![Documentation](https://docs.rs/whereat/badge.svg)](https://docs.rs/whereat)
-[![codecov](https://codecov.io/gh/imazen/whereat/branch/main/graph/badge.svg)](https://codecov.io/gh/imazen/whereat)
+[![codecov](https://codecov.io/gh/lilith/whereat/branch/main/graph/badge.svg)](https://codecov.io/gh/lilith/whereat)
 [![License](https://img.shields.io/crates/l/whereat.svg)](LICENSE)
 
 # Why `whereat`? 
