@@ -8,7 +8,9 @@
 
 **Production error tracing without debuginfo, panic, or overhead.**
 
-Replace `?` with `.at()?` and get async-friendly stacktraces with GitHub links—in 40 nanoseconds.
+*After a decade of distributing server binaries, I'm finally extracting this approach into its own crate!*
+
+In production, you need to immediately know where the bug is `at()` — without panic!, debuginfo, or overhead. Just replace `?` with `.at()?` in your call tree to get beautiful build-time & async-friendly stacktraces with GitHub links.
 
 ```
 Error: UserNotFound
@@ -18,6 +20,8 @@ Error: UserNotFound
       ╰─ in handle_request
    at myapp @ https://github.com/you/myapp/blob/a1b2c3d/src/main.rs#L23
 ```
+
+Compatible with plain enums, errors, structs, thiserror, anyhow, or any type with `Debug`. No changes to your error types required!
 
 ## Performance
 
@@ -50,42 +54,76 @@ backtrace crate         ██████████████████�
 ## Quick Start
 
 ```rust
-whereat::define_at_crate_info!();  // Once in lib.rs/main.rs
+// In lib.rs or main.rs - required for at!() and at_crate!() macros
+whereat::define_at_crate_info!();
 
 use whereat::{At, ResultAtExt, at};
 
 #[derive(Debug)]
-enum MyError { NotFound, InvalidInput }
+enum MyError {
+    NotFound,
+    InvalidInput(String),
+}
 
-fn find_user(id: u64) -> Result<User, At<MyError>> {
+fn find_user(id: u64) -> Result<String, At<MyError>> {
     if id == 0 {
-        return Err(at!(MyError::InvalidInput));
+        return Err(at!(MyError::InvalidInput("id cannot be zero".into())));
     }
     Err(at!(MyError::NotFound))
 }
 
-fn handle(id: u64) -> Result<User, At<MyError>> {
-    find_user(id).at_str("looking up user")?  // Add context
+fn process(id: u64) -> Result<String, At<MyError>> {
+    find_user(id).at_str("looking up user")?;  // Adds context
+    Ok("done".into())
 }
 ```
 
-## Why whereat?
+For workspace crates: `whereat::define_at_crate_info!(path = "crates/mylib/");`
 
-- **40ns per error** — 63x faster than anyhow with `RUST_BACKTRACE=1`
-- **Zero cost on Ok** — No allocation until an error occurs
-- **Tiny footprint** — `At<E>` is `sizeof(E) + 8` bytes
-- **Async-friendly** — Uses `#[track_caller]`, works across `.await`
-- **GitHub links** — Traces link to exact commit and line number
-- **Works with anything** — thiserror, anyhow, plain enums, any `Debug` type
-- **no_std + alloc** — Works everywhere
+## Best Practices
+
+**DO: Keep your hot loops zero-alloc**
+- You do NOT need At<> inside hot loops. Defer tracing until you exit.
+- `.at_skipped_frames()` adds a `[...]` marker to indicate frames were skipped.
+
+**DO: Halve allocations with tinyvec**
+- Features `_tinyvec-128-bytes` or `_tinyvec-256-bytes` give you 12 or 28 inline stacktrace slots without a 2nd allocation.
+
+**DO: Use `at_crate!()` at crate boundaries**
+- When consuming errors from other crates, this ensures backtraces show `myapp @ src/lib.rs:42` instead of confusing paths.
+
+**DO: Feel free to add ergonomic aliases**
+- `type MyError = At<MyInternalError>` works perfectly.
+
+## Design Philosophy
+
+**You define your own error types.** whereat doesn't impose any structure on your errors — use enums, structs, or whatever suits your domain. whereat just wraps them in `At<E>` to add location+context+crate tracking.
+
+This means you can:
+- Use `thiserror` for ergonomic `Display`/`From` impls, or `anyhow`
+- Use any enum or struct that implements `Debug`
+- Define type aliases like `type MyError = At<BaseError>`
+- Access your error via `.error()` or deref
+- Support nesting with `core::error::Error::source()`
+
+## Features
+
+- **Small sizeof**: `At<E>` is only `sizeof(E) + 8` bytes (one pointer for boxed trace)
+- **Zero allocation on Ok path**: No heap allocation until an error occurs
+- **Ergonomic API**: `.at()` on Results, `.start_at()` on errors, `.map_err(at)` for conversions
+- **Context options**: `.at_str("msg")`, `.at_fn(|| {})`, `.at_debug(|| data)`, `.at_string(|| format!(...))`
+- **Cross-crate tracing**: `at!()` and `at_crate!()` macros capture crate info for GitHub links
+- **Equality/Hashing**: `PartialEq`, `Eq`, `Hash` compare only the error, not the trace
+- **no_std compatible**: Works with just `core` + `alloc`
+- **Fallible allocations**: Vec/String ops use `try_reserve` and silently fail on OOM
 
 ## Adding Context
 
 ```rust
 result.at()?                           // Just add location
 result.at_str("loading config")?       // Static message
-result.at_string(|| format!("id={}", id))?  // Dynamic message
-result.at_debug(|| request_info)?      // Attach debug data
+result.at_string(|| format!("id={}", id))?  // Dynamic message (lazy)
+result.at_debug(|| request_info)?      // Attach debug data (lazy)
 result.at_fn(|| {})?                   // Capture function name
 ```
 
@@ -102,7 +140,7 @@ fn call_external() -> Result<(), At<ExternalError>> {
 }
 ```
 
-This ensures traces show `myapp @ src/lib.rs:42` instead of confusing paths.
+This ensures traces show `myapp @ src/lib.rs:42` instead of confusing paths from dependencies.
 
 ## Crate Metadata
 
@@ -136,15 +174,6 @@ pub(crate) fn at_crate_info() -> &'static AtCrateInfo {
 }
 ```
 
-## Design
-
-**You define your error types.** whereat just wraps them in `At<E>` to add tracing.
-
-- Works with `thiserror`, `anyhow`, plain enums, or any `Debug` type
-- `At<E>` dereferences to `E` — use `.error()` for explicit access
-- `PartialEq`/`Hash` compare only the error, not the trace
-- Type alias friendly: `type MyError = At<InternalError>`
-
 ## Embedded Traces
 
 For full control, embed `AtTrace` directly in your error type:
@@ -171,7 +200,7 @@ impl AtTraceable for MyError {
 Don't trace inside hot loops. Defer until you exit:
 
 ```rust
-fn process_batch(items: &[Item]) -> Result<(), At<MyError>> {
+fn process_batch(items: &[Item]) -> Result<(), MyError> {
     for item in items {
         process_one(item)?;  // Plain Result here, no At<>
     }
@@ -183,6 +212,8 @@ fn caller() -> Result<(), At<MyError>> {
     Ok(())
 }
 ```
+
+Use `.at_skipped_frames()` to add a `[...]` marker when you know frames were skipped.
 
 ## License
 
