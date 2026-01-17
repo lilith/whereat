@@ -62,12 +62,12 @@ fn test_sizeof_trace() {
     // - tinyvec-512-bytes: 512 bytes (60 slots)
 
     #[cfg(not(any(
-        feature = "tinyvec-64-bytes",
-        feature = "tinyvec-128-bytes",
-        feature = "tinyvec-256-bytes",
-        feature = "tinyvec-512-bytes",
-        feature = "smallvec-128-bytes",
-        feature = "smallvec-256-bytes"
+        feature = "_tinyvec-64-bytes",
+        feature = "_tinyvec-128-bytes",
+        feature = "_tinyvec-256-bytes",
+        feature = "_tinyvec-512-bytes",
+        feature = "_smallvec-128-bytes",
+        feature = "_smallvec-256-bytes"
     )))]
     assert_eq!(
         trace_size, 40,
@@ -75,12 +75,12 @@ fn test_sizeof_trace() {
     );
 
     #[cfg(all(
-        feature = "tinyvec-64-bytes",
+        feature = "_tinyvec-64-bytes",
         not(any(
-            feature = "tinyvec-128-bytes",
-            feature = "tinyvec-256-bytes",
-            feature = "smallvec-128-bytes",
-            feature = "smallvec-256-bytes"
+            feature = "_tinyvec-128-bytes",
+            feature = "_tinyvec-256-bytes",
+            feature = "_smallvec-128-bytes",
+            feature = "_smallvec-256-bytes"
         ))
     ))]
     assert_eq!(
@@ -89,8 +89,8 @@ fn test_sizeof_trace() {
     );
 
     #[cfg(all(
-        any(feature = "tinyvec-128-bytes", feature = "smallvec-128-bytes"),
-        not(any(feature = "tinyvec-256-bytes", feature = "smallvec-256-bytes"))
+        any(feature = "_tinyvec-128-bytes", feature = "_smallvec-128-bytes"),
+        not(any(feature = "_tinyvec-256-bytes", feature = "_smallvec-256-bytes"))
     ))]
     assert_eq!(
         trace_size, 128,
@@ -98,7 +98,7 @@ fn test_sizeof_trace() {
     );
 
     // smallvec-256-bytes takes precedence over everything
-    #[cfg(feature = "smallvec-256-bytes")]
+    #[cfg(feature = "_smallvec-256-bytes")]
     assert_eq!(
         trace_size, 256,
         "AtTrace with smallvec-256-bytes should be exactly 256 bytes"
@@ -106,11 +106,11 @@ fn test_sizeof_trace() {
 
     // tinyvec-256-bytes only if no smallvec and no tinyvec-512
     #[cfg(all(
-        feature = "tinyvec-256-bytes",
+        feature = "_tinyvec-256-bytes",
         not(any(
-            feature = "smallvec-128-bytes",
-            feature = "smallvec-256-bytes",
-            feature = "tinyvec-512-bytes"
+            feature = "_smallvec-128-bytes",
+            feature = "_smallvec-256-bytes",
+            feature = "_tinyvec-512-bytes"
         ))
     ))]
     assert_eq!(
@@ -120,8 +120,8 @@ fn test_sizeof_trace() {
 
     // tinyvec-512-bytes only if no smallvec features
     #[cfg(all(
-        feature = "tinyvec-512-bytes",
-        not(any(feature = "smallvec-128-bytes", feature = "smallvec-256-bytes"))
+        feature = "_tinyvec-512-bytes",
+        not(any(feature = "_smallvec-128-bytes", feature = "_smallvec-256-bytes"))
     ))]
     assert_eq!(
         trace_size, 512,

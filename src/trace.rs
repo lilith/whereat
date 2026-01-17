@@ -35,61 +35,61 @@ type LocationElem = Option<&'static Location<'static>>;
 
 /// Stack-first location storage with 4 inline slots (tinyvec-64-bytes: sizeof(AtTrace) ≤ 64).
 #[cfg(all(
-    feature = "tinyvec-64-bytes",
-    not(any(feature = "tinyvec-128-bytes", feature = "tinyvec-256-bytes"))
+    feature = "_tinyvec-64-bytes",
+    not(any(feature = "_tinyvec-128-bytes", feature = "_tinyvec-256-bytes"))
 ))]
 type LocationVec = tinyvec::TinyVec<[LocationElem; 4]>;
 
 /// Stack-first location storage with 12 inline slots (tinyvec-128-bytes: sizeof(AtTrace) ≤ 128).
-#[cfg(all(feature = "tinyvec-128-bytes", not(feature = "tinyvec-256-bytes")))]
+#[cfg(all(feature = "_tinyvec-128-bytes", not(feature = "_tinyvec-256-bytes")))]
 type LocationVec = tinyvec::TinyVec<[LocationElem; 12]>;
 
 /// Stack-first location storage with 28 inline slots (tinyvec-256-bytes: sizeof(AtTrace) ≤ 256).
-#[cfg(all(feature = "tinyvec-256-bytes", not(feature = "tinyvec-512-bytes")))]
+#[cfg(all(feature = "_tinyvec-256-bytes", not(feature = "_tinyvec-512-bytes")))]
 type LocationVec = tinyvec::TinyVec<[LocationElem; 28]>;
 
 /// Stack-first location storage with 60 inline slots (tinyvec-512-bytes: sizeof(AtTrace) ≤ 512).
-#[cfg(all(feature = "tinyvec-512-bytes", not(feature = "smallvec-128-bytes")))]
+#[cfg(all(feature = "_tinyvec-512-bytes", not(feature = "_smallvec-128-bytes")))]
 type LocationVec = tinyvec::TinyVec<[LocationElem; 60]>;
 
 /// Stack-first location storage with 12 inline slots using smallvec.
-#[cfg(all(feature = "smallvec-128-bytes", not(feature = "smallvec-256-bytes")))]
+#[cfg(all(feature = "_smallvec-128-bytes", not(feature = "_smallvec-256-bytes")))]
 type LocationVec = smallvec::SmallVec<[LocationElem; 12]>;
 
 /// Stack-first location storage with 28 inline slots using smallvec.
-#[cfg(feature = "smallvec-256-bytes")]
+#[cfg(feature = "_smallvec-256-bytes")]
 type LocationVec = smallvec::SmallVec<[LocationElem; 28]>;
 
 /// Heap-allocated location storage (default, no tinyvec/smallvec feature).
 #[cfg(not(any(
-    feature = "tinyvec-64-bytes",
-    feature = "tinyvec-128-bytes",
-    feature = "tinyvec-256-bytes",
-    feature = "tinyvec-512-bytes",
-    feature = "smallvec-128-bytes",
-    feature = "smallvec-256-bytes"
+    feature = "_tinyvec-64-bytes",
+    feature = "_tinyvec-128-bytes",
+    feature = "_tinyvec-256-bytes",
+    feature = "_tinyvec-512-bytes",
+    feature = "_smallvec-128-bytes",
+    feature = "_smallvec-256-bytes"
 )))]
 type LocationVec = Vec<LocationElem>;
 
 /// Default capacity for Vec-based storage. Avoids reallocations for typical traces.
 #[cfg(not(any(
-    feature = "tinyvec-64-bytes",
-    feature = "tinyvec-128-bytes",
-    feature = "tinyvec-256-bytes",
-    feature = "tinyvec-512-bytes",
-    feature = "smallvec-128-bytes",
-    feature = "smallvec-256-bytes"
+    feature = "_tinyvec-64-bytes",
+    feature = "_tinyvec-128-bytes",
+    feature = "_tinyvec-256-bytes",
+    feature = "_tinyvec-512-bytes",
+    feature = "_smallvec-128-bytes",
+    feature = "_smallvec-256-bytes"
 )))]
 const DEFAULT_LOCATION_CAPACITY: usize = 12;
 
 /// Create a new LocationVec with appropriate default capacity.
 #[cfg(not(any(
-    feature = "tinyvec-64-bytes",
-    feature = "tinyvec-128-bytes",
-    feature = "tinyvec-256-bytes",
-    feature = "tinyvec-512-bytes",
-    feature = "smallvec-128-bytes",
-    feature = "smallvec-256-bytes"
+    feature = "_tinyvec-64-bytes",
+    feature = "_tinyvec-128-bytes",
+    feature = "_tinyvec-256-bytes",
+    feature = "_tinyvec-512-bytes",
+    feature = "_smallvec-128-bytes",
+    feature = "_smallvec-256-bytes"
 )))]
 #[inline]
 fn location_vec_new() -> LocationVec {
@@ -98,12 +98,12 @@ fn location_vec_new() -> LocationVec {
 
 /// Create a new LocationVec (tinyvec/smallvec version - no pre-allocation needed).
 #[cfg(any(
-    feature = "tinyvec-64-bytes",
-    feature = "tinyvec-128-bytes",
-    feature = "tinyvec-256-bytes",
-    feature = "tinyvec-512-bytes",
-    feature = "smallvec-128-bytes",
-    feature = "smallvec-256-bytes"
+    feature = "_tinyvec-64-bytes",
+    feature = "_tinyvec-128-bytes",
+    feature = "_tinyvec-256-bytes",
+    feature = "_tinyvec-512-bytes",
+    feature = "_smallvec-128-bytes",
+    feature = "_smallvec-256-bytes"
 ))]
 #[inline]
 fn location_vec_new() -> LocationVec {
@@ -141,12 +141,12 @@ pub(crate) fn try_box<T>(value: T) -> Option<Box<T>> {
 /// Try to push a location onto a LocationVec, returning false on allocation failure.
 /// For Vec: uses try_reserve. For TinyVec/SmallVec: spills to heap if needed.
 #[cfg(not(any(
-    feature = "tinyvec-64-bytes",
-    feature = "tinyvec-128-bytes",
-    feature = "tinyvec-256-bytes",
-    feature = "tinyvec-512-bytes",
-    feature = "smallvec-128-bytes",
-    feature = "smallvec-256-bytes"
+    feature = "_tinyvec-64-bytes",
+    feature = "_tinyvec-128-bytes",
+    feature = "_tinyvec-256-bytes",
+    feature = "_tinyvec-512-bytes",
+    feature = "_smallvec-128-bytes",
+    feature = "_smallvec-256-bytes"
 )))]
 #[inline]
 fn try_push_location(vec: &mut LocationVec, elem: LocationElem) -> bool {
@@ -160,12 +160,12 @@ fn try_push_location(vec: &mut LocationVec, elem: LocationElem) -> bool {
 /// Try to push a location onto a LocationVec (TinyVec/SmallVec version).
 /// Spills to heap if inline capacity exceeded.
 #[cfg(any(
-    feature = "tinyvec-64-bytes",
-    feature = "tinyvec-128-bytes",
-    feature = "tinyvec-256-bytes",
-    feature = "tinyvec-512-bytes",
-    feature = "smallvec-128-bytes",
-    feature = "smallvec-256-bytes"
+    feature = "_tinyvec-64-bytes",
+    feature = "_tinyvec-128-bytes",
+    feature = "_tinyvec-256-bytes",
+    feature = "_tinyvec-512-bytes",
+    feature = "_smallvec-128-bytes",
+    feature = "_smallvec-256-bytes"
 ))]
 #[inline]
 fn try_push_location(vec: &mut LocationVec, elem: LocationElem) -> bool {

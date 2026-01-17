@@ -11,7 +11,7 @@
 //! 8. panic+catch_unwind - panic-based error handling
 //!
 //! Run with: cargo bench --bench nested_loops
-//! Compare tinyvec: cargo bench --bench nested_loops --features tinyvec-64-bytes
+//! Compare tinyvec: cargo bench --bench nested_loops --features _tinyvec-64-bytes
 
 // Allow unused functions - these are kept for potential future frame-depth comparison benchmarks
 #![allow(dead_code)]

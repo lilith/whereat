@@ -11,18 +11,13 @@ categories = ["rust-patterns", "no-std"]
 
 [features]
 default = []
-# Use tinyvec with 4 inline slots (sizeof(AtTrace) = 64 bytes, spills to heap)
-tinyvec-64-bytes = ["dep:tinyvec"]
-# Use tinyvec with 12 inline slots (sizeof(AtTrace) = 128 bytes, spills to heap)
-tinyvec-128-bytes = ["dep:tinyvec"]
-# Use tinyvec with 28 inline slots (sizeof(AtTrace) = 256 bytes, spills to heap)
-tinyvec-256-bytes = ["dep:tinyvec"]
-# Use tinyvec with 60 inline slots (sizeof(AtTrace) = 512 bytes, spills to heap)
-tinyvec-512-bytes = ["dep:tinyvec"]
-# Use smallvec with 12 inline slots (sizeof(AtTrace) = 128 bytes, spills to heap)
-smallvec-128-bytes = ["dep:smallvec"]
-# Use smallvec with 28 inline slots (sizeof(AtTrace) = 256 bytes, spills to heap)
-smallvec-256-bytes = ["dep:smallvec"]
+# Internal/unstable features - prefixed with _ to indicate not part of public API
+_tinyvec-64-bytes = ["dep:tinyvec"]
+_tinyvec-128-bytes = ["dep:tinyvec"]
+_tinyvec-256-bytes = ["dep:tinyvec"]
+_tinyvec-512-bytes = ["dep:tinyvec"]
+_smallvec-128-bytes = ["dep:smallvec"]
+_smallvec-256-bytes = ["dep:smallvec"]
 
 [dependencies]
 tinyvec = { version = "1.9", optional = true, default-features = false, features = ["alloc"] }

@@ -18,12 +18,12 @@ clippy:
 test:
     cargo test
 
-# Run tests with all feature combinations
+# Run tests with all feature combinations (internal features)
 test-all:
     cargo test
-    cargo test --features tinyvec-64-bytes
-    cargo test --features tinyvec-128-bytes
-    cargo test --features tinyvec-256-bytes
+    cargo test --features _tinyvec-64-bytes
+    cargo test --features _tinyvec-128-bytes
+    cargo test --features _tinyvec-256-bytes
 
 # Check for outdated dependencies
 outdated:
@@ -61,13 +61,13 @@ wsl_path := "\\\\wsl.localhost\\Ubuntu-22.04"
 bench-nested:
     cargo bench --bench nested_loops
 
-# Run frame benchmarks (quick comparison)
+# Run frame benchmarks (quick comparison, internal features)
 bench-frames frames="40":
     @echo "=== Default (heap) ===" && cargo run --release --example frames_{{frames}}
-    @echo "=== tinyvec-128 (12 slots) ===" && cargo run --release --example frames_{{frames}} --features tinyvec-128-bytes
-    @echo "=== smallvec-128 (12 slots) ===" && cargo run --release --example frames_{{frames}} --features smallvec-128-bytes
-    @echo "=== tinyvec-256 (28 slots) ===" && cargo run --release --example frames_{{frames}} --features tinyvec-256-bytes
-    @echo "=== smallvec-256 (28 slots) ===" && cargo run --release --example frames_{{frames}} --features smallvec-256-bytes
+    @echo "=== tinyvec-128 (12 slots) ===" && cargo run --release --example frames_{{frames}} --features _tinyvec-128-bytes
+    @echo "=== smallvec-128 (12 slots) ===" && cargo run --release --example frames_{{frames}} --features _smallvec-128-bytes
+    @echo "=== tinyvec-256 (28 slots) ===" && cargo run --release --example frames_{{frames}} --features _tinyvec-256-bytes
+    @echo "=== smallvec-256 (28 slots) ===" && cargo run --release --example frames_{{frames}} --features _smallvec-256-bytes
 
 # Run 40-frame benchmark (shortcut)
 bench-40: (bench-frames "40")
