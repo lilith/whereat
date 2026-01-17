@@ -83,3 +83,19 @@ bench-win:
 # Run specific benchmark on Windows host
 bench-win-group group:
     {{pwsh}} -NoProfile -Command "\$env:CARGO_INCREMENTAL=0; Set-Location '{{wsl_path}}{{justfile_directory()}}'; cargo bench --bench nested_loops -- '{{group}}'"
+
+# Run single_error benchmarks with RUST_BACKTRACE=1 (for accurate anyhow/panic comparison)
+bench-backtrace:
+    @echo "=== Linux (RUST_BACKTRACE=0) ==="
+    RUST_BACKTRACE=0 cargo bench --bench nested_loops "single_error" 2>&1 | grep -E "^single_error|time:"
+    @echo ""
+    @echo "=== Linux (RUST_BACKTRACE=1) ==="
+    RUST_BACKTRACE=1 cargo bench --bench nested_loops "single_error" 2>&1 | grep -E "^single_error|time:"
+
+# Run single_error benchmarks on Windows with RUST_BACKTRACE variants
+bench-backtrace-win:
+    @echo "=== Windows (RUST_BACKTRACE=0) ==="
+    {{pwsh}} -NoProfile -Command "\$env:CARGO_INCREMENTAL=0; \$env:RUST_BACKTRACE=0; Set-Location '{{wsl_path}}{{justfile_directory()}}'; cargo bench --bench nested_loops 'single_error'"
+    @echo ""
+    @echo "=== Windows (RUST_BACKTRACE=1) ==="
+    {{pwsh}} -NoProfile -Command "\$env:CARGO_INCREMENTAL=0; \$env:RUST_BACKTRACE=1; Set-Location '{{wsl_path}}{{justfile_directory()}}'; cargo bench --bench nested_loops 'single_error'"
