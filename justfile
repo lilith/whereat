@@ -72,26 +72,14 @@ bench-frames frames="40":
 # Run 40-frame benchmark (shortcut)
 bench-40: (bench-frames "40")
 
+# Run tests on Windows host (from WSL)
+test-win:
+    {{pwsh}} -NoProfile -Command "\$env:CARGO_INCREMENTAL=0; Set-Location '{{wsl_path}}{{justfile_directory()}}'; cargo test"
+
 # Run benchmarks on Windows host (from WSL)
 bench-win:
-    {{pwsh}} -NoProfile -Command "Set-Location '{{wsl_path}}{{justfile_directory()}}'; cargo bench --bench nested_loops"
-
-# Run frame benchmarks on Windows host (from WSL)
-bench-frames-win frames="40":
-    @echo "=== Default (heap) ==="
-    {{pwsh}} -NoProfile -Command "Set-Location '{{wsl_path}}{{justfile_directory()}}'; cargo run --release --example frames_{{frames}}"
-    @echo "=== tinyvec-128 (12 slots) ==="
-    {{pwsh}} -NoProfile -Command "Set-Location '{{wsl_path}}{{justfile_directory()}}'; cargo run --release --example frames_{{frames}} --features tinyvec-128-bytes"
-    @echo "=== smallvec-128 (12 slots) ==="
-    {{pwsh}} -NoProfile -Command "Set-Location '{{wsl_path}}{{justfile_directory()}}'; cargo run --release --example frames_{{frames}} --features smallvec-128-bytes"
-    @echo "=== tinyvec-256 (28 slots) ==="
-    {{pwsh}} -NoProfile -Command "Set-Location '{{wsl_path}}{{justfile_directory()}}'; cargo run --release --example frames_{{frames}} --features tinyvec-256-bytes"
-    @echo "=== smallvec-256 (28 slots) ==="
-    {{pwsh}} -NoProfile -Command "Set-Location '{{wsl_path}}{{justfile_directory()}}'; cargo run --release --example frames_{{frames}} --features smallvec-256-bytes"
-
-# Run 40-frame benchmark on Windows (shortcut)
-bench-40-win: (bench-frames-win "40")
+    {{pwsh}} -NoProfile -Command "\$env:CARGO_INCREMENTAL=0; Set-Location '{{wsl_path}}{{justfile_directory()}}'; cargo bench --bench nested_loops"
 
 # Run specific benchmark on Windows host
 bench-win-group group:
-    {{pwsh}} -NoProfile -Command "Set-Location '{{wsl_path}}{{justfile_directory()}}'; cargo bench --bench nested_loops -- '{{group}}'"
+    {{pwsh}} -NoProfile -Command "\$env:CARGO_INCREMENTAL=0; Set-Location '{{wsl_path}}{{justfile_directory()}}'; cargo bench --bench nested_loops -- '{{group}}'"

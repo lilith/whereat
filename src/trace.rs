@@ -71,6 +71,45 @@ type LocationVec = smallvec::SmallVec<[LocationElem; 28]>;
 )))]
 type LocationVec = Vec<LocationElem>;
 
+/// Default capacity for Vec-based storage. Avoids reallocations for typical traces.
+#[cfg(not(any(
+    feature = "tinyvec-64-bytes",
+    feature = "tinyvec-128-bytes",
+    feature = "tinyvec-256-bytes",
+    feature = "tinyvec-512-bytes",
+    feature = "smallvec-128-bytes",
+    feature = "smallvec-256-bytes"
+)))]
+const DEFAULT_LOCATION_CAPACITY: usize = 12;
+
+/// Create a new LocationVec with appropriate default capacity.
+#[cfg(not(any(
+    feature = "tinyvec-64-bytes",
+    feature = "tinyvec-128-bytes",
+    feature = "tinyvec-256-bytes",
+    feature = "tinyvec-512-bytes",
+    feature = "smallvec-128-bytes",
+    feature = "smallvec-256-bytes"
+)))]
+#[inline]
+fn location_vec_new() -> LocationVec {
+    Vec::with_capacity(DEFAULT_LOCATION_CAPACITY)
+}
+
+/// Create a new LocationVec (tinyvec/smallvec version - no pre-allocation needed).
+#[cfg(any(
+    feature = "tinyvec-64-bytes",
+    feature = "tinyvec-128-bytes",
+    feature = "tinyvec-256-bytes",
+    feature = "tinyvec-512-bytes",
+    feature = "smallvec-128-bytes",
+    feature = "smallvec-256-bytes"
+))]
+#[inline]
+fn location_vec_new() -> LocationVec {
+    LocationVec::new()
+}
+
 // ============================================================================
 // ContextVec - lazily-allocated context storage
 // ============================================================================
@@ -217,7 +256,7 @@ impl AtTrace {
     #[inline]
     pub fn new() -> Self {
         Self {
-            locations: LocationVec::new(),
+            locations: location_vec_new(),
             crate_info: None,
             contexts: context_vec_new(),
         }

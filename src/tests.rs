@@ -510,8 +510,12 @@ fn test_trace_format_structure() {
     assert!(debug.contains("╰─ in level2"));
     assert!(debug.contains("╰─ in level3"));
 
-    // - Location lines present
-    assert!(debug.contains("at src/tests.rs:"));
+    // - Location lines present (path separator varies by platform)
+    assert!(
+        debug.contains("at src/tests.rs:") || debug.contains("at src\\tests.rs:"),
+        "Debug output should contain location: {}",
+        debug
+    );
 
     // Verify order: level2 context before level3 context (oldest first)
     let level2_pos = debug.find("in level2").unwrap();
@@ -540,11 +544,11 @@ fn test_trace_origin_comes_first() {
     // and the context "wrapping" should come after
     let lines: Vec<&str> = debug.lines().collect();
 
-    // Find first "at" line
+    // Find first "at" line (path separator varies by platform)
     let first_at = lines
         .iter()
-        .find(|l| l.contains("at src/tests.rs:"))
-        .unwrap();
+        .find(|l| l.contains("at src/tests.rs:") || l.contains("at src\\tests.rs:"))
+        .expect("should find location line in debug output");
 
     // It should be the origin location (before the wrapper's context)
     // The origin .start_at() call will be at a lower line than wrapper's .at_str()
