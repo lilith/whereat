@@ -80,6 +80,26 @@ fn process(id: u64) -> Result<String, At<MyError>> {
 
 For workspace crates: `whereat::define_at_crate_info!(path = "crates/mylib/");`
 
+## API Overview
+
+**Starting a trace:**
+
+| Function | Works on | Crate info | Use when |
+|----------|----------|------------|----------|
+| `at!(err)` | Any type | ✅ GitHub links | Default choice with `define_at_crate_info!()` |
+| `at(err)` | Any type | ❌ None | Simple usage, no links needed |
+| `err.start_at()` | `Error` types | ❌ None | Chaining on error values |
+
+**Extending a trace** (on `Result<T, At<E>>`):
+
+| Method | Effect |
+|--------|--------|
+| `.at()` | Add new frame at caller's location |
+| `.at_str("msg")` | Add context to last frame |
+| `.map_err_at(\|e\| ...)` | Convert error, preserve trace |
+
+See [Adding Context](#adding-context) for the full method list.
+
 ## Best Practices
 
 **DO: Keep your hot loops zero-alloc**
@@ -115,15 +135,32 @@ This means you can:
 
 ## Adding Context
 
+**Add a new location frame:**
 ```rust
-result.at()?                              // Just add location
-result.at_str("loading config")?          // Static message (zero-cost)
-result.at_string(|| format!("id={}", id))?  // Dynamic message (lazy)
-result.at_data(|| path_context)?          // Typed context via Display (lazy)
-result.at_debug(|| request_info)?         // Typed context via Debug (lazy)
-result.at_fn(|| {})?                      // Capture function name
-result.at_named("validation")?            // Custom phase/checkpoint label
-result.at_error(io_err)?                  // Attach a source error
+result.at()?                    // New frame with just file:line:col
+result.at_fn(|| {})?            // New frame + captures function name
+result.at_named("validation")?  // New frame + custom label
+```
+
+**Add context to the last frame** (no new location):
+```rust
+result.at_str("loading config")?            // Static string (zero-cost)
+result.at_string(|| format!("id={}", id))?  // Dynamic string (lazy)
+result.at_data(|| path_context)?            // Typed via Display (lazy)
+result.at_debug(|| request_info)?           // Typed via Debug (lazy)
+result.at_error(io_err)?                    // Attach a source error
+```
+
+If the trace is empty, context methods create a frame first. Example:
+
+```rust
+// One frame with two contexts attached
+let e = at!(MyError).at_str("a").at_str("b");
+assert_eq!(e.frame_count(), 1);
+
+// Two frames: at!() creates first, .at() creates second
+let e = at!(MyError).at().at_str("on second frame");
+assert_eq!(e.frame_count(), 2);
 ```
 
 ## Cross-Crate Tracing
