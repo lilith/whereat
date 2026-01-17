@@ -1140,6 +1140,7 @@ fn bench_single_at_vs_at_fn(c: &mut Criterion) {
 
 criterion_group!(
     benches,
+    bench_fair_10_frames,
     bench_reproducible,
     bench_at_vs_at_fn,
     bench_single_at_vs_at_fn,
@@ -1367,6 +1368,52 @@ fn plain_level_1(i: u32, fail_at: u32) -> Result<u32, U64Error> {
     plain_level_2(i, fail_at).map(|x| black_box(x + 1))
 }
 
+// 10-level deep call chain for panic
+#[inline(never)]
+fn panic_level_10(i: u32, fail_at: u32) -> u32 {
+    if i == fail_at {
+        panic!("failed at {}", i);
+    }
+    black_box(i * 2)
+}
+
+#[inline(never)]
+fn panic_level_9(i: u32, fail_at: u32) -> u32 {
+    black_box(panic_level_10(i, fail_at) + 1)
+}
+#[inline(never)]
+fn panic_level_8(i: u32, fail_at: u32) -> u32 {
+    black_box(panic_level_9(i, fail_at) + 1)
+}
+#[inline(never)]
+fn panic_level_7(i: u32, fail_at: u32) -> u32 {
+    black_box(panic_level_8(i, fail_at) + 1)
+}
+#[inline(never)]
+fn panic_level_6(i: u32, fail_at: u32) -> u32 {
+    black_box(panic_level_7(i, fail_at) + 1)
+}
+#[inline(never)]
+fn panic_level_5(i: u32, fail_at: u32) -> u32 {
+    black_box(panic_level_6(i, fail_at) + 1)
+}
+#[inline(never)]
+fn panic_level_4(i: u32, fail_at: u32) -> u32 {
+    black_box(panic_level_5(i, fail_at) + 1)
+}
+#[inline(never)]
+fn panic_level_3(i: u32, fail_at: u32) -> u32 {
+    black_box(panic_level_4(i, fail_at) + 1)
+}
+#[inline(never)]
+fn panic_level_2(i: u32, fail_at: u32) -> u32 {
+    black_box(panic_level_3(i, fail_at) + 1)
+}
+#[inline(never)]
+fn panic_level_1(i: u32, fail_at: u32) -> Result<u32, Box<dyn std::any::Any + Send>> {
+    catch_unwind(AssertUnwindSafe(|| panic_level_2(i, fail_at)))
+}
+
 /// Fair comparison: 10 frames deep, same call structure
 fn bench_fair_10_frames(c: &mut Criterion) {
     let mut group = c.benchmark_group("fair_10fr");
@@ -1391,6 +1438,11 @@ fn bench_fair_10_frames(c: &mut Criterion) {
 
     group.bench_function("err_backtrace", |b| {
         b.iter(|| run_nested_loops(OUTER, INNER, FAIL_ALL, bt_level_1))
+    });
+
+    install_silent_panic_hook();
+    group.bench_function("err_panic", |b| {
+        b.iter(|| run_nested_loops(OUTER, INNER, FAIL_ALL, panic_level_1))
     });
 
     // === 0% error rate (happy path) ===

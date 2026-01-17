@@ -36,9 +36,16 @@ backtrace crate         ██████████████████�
 panic + catch_unwind    █████████████████ 1,300ns
 ```
 
+**Fair comparison (same 10-frame depth, 10k errors):**
+```text
+whereat .at()           ██ 656µs          ← 150x faster than backtrace
+panic + catch_unwind    ██████████████████████ 22ms
+backtrace crate         ██████████████████████████████████████████████████ 99ms
+```
+
 *anyhow/panic only capture backtraces when `RUST_BACKTRACE=1`. whereat always captures location.*
 
-*Linux x86_64. See `cargo bench --bench nested_loops` for full results.*
+*Linux x86_64. See `cargo bench --bench nested_loops "fair_10fr"` for full results.*
 
 ## Quick Start
 
