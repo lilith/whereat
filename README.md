@@ -178,95 +178,6 @@ fn call_external() -> Result<(), At<ExternalError>> {
 
 This ensures traces show `myapp @ src/lib.rs:42` instead of confusing paths from dependencies.
 
-## Crate Metadata
-
-### Compile-time
-
-```rust
-whereat::define_at_crate_info!(
-    path = "crates/mylib/",  // For workspace crates
-    meta = &[("team", "platform"), ("oncall", "team@example.com")],
-);
-```
-
-### Runtime
-
-For runtime-determined values (instance IDs, environment config), define your own `at_crate_info()` getter:
-
-```rust
-use std::sync::OnceLock;
-use whereat::AtCrateInfo;
-
-static CRATE_INFO: OnceLock<AtCrateInfo> = OnceLock::new();
-
-pub(crate) fn at_crate_info() -> &'static AtCrateInfo {
-    CRATE_INFO.get_or_init(|| {
-        AtCrateInfo::builder()
-            .name(env!("CARGO_PKG_NAME"))
-            .repo(option_env!("CARGO_PKG_REPOSITORY"))
-            .meta_owned(vec![
-                ("instance".into(), std::env::var("INSTANCE_ID").unwrap_or_default()),
-            ])
-            .build()
-    })
-}
-```
-
-The `_owned()` builder methods (`name_owned()`, `meta_owned()`, etc.) leak strings via `Box::leak` to get `'static` lifetime — appropriate for one-time initialization.
-
-### Link Formats
-
-By default, links use GitHub format. For other forges:
-
-```rust
-use whereat::{AtCrateInfo, GITLAB_LINK_FORMAT};
-
-static INFO: AtCrateInfo = AtCrateInfo::builder()
-    .name("mylib")
-    .repo(Some("https://gitlab.com/org/repo"))
-    .link_format(GITLAB_LINK_FORMAT)  // or GITEA_LINK_FORMAT, BITBUCKET_LINK_FORMAT
-    .build();
-```
-
-Or use `.link_format_auto()` to auto-detect from the repo URL.
-
-## Embedded Traces
-
-For full control, embed `AtTrace` directly in your error type:
-
-```rust
-use whereat::{AtTrace, AtTraceable, ResultAtTraceableExt};
-
-struct MyError {
-    kind: ErrorKind,
-    trace: AtTrace,
-}
-
-impl AtTraceable for MyError {
-    fn trace_mut(&mut self) -> &mut AtTrace { &mut self.trace }
-    fn trace(&self) -> Option<&AtTrace> { Some(&self.trace) }
-    fn fmt_message(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "{:?}", self.kind)
-    }
-}
-```
-
-**Storage options:**
-
-| Field Type | Size | When to use |
-|------------|------|-------------|
-| `AtTrace` | 40 bytes | Trace always captured at construction |
-| `Box<AtTrace>` | 8 bytes | Smaller error, trace always allocated |
-| `Option<Box<AtTrace>>` | 8 bytes | Lazy allocation on first `.at_*()` call |
-
-For `Option<Box<AtTrace>>`, implement `trace_mut` with lazy init:
-
-```rust
-fn trace_mut(&mut self) -> &mut AtTrace {
-    self.trace.get_or_insert_with(|| Box::new(AtTrace::new()))
-}
-```
-
 ## Hot Loops
 
 Don't trace inside hot loops. Defer until you exit:
@@ -285,6 +196,15 @@ fn caller() -> Result<(), At<MyError>> {
     Ok(())
 }
 ```
+
+## Advanced Usage
+
+See [ADVANCED.md](ADVANCED.md) for:
+- Embedded traces with `AtTraceable` trait
+- Custom storage options (inline vs boxed)
+- Complex workspace layouts
+- Link format customization (GitLab, Gitea, Bitbucket)
+- Inline storage features for reduced allocations
 
 ## License
 
