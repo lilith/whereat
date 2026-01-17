@@ -966,9 +966,168 @@ fn bench_reproducible(c: &mut Criterion) {
     }
 }
 
+// ============================================================================
+// Benchmark: at() vs at_fn() vs at().at_str()
+// ============================================================================
+
+/// Inner function returning At<E> with just .at()
+#[inline(never)]
+fn inner_at_only(i: u32, fail_at: u32) -> Result<u32, At<U64Error>> {
+    if i == fail_at {
+        Err(at(U64Error::InnerFailed(i as u64, fail_at as u64)))
+    } else {
+        Ok(i * 2)
+    }
+}
+
+#[inline(never)]
+fn middle_at_only(i: u32, fail_at: u32) -> Result<u32, At<U64Error>> {
+    inner_at_only(i, fail_at).at()
+}
+
+#[inline(never)]
+fn outer_at_only(i: u32, fail_at: u32) -> Result<u32, At<U64Error>> {
+    middle_at_only(i, fail_at).at()
+}
+
+/// Inner function returning At<E> with .at_fn()
+#[inline(never)]
+fn inner_at_fn(i: u32, fail_at: u32) -> Result<u32, At<U64Error>> {
+    if i == fail_at {
+        Err(at(U64Error::InnerFailed(i as u64, fail_at as u64)).at_fn(|| {}))
+    } else {
+        Ok(i * 2)
+    }
+}
+
+#[inline(never)]
+fn middle_at_fn(i: u32, fail_at: u32) -> Result<u32, At<U64Error>> {
+    inner_at_fn(i, fail_at).at_fn(|| {})
+}
+
+#[inline(never)]
+fn outer_at_fn(i: u32, fail_at: u32) -> Result<u32, At<U64Error>> {
+    middle_at_fn(i, fail_at).at_fn(|| {})
+}
+
+/// Inner function returning At<E> with .at().at_str()
+#[inline(never)]
+fn inner_at_str(i: u32, fail_at: u32) -> Result<u32, At<U64Error>> {
+    if i == fail_at {
+        Err(at(U64Error::InnerFailed(i as u64, fail_at as u64)).at().at_str("inner_at_str"))
+    } else {
+        Ok(i * 2)
+    }
+}
+
+#[inline(never)]
+fn middle_at_str(i: u32, fail_at: u32) -> Result<u32, At<U64Error>> {
+    inner_at_str(i, fail_at).at().at_str("middle_at_str")
+}
+
+#[inline(never)]
+fn outer_at_str(i: u32, fail_at: u32) -> Result<u32, At<U64Error>> {
+    middle_at_str(i, fail_at).at().at_str("outer_at_str")
+}
+
+fn bench_at_vs_at_fn(c: &mut Criterion) {
+    let mut group = c.benchmark_group("at_vs_at_fn");
+
+    const OUTER: u32 = 100;
+    const INNER: u32 = 100;
+    const FAIL_EVERY: u32 = 1; // 100% error rate to maximize the difference
+
+    // Plain enum baseline (no tracing)
+    group.bench_function("plain_u64", |b| {
+        b.iter(|| run_nested_loops(OUTER, INNER, FAIL_EVERY, outer_u64_plain))
+    });
+
+    // errat .at() only - file:line, 3 frames
+    group.bench_function("at_3fr", |b| {
+        b.iter(|| run_nested_loops(OUTER, INNER, FAIL_EVERY, outer_at_only))
+    });
+
+    // errat .at_fn() - file:line + function name, 4 frames (at + at_fn adds a frame)
+    group.bench_function("at_fn_4fr", |b| {
+        b.iter(|| run_nested_loops(OUTER, INNER, FAIL_EVERY, outer_at_fn))
+    });
+
+    // errat .at().at_str() - file:line + context string, 6 frames (at + at_str each add a frame)
+    group.bench_function("at_str_6fr", |b| {
+        b.iter(|| run_nested_loops(OUTER, INNER, FAIL_EVERY, outer_at_str))
+    });
+
+    // backtrace for comparison
+    group.bench_function("backtrace", |b| {
+        b.iter(|| run_nested_loops(OUTER, INNER, FAIL_EVERY, outer_backtrace))
+    });
+
+    group.finish();
+}
+
+/// Single error creation overhead comparison
+fn bench_single_at_vs_at_fn(c: &mut Criterion) {
+    let mut group = c.benchmark_group("single_at_vs_at_fn");
+
+    // Just creating an error (no trace)
+    group.bench_function("plain_u64", |b| {
+        b.iter(|| {
+            let err: Result<u32, U64Error> = Err(U64Error::InnerFailed(black_box(42), black_box(0)));
+            black_box(err)
+        })
+    });
+
+    // .at() - captures file:line (1 frame)
+    group.bench_function("at_1fr", |b| {
+        b.iter(|| {
+            let err = at(U64Error::InnerFailed(black_box(42), black_box(0)));
+            black_box(err)
+        })
+    });
+
+    // .at_fn() - captures file:line + function name (1 frame + context)
+    group.bench_function("at_fn_1fr", |b| {
+        b.iter(|| {
+            let err = at(U64Error::InnerFailed(black_box(42), black_box(0))).at_fn(|| {});
+            black_box(err)
+        })
+    });
+
+    // .at().at_str() - file:line + context string (1 frame + context)
+    group.bench_function("at_str_1fr", |b| {
+        b.iter(|| {
+            let err = at(U64Error::InnerFailed(black_box(42), black_box(0))).at_str("context");
+            black_box(err)
+        })
+    });
+
+    // .at().at_str() - file:line + context (2 frames, each with context)
+    group.bench_function("at_at_str_2fr", |b| {
+        b.iter(|| {
+            let err = at(U64Error::InnerFailed(black_box(42), black_box(0)))
+                .at()
+                .at_str("context");
+            black_box(err)
+        })
+    });
+
+    // backtrace for comparison
+    group.bench_function("backtrace", |b| {
+        b.iter(|| {
+            let err =
+                BacktraceError::new(StringError::InnerFailed(format!("at {}", black_box(42))));
+            black_box(err)
+        })
+    });
+
+    group.finish();
+}
+
 criterion_group!(
     benches,
     bench_reproducible,
+    bench_at_vs_at_fn,
+    bench_single_at_vs_at_fn,
     bench_nested_no_errors,
     bench_nested_1pct_errors,
     bench_nested_5pct_errors,

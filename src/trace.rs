@@ -45,14 +45,29 @@ type LocationVec = tinyvec::TinyVec<[LocationElem; 4]>;
 type LocationVec = tinyvec::TinyVec<[LocationElem; 12]>;
 
 /// Stack-first location storage with 28 inline slots (tinyvec-256-bytes: sizeof(AtTrace) ≤ 256).
-#[cfg(feature = "tinyvec-256-bytes")]
+#[cfg(all(feature = "tinyvec-256-bytes", not(feature = "tinyvec-512-bytes")))]
 type LocationVec = tinyvec::TinyVec<[LocationElem; 28]>;
 
-/// Heap-allocated location storage (default, no tinyvec feature).
+/// Stack-first location storage with 60 inline slots (tinyvec-512-bytes: sizeof(AtTrace) ≤ 512).
+#[cfg(all(feature = "tinyvec-512-bytes", not(feature = "smallvec-128-bytes")))]
+type LocationVec = tinyvec::TinyVec<[LocationElem; 60]>;
+
+/// Stack-first location storage with 12 inline slots using smallvec.
+#[cfg(all(feature = "smallvec-128-bytes", not(feature = "smallvec-256-bytes")))]
+type LocationVec = smallvec::SmallVec<[LocationElem; 12]>;
+
+/// Stack-first location storage with 28 inline slots using smallvec.
+#[cfg(feature = "smallvec-256-bytes")]
+type LocationVec = smallvec::SmallVec<[LocationElem; 28]>;
+
+/// Heap-allocated location storage (default, no tinyvec/smallvec feature).
 #[cfg(not(any(
     feature = "tinyvec-64-bytes",
     feature = "tinyvec-128-bytes",
-    feature = "tinyvec-256-bytes"
+    feature = "tinyvec-256-bytes",
+    feature = "tinyvec-512-bytes",
+    feature = "smallvec-128-bytes",
+    feature = "smallvec-256-bytes"
 )))]
 type LocationVec = Vec<LocationElem>;
 
@@ -85,11 +100,14 @@ pub(crate) fn try_box<T>(value: T) -> Option<Box<T>> {
 }
 
 /// Try to push a location onto a LocationVec, returning false on allocation failure.
-/// For Vec: uses try_reserve. For TinyVec: spills to heap if needed.
+/// For Vec: uses try_reserve. For TinyVec/SmallVec: spills to heap if needed.
 #[cfg(not(any(
     feature = "tinyvec-64-bytes",
     feature = "tinyvec-128-bytes",
-    feature = "tinyvec-256-bytes"
+    feature = "tinyvec-256-bytes",
+    feature = "tinyvec-512-bytes",
+    feature = "smallvec-128-bytes",
+    feature = "smallvec-256-bytes"
 )))]
 #[inline]
 fn try_push_location(vec: &mut LocationVec, elem: LocationElem) -> bool {
@@ -100,12 +118,15 @@ fn try_push_location(vec: &mut LocationVec, elem: LocationElem) -> bool {
     true
 }
 
-/// Try to push a location onto a LocationVec (TinyVec version).
-/// TinyVec spills to heap if inline capacity exceeded.
+/// Try to push a location onto a LocationVec (TinyVec/SmallVec version).
+/// Spills to heap if inline capacity exceeded.
 #[cfg(any(
     feature = "tinyvec-64-bytes",
     feature = "tinyvec-128-bytes",
-    feature = "tinyvec-256-bytes"
+    feature = "tinyvec-256-bytes",
+    feature = "tinyvec-512-bytes",
+    feature = "smallvec-128-bytes",
+    feature = "smallvec-256-bytes"
 ))]
 #[inline]
 fn try_push_location(vec: &mut LocationVec, elem: LocationElem) -> bool {
@@ -1084,6 +1105,60 @@ pub trait AtTraceable: Sized {
         self
     }
 
+    /// Add a location frame with the caller's function name as context.
+    ///
+    /// Captures both file:line:col AND the function name at zero runtime cost.
+    /// Pass an empty closure `|| {}` - its type includes the parent function name.
+    ///
+    /// ## Example
+    ///
+    /// ```rust
+    /// use errat::{AtTrace, AtTraceable};
+    ///
+    /// struct MyError {
+    ///     trace: AtTrace,
+    /// }
+    ///
+    /// impl AtTraceable for MyError {
+    ///     fn trace_mut(&mut self) -> &mut AtTrace { &mut self.trace }
+    ///     fn trace(&self) -> Option<&AtTrace> { Some(&self.trace) }
+    ///     fn fmt_message(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+    ///         write!(f, "my error")
+    ///     }
+    /// }
+    ///
+    /// impl MyError {
+    ///     #[track_caller]
+    ///     fn new() -> Self {
+    ///         Self { trace: AtTrace::capture() }
+    ///     }
+    /// }
+    ///
+    /// fn do_something() -> Result<(), MyError> {
+    ///     Err(MyError::new().at_fn(|| {}))  // Captures file:line + "do_something"
+    /// }
+    /// ```
+    #[track_caller]
+    #[inline]
+    fn at_fn<F: Fn()>(mut self, _marker: F) -> Self {
+        let full_name = core::any::type_name::<F>();
+        // Type looks like: "crate::module::function::{{closure}}"
+        // Strip "::{{closure}}" (13 chars)
+        let name = if full_name.ends_with("::{{closure}}") {
+            &full_name[..full_name.len() - 13]
+        } else {
+            full_name
+        };
+        let loc = Location::caller();
+        let trace = self.trace_mut();
+        // First push a new location frame
+        let _ = trace.try_push(loc);
+        // Then add function name context to that frame
+        let context = AtContext::FunctionName(name);
+        trace.try_add_context(loc, context);
+        self
+    }
+
     // ========================================================================
     // Trace manipulation methods
     // ========================================================================
@@ -1269,6 +1344,8 @@ impl<E: AtTraceable> fmt::Display for FullTraceDisplay<'_, E> {
                 for ctx in frame.contexts() {
                     if let Some(text) = ctx.as_text() {
                         write!(f, "\n        {}", text)?;
+                    } else if let Some(fn_name) = ctx.as_function_name() {
+                        write!(f, "\n        in {}", fn_name)?;
                     } else if let Some(err) = ctx.as_error() {
                         write!(f, "\n        caused by: {}", err)?;
                         // Write nested error chain

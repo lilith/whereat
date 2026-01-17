@@ -130,6 +130,48 @@ impl<E> At<E> {
         self
     }
 
+    /// Add a location frame with the caller's function name as context.
+    ///
+    /// Captures both file:line:col AND the function name at zero runtime cost.
+    /// Pass an empty closure `|| {}` - its type includes the parent function name.
+    ///
+    /// ## Example
+    ///
+    /// ```rust
+    /// use errat::{at, At};
+    ///
+    /// #[derive(Debug)]
+    /// enum MyError { NotFound }
+    ///
+    /// fn load_config() -> Result<(), At<MyError>> {
+    ///     Err(at(MyError::NotFound).at_fn(|| {}))
+    /// }
+    ///
+    /// // Output will include:
+    /// //     at src/lib.rs:10:5
+    /// //         in my_crate::load_config
+    /// ```
+    #[track_caller]
+    #[inline]
+    pub fn at_fn<F: Fn()>(mut self, _marker: F) -> Self {
+        let full_name = core::any::type_name::<F>();
+        // Type looks like: "crate::module::function::{{closure}}"
+        // Strip "::{{closure}}" (13 chars)
+        let name = if full_name.ends_with("::{{closure}}") {
+            &full_name[..full_name.len() - 13]
+        } else {
+            full_name
+        };
+        let loc = Location::caller();
+        let trace = self.trace.get_or_insert_mut();
+        // First push a new location frame
+        let _ = trace.try_push(loc);
+        // Then add function name context to that frame
+        let context = AtContext::FunctionName(name);
+        trace.try_add_context(loc, context);
+        self
+    }
+
     /// Add a static string context to the last location (or create one if empty).
     ///
     /// Zero-cost for static strings - just stores a pointer.
@@ -660,6 +702,7 @@ impl<E: fmt::Debug> fmt::Debug for At<E> {
                     for context in trace.contexts_at(i) {
                         match context {
                             AtContext::Text(msg) => writeln!(f, "       ╰─ {}", msg)?,
+                            AtContext::FunctionName(name) => writeln!(f, "       ╰─ in {}", name)?,
                             AtContext::Debug(t) => writeln!(f, "       ╰─ {:?}", &**t)?,
                             AtContext::Display(t) => writeln!(f, "       ╰─ {}", &**t)?,
                             AtContext::Error(e) => writeln!(f, "       ╰─ caused by: {}", e)?,
@@ -756,6 +799,7 @@ impl<E: fmt::Debug> fmt::Display for DisplayWithMeta<'_, E> {
                     for context in trace.contexts_at(i) {
                         match context {
                             AtContext::Text(msg) => writeln!(f, "       ╰─ {}", msg)?,
+                            AtContext::FunctionName(name) => writeln!(f, "       ╰─ in {}", name)?,
                             AtContext::Debug(t) => writeln!(f, "       ╰─ {:?}", &**t)?,
                             AtContext::Display(t) => writeln!(f, "       ╰─ {}", &**t)?,
                             AtContext::Error(e) => writeln!(f, "       ╰─ caused by: {}", e)?,
@@ -903,6 +947,8 @@ impl<E: fmt::Display> fmt::Display for AtFullTraceDisplay<'_, E> {
                 for ctx in frame.contexts() {
                     if let Some(text) = ctx.as_text() {
                         write!(f, "\n        {}", text)?;
+                    } else if let Some(fn_name) = ctx.as_function_name() {
+                        write!(f, "\n        in {}", fn_name)?;
                     } else if let Some(err) = ctx.as_error() {
                         write!(f, "\n        caused by: {}", err)?;
                         // Write nested error chain

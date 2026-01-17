@@ -77,6 +77,9 @@ pub(crate) enum AtContext {
     /// A text message describing what operation was being performed.
     /// Uses `Cow<'static, str>` for zero-copy static strings.
     Text(Cow<'static, str>),
+    /// A function name captured via type_name_of trick.
+    /// Stored separately from Text so it can be formatted differently (e.g., dimmed, in monospace).
+    FunctionName(&'static str),
     /// Typed context data formatted via Debug.
     Debug(Box<dyn AtDebugAny>),
     /// Typed context data formatted via Display.
@@ -97,6 +100,13 @@ impl AtContext {
         }
     }
 
+    pub(crate) fn as_function_name(&self) -> Option<&'static str> {
+        match self {
+            AtContext::FunctionName(s) => Some(s),
+            _ => None,
+        }
+    }
+
     pub(crate) fn as_crate_info(&self) -> Option<&'static AtCrateInfo> {
         match self {
             AtContext::Crate(info) => Some(info),
@@ -113,7 +123,10 @@ impl AtContext {
 
     pub(crate) fn downcast_ref<T: 'static>(&self) -> Option<&T> {
         match self {
-            AtContext::Text(_) | AtContext::Crate(_) | AtContext::Error(_) => None,
+            AtContext::Text(_)
+            | AtContext::FunctionName(_)
+            | AtContext::Crate(_)
+            | AtContext::Error(_) => None,
             // Must use (**b) to call as_any on the trait object, not the Box
             // (Box<dyn AtDebugAny> itself implements AtDebugAny through the blanket impl)
             AtContext::Debug(b) => (**b).as_any().downcast_ref(),
@@ -123,7 +136,10 @@ impl AtContext {
 
     pub(crate) fn type_name(&self) -> Option<&'static str> {
         match self {
-            AtContext::Text(_) | AtContext::Crate(_) | AtContext::Error(_) => None,
+            AtContext::Text(_)
+            | AtContext::FunctionName(_)
+            | AtContext::Crate(_)
+            | AtContext::Error(_) => None,
             AtContext::Debug(b) => Some((**b).type_name()),
             AtContext::Display(b) => Some((**b).type_name()),
         }
@@ -134,6 +150,10 @@ impl AtContext {
             self,
             AtContext::Text(_) | AtContext::Display(_) | AtContext::Error(_)
         )
+    }
+
+    pub(crate) fn is_function_name(&self) -> bool {
+        matches!(self, AtContext::FunctionName(_))
     }
 
     pub(crate) fn is_crate_boundary(&self) -> bool {
@@ -149,6 +169,7 @@ impl fmt::Debug for AtContext {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             AtContext::Text(s) => write!(f, "{:?}", s),
+            AtContext::FunctionName(s) => write!(f, "in {}", s),
             AtContext::Debug(t) => write!(f, "{:?}", &**t),
             AtContext::Display(t) => write!(f, "{}", &**t), // Display types use Display even in Debug
             AtContext::Crate(info) => write!(f, "[crate: {}]", info.name()),
@@ -161,6 +182,7 @@ impl fmt::Display for AtContext {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             AtContext::Text(s) => write!(f, "{}", s),
+            AtContext::FunctionName(s) => write!(f, "in {}", s),
             AtContext::Debug(t) => write!(f, "{:?}", &**t), // Debug types use Debug in Display
             AtContext::Display(t) => write!(f, "{}", &**t),
             AtContext::Crate(info) => write!(f, "[crate: {}]", info.name()),
@@ -204,6 +226,18 @@ impl<'a> AtContextRef<'a> {
     #[inline]
     pub fn as_text(&self) -> Option<&'a str> {
         self.inner.as_text()
+    }
+
+    /// Get as function name, if this is a function name context (from `at_fn`).
+    #[inline]
+    pub fn as_function_name(&self) -> Option<&'static str> {
+        self.inner.as_function_name()
+    }
+
+    /// Check if this is a function name context.
+    #[inline]
+    pub fn is_function_name(&self) -> bool {
+        self.inner.is_function_name()
     }
 
     /// Get as crate info, if this is a crate boundary marker.

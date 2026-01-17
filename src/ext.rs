@@ -135,6 +135,13 @@ pub trait ResultAtExt<T, E> {
 
     /// Add a skip marker to indicate skipped frames.
     fn at_skipped_frames(self) -> Result<T, At<E>>;
+
+    /// Add a location frame with the caller's function name as context.
+    ///
+    /// Captures both file:line:col AND the function name at zero runtime cost.
+    /// Pass an empty closure `|| {}` - its type includes the parent function name.
+    #[track_caller]
+    fn at_fn<F: Fn()>(self, marker: F) -> Result<T, At<E>>;
 }
 
 impl<T, E> ResultAtExt<T, E> for Result<T, At<E>> {
@@ -215,6 +222,15 @@ impl<T, E> ResultAtExt<T, E> for Result<T, At<E>> {
         match self {
             Ok(v) => Ok(v),
             Err(e) => Err(e.at_skipped_frames()),
+        }
+    }
+
+    #[track_caller]
+    #[inline]
+    fn at_fn<F: Fn()>(self, marker: F) -> Result<T, At<E>> {
+        match self {
+            Ok(v) => Ok(v),
+            Err(e) => Err(e.at_fn(marker)),
         }
     }
 }
@@ -356,6 +372,13 @@ pub trait ResultAtTraceableExt<T, E: AtTraceable> {
 
     /// Add a skip marker to indicate skipped frames.
     fn at_skipped_frames(self) -> Result<T, E>;
+
+    /// Add a location frame with the caller's function name as context.
+    ///
+    /// Captures both file:line:col AND the function name at zero runtime cost.
+    /// Pass an empty closure `|| {}` - its type includes the parent function name.
+    #[track_caller]
+    fn at_fn<F: Fn()>(self, marker: F) -> Result<T, E>;
 }
 
 impl<T, E: AtTraceable> ResultAtTraceableExt<T, E> for Result<T, E> {
@@ -410,5 +433,11 @@ impl<T, E: AtTraceable> ResultAtTraceableExt<T, E> for Result<T, E> {
     #[inline]
     fn at_skipped_frames(self) -> Result<T, E> {
         self.map_err(|e| e.at_skipped_frames())
+    }
+
+    #[track_caller]
+    #[inline]
+    fn at_fn<F: Fn()>(self, marker: F) -> Result<T, E> {
+        self.map_err(|e| e.at_fn(marker))
     }
 }
