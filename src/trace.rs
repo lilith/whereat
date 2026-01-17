@@ -1143,12 +1143,10 @@ pub trait AtTraceable: Sized {
     fn at_fn<F: Fn()>(mut self, _marker: F) -> Self {
         let full_name = core::any::type_name::<F>();
         // Type looks like: "crate::module::function::{{closure}}"
-        // Strip "::{{closure}}" (13 chars)
-        let name = if full_name.ends_with("::{{closure}}") {
-            &full_name[..full_name.len() - 13]
-        } else {
-            full_name
-        };
+        // Strip "::{{closure}}" suffix if present
+        let name = full_name
+            .strip_suffix("::{{closure}}")
+            .unwrap_or(full_name);
         let loc = Location::caller();
         let trace = self.trace_mut();
         // First push a new location frame

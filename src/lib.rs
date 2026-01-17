@@ -474,7 +474,10 @@ mod tests {
             feature = "smallvec-128-bytes",
             feature = "smallvec-256-bytes"
         )))]
-        assert_eq!(trace_size, 40, "AtTrace should be 40 bytes without tinyvec/smallvec");
+        assert_eq!(
+            trace_size, 40,
+            "AtTrace should be 40 bytes without tinyvec/smallvec"
+        );
 
         #[cfg(all(
             feature = "tinyvec-64-bytes",
@@ -509,7 +512,11 @@ mod tests {
         // tinyvec-256-bytes only if no smallvec and no tinyvec-512
         #[cfg(all(
             feature = "tinyvec-256-bytes",
-            not(any(feature = "smallvec-128-bytes", feature = "smallvec-256-bytes", feature = "tinyvec-512-bytes"))
+            not(any(
+                feature = "smallvec-128-bytes",
+                feature = "smallvec-256-bytes",
+                feature = "tinyvec-512-bytes"
+            ))
         ))]
         assert_eq!(
             trace_size, 256,
@@ -947,5 +954,65 @@ mod tests {
             !first_at.contains("╰─"),
             "First location should be origin without context"
         );
+    }
+
+    #[test]
+    fn test_partial_eq_compares_error_only() {
+        // Same error, different traces
+        fn location1() -> At<TestError> {
+            TestError::NotFound.start_at()
+        }
+        fn location2() -> At<TestError> {
+            TestError::NotFound.start_at()
+        }
+
+        let err1 = location1();
+        let err2 = location2();
+
+        // Different traces (different source locations)
+        assert!(err1.first_location() != err2.first_location());
+
+        // But errors should be equal because the inner E is equal
+        assert_eq!(err1, err2);
+
+        // Different errors should not be equal
+        let err3 = at(TestError::InvalidInput);
+        assert_ne!(err1, err3);
+    }
+
+    #[test]
+    fn test_as_ref() {
+        let err = at(TestError::NotFound);
+
+        // AsRef gives us &E
+        let inner: &TestError = err.as_ref();
+        assert_eq!(*inner, TestError::NotFound);
+
+        // Should be same as .error()
+        assert!(core::ptr::eq(err.as_ref(), err.error()));
+    }
+
+    #[test]
+    fn test_map_err_at() {
+        #[derive(Debug, PartialEq)]
+        struct Error1;
+        #[derive(Debug, PartialEq)]
+        struct Error2;
+
+        fn inner() -> Result<(), At<Error1>> {
+            Err(at(Error1).at_str("inner context"))
+        }
+
+        fn outer() -> Result<(), At<Error2>> {
+            // map_err_at converts Error1 -> Error2 while preserving trace
+            inner().map_err_at(|_| Error2)?;
+            Ok(())
+        }
+
+        let err = outer().unwrap_err();
+        assert_eq!(*err.error(), Error2);
+        assert_eq!(err.trace_len(), 1); // Trace preserved
+        let text = err.contexts().find_map(|c| c.as_text());
+        assert_eq!(text, Some("inner context")); // Context preserved
     }
 }

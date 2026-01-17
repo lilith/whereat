@@ -156,12 +156,10 @@ impl<E> At<E> {
     pub fn at_fn<F: Fn()>(mut self, _marker: F) -> Self {
         let full_name = core::any::type_name::<F>();
         // Type looks like: "crate::module::function::{{closure}}"
-        // Strip "::{{closure}}" (13 chars)
-        let name = if full_name.ends_with("::{{closure}}") {
-            &full_name[..full_name.len() - 13]
-        } else {
-            full_name
-        };
+        // Strip "::{{closure}}" suffix if present
+        let name = full_name
+            .strip_suffix("::{{closure}}")
+            .unwrap_or(full_name);
         let loc = Location::caller();
         let trace = self.trace.get_or_insert_mut();
         // First push a new location frame
@@ -1033,5 +1031,34 @@ impl<E> From<E> for At<E> {
     #[inline]
     fn from(error: E) -> Self {
         At::new(error)
+    }
+}
+
+// ============================================================================
+// PartialEq impl for At<E> - compares only the error, not the trace
+// ============================================================================
+
+impl<E: PartialEq> PartialEq for At<E> {
+    /// Compare two `At<E>` errors by their inner error only.
+    ///
+    /// The trace is metadata about *where* the error was created, not *what*
+    /// the error is. Two errors with the same `E` value are equal regardless
+    /// of their traces.
+    #[inline]
+    fn eq(&self, other: &Self) -> bool {
+        self.error == other.error
+    }
+}
+
+impl<E: Eq> Eq for At<E> {}
+
+// ============================================================================
+// AsRef impl for At<E>
+// ============================================================================
+
+impl<E> AsRef<E> for At<E> {
+    #[inline]
+    fn as_ref(&self) -> &E {
+        &self.error
     }
 }

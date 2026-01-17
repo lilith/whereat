@@ -142,6 +142,34 @@ pub trait ResultAtExt<T, E> {
     /// Pass an empty closure `|| {}` - its type includes the parent function name.
     #[track_caller]
     fn at_fn<F: Fn()>(self, marker: F) -> Result<T, At<E>>;
+
+    /// Convert the error type while preserving the trace.
+    ///
+    /// This is a convenience method that combines `map_err` with `At::map_error`.
+    ///
+    /// ## Example
+    ///
+    /// ```rust
+    /// use errat::{at, At, ResultAtExt};
+    ///
+    /// #[derive(Debug)]
+    /// struct InternalError;
+    /// #[derive(Debug)]
+    /// struct PublicError;
+    ///
+    /// fn internal() -> Result<(), At<InternalError>> {
+    ///     Err(at(InternalError))
+    /// }
+    ///
+    /// fn public() -> Result<(), At<PublicError>> {
+    ///     // Clean conversion that preserves trace
+    ///     internal().map_err_at(|_| PublicError)?;
+    ///     Ok(())
+    /// }
+    /// ```
+    fn map_err_at<E2, F>(self, f: F) -> Result<T, At<E2>>
+    where
+        F: FnOnce(E) -> E2;
 }
 
 impl<T, E> ResultAtExt<T, E> for Result<T, At<E>> {
@@ -231,6 +259,17 @@ impl<T, E> ResultAtExt<T, E> for Result<T, At<E>> {
         match self {
             Ok(v) => Ok(v),
             Err(e) => Err(e.at_fn(marker)),
+        }
+    }
+
+    #[inline]
+    fn map_err_at<E2, F>(self, f: F) -> Result<T, At<E2>>
+    where
+        F: FnOnce(E) -> E2,
+    {
+        match self {
+            Ok(v) => Ok(v),
+            Err(e) => Err(e.map_error(f)),
         }
     }
 }
