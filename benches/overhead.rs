@@ -385,7 +385,7 @@ fn bench_start_at(c: &mut Criterion) {
 
     group.bench_function("at_new_skipped_frames_conversion", |b| {
         b.iter(|| {
-            let _ = external_error().map_err(|e| At::new(e).at_skipped_frames());
+            let _ = external_error().map_err(|e| At::wrap(e).at_skipped_frames());
         })
     });
 

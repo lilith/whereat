@@ -92,12 +92,15 @@ pub struct At<E> {
 // ============================================================================
 
 impl<E> At<E> {
-    /// Create a new traced error without any location information.
+    /// Wrap an error without capturing any location.
     ///
-    /// Use `.at()` to add the first location, or use the `ErrorAtExt::at()` method
-    /// on the error directly.
+    /// Use this when you want to defer tracing until later (e.g., exiting a hot loop).
+    /// Call `.at()` to add the first location when ready.
+    ///
+    /// For normal use, prefer [`at()`](crate::at) or [`at!()`](crate::at!) which
+    /// capture the caller's location immediately.
     #[inline]
-    pub const fn new(error: E) -> Self {
+    pub const fn wrap(error: E) -> Self {
         Self {
             error,
             trace: AtTraceBoxed::new(),
@@ -135,7 +138,7 @@ impl<E> At<E> {
     /// enum MyError { Oops }
     ///
     /// fn inner() -> Result<(), At<MyError>> {
-    ///     Err(At::new(MyError::Oops).at())
+    ///     Err(At::wrap(MyError::Oops).at())
     /// }
     ///
     /// fn outer() -> Result<(), At<MyError>> {
@@ -509,7 +512,7 @@ impl<E> At<E> {
     /// #[derive(Debug)]
     /// enum MyError { Oops }
     ///
-    /// let err = At::new(MyError::Oops)
+    /// let err = At::wrap(MyError::Oops)
     ///     .set_crate_info(crate::at_crate_info())
     ///     .at();
     /// ```
@@ -1157,7 +1160,7 @@ impl<E: core::error::Error> core::error::Error for At<E> {
 impl<E> From<E> for At<E> {
     #[inline]
     fn from(error: E) -> Self {
-        At::new(error)
+        At::wrap(error)
     }
 }
 

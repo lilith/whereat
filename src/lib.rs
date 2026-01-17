@@ -348,7 +348,7 @@ macro_rules! define_at_crate_info {
 #[allow(clippy::crate_in_macro_def)] // Intentional: calls caller's crate getter
 macro_rules! at {
     ($err:expr) => {{
-        $crate::At::new($err)
+        $crate::At::wrap($err)
             .set_crate_info(crate::at_crate_info())
             .at()
     }};
@@ -402,7 +402,7 @@ macro_rules! at_crate {
 #[track_caller]
 #[inline]
 pub fn at<E>(err: E) -> At<E> {
-    At::new(err).at()
+    At::wrap(err).at()
 }
 
 // Extension traits are in ext.rs

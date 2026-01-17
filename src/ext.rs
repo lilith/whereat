@@ -67,7 +67,7 @@ impl<E: core::error::Error> ErrorAtExt for E {
     #[track_caller]
     #[inline]
     fn start_at(self) -> At<Self> {
-        At::new(self).at()
+        At::wrap(self).at()
     }
 }
 

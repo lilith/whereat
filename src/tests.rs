@@ -227,7 +227,7 @@ fn test_display_debug() {
 
 #[test]
 fn test_no_trace() {
-    let err: At<TestError> = At::new(TestError::NotFound);
+    let err: At<TestError> = At::wrap(TestError::NotFound);
     assert_eq!(err.frame_count(), 0);
     assert!(err.is_empty());
     assert!(err.first_location().is_none());

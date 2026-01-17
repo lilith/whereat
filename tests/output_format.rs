@@ -188,7 +188,7 @@ fn late_tracing_adds_skip_marker() {
     }
 
     let err = fallible()
-        .map_err(|e| At::new(e).at_skipped_frames())
+        .map_err(|e| At::wrap(e).at_skipped_frames())
         .unwrap_err();
     let output = format!("{:?}", err);
 
@@ -285,7 +285,7 @@ fn context_indentation_deeper_than_location() {
 
 #[test]
 fn empty_trace_just_shows_error() {
-    let err: At<TestError> = At::new(TestError::NotFound);
+    let err: At<TestError> = At::wrap(TestError::NotFound);
     let output = format!("{:?}", err);
 
     assert!(

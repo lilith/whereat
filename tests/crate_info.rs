@@ -353,7 +353,7 @@ fn github_link_format_in_display() {
         .module("test")
         .build();
 
-    let err = whereat::At::new(TestError).at().at_crate(&INFO);
+    let err = whereat::At::wrap(TestError).at().at_crate(&INFO);
     let output = format!("{}", err.display_with_meta());
 
     // Should generate GitHub blob URL
@@ -373,7 +373,7 @@ fn github_link_includes_line_number() {
         .module("test")
         .build();
 
-    let err = whereat::At::new(TestError).at().at_crate(&INFO);
+    let err = whereat::At::wrap(TestError).at().at_crate(&INFO);
     let output = format!("{}", err.display_with_meta());
 
     // Should have #L<number> anchor
@@ -396,7 +396,7 @@ fn repo_without_commit_no_link() {
         )
         .build();
 
-    let err = whereat::At::new(TestError).at().at_crate(&INFO);
+    let err = whereat::At::wrap(TestError).at().at_crate(&INFO);
     let output = format!("{}", err.display_with_meta());
 
     // Should NOT have blob URL without commit (can't make permalink)
@@ -419,7 +419,7 @@ fn trailing_slash_stripped_from_repo() {
         .module("test")
         .build();
 
-    let err = whereat::At::new(TestError).at().at_crate(&INFO);
+    let err = whereat::At::wrap(TestError).at().at_crate(&INFO);
     let output = format!("{}", err.display_with_meta());
 
     // Should not have double slashes
@@ -451,7 +451,7 @@ fn crate_boundary_switches_github_links() {
         .build();
 
     // Simulate: error in crate-a, crosses to crate-b
-    let err = whereat::At::new(TestError)
+    let err = whereat::At::wrap(TestError)
         .at()
         .at_crate(&CRATE_A)
         .at()
@@ -483,7 +483,7 @@ fn crate_boundary_affects_subsequent_locations() {
         .build();
 
     // Locations after boundary should use that crate's info
-    let err = whereat::At::new(TestError)
+    let err = whereat::At::wrap(TestError)
         .at_crate(&CRATE_X) // Boundary
         .at() // Should use CRATE_X
         .at(); // Should use CRATE_X
@@ -521,7 +521,7 @@ fn multiple_boundary_switches() {
         .module("c3")
         .build();
 
-    let err = whereat::At::new(TestError)
+    let err = whereat::At::wrap(TestError)
         .at_crate(&C1)
         .at()
         .at_crate(&C2)
@@ -597,7 +597,7 @@ fn github_link_has_full_url() {
         .module("mylib")
         .build();
 
-    let err = whereat::At::new(TestError).at().at_crate(&INFO);
+    let err = whereat::At::wrap(TestError).at().at_crate(&INFO);
     let output = format!("{}", err.display_with_meta());
 
     // Should have complete clickable URL
@@ -617,7 +617,7 @@ fn github_link_has_file_path() {
         .module("test")
         .build();
 
-    let err = whereat::At::new(TestError).at().at_crate(&INFO);
+    let err = whereat::At::wrap(TestError).at().at_crate(&INFO);
     let output = format!("{}", err.display_with_meta());
 
     // Should include file path in URL
@@ -637,7 +637,7 @@ fn github_link_line_number_is_numeric() {
         .module("test")
         .build();
 
-    let err = whereat::At::new(TestError).at().at_crate(&INFO);
+    let err = whereat::At::wrap(TestError).at().at_crate(&INFO);
     let output = format!("{}", err.display_with_meta());
 
     // Find #L and verify it's followed by digits
@@ -674,7 +674,7 @@ fn windows_paths_converted_to_forward_slashes() {
         .module("test")
         .build();
 
-    let err = whereat::At::new(TestError).at().at_crate(&INFO);
+    let err = whereat::At::wrap(TestError).at().at_crate(&INFO);
     let output = format!("{}", err.display_with_meta());
 
     // URL lines should not have backslashes
@@ -802,7 +802,7 @@ fn crate_path_included_in_github_url() {
         )
         .build();
 
-    let err = whereat::At::new(TestError).at().at_crate(&INFO);
+    let err = whereat::At::wrap(TestError).at().at_crate(&INFO);
     let output = format!("{}", err.display_with_meta());
 
     // URL should include crate_path between commit and file
@@ -826,7 +826,7 @@ fn crate_path_none_works() {
         )
         .build();
 
-    let err = whereat::At::new(TestError).at().at_crate(&INFO);
+    let err = whereat::At::wrap(TestError).at().at_crate(&INFO);
     let output = format!("{}", err.display_with_meta());
 
     // URL should work without crate_path
@@ -850,7 +850,7 @@ fn crate_path_with_trailing_slash() {
         )
         .build();
 
-    let err = whereat::At::new(TestError).at().at_crate(&INFO);
+    let err = whereat::At::wrap(TestError).at().at_crate(&INFO);
     let output = format!("{}", err.display_with_meta());
 
     // Should not have double slashes
@@ -879,7 +879,7 @@ fn crate_path_without_trailing_slash() {
         )
         .build();
 
-    let err = whereat::At::new(TestError).at().at_crate(&INFO);
+    let err = whereat::At::wrap(TestError).at().at_crate(&INFO);
     let output = format!("{}", err.display_with_meta());
 
     // Should still work (file path starts with tests/)
@@ -941,7 +941,7 @@ mod with_path {
 
         assert_eq!(INFO.crate_path(), Some("crates/mylib/"));
 
-        let err = whereat::At::new(TestError).at().at_crate(&INFO);
+        let err = whereat::At::wrap(TestError).at().at_crate(&INFO);
         let output = format!("{}", err.display_with_meta());
 
         assert!(
