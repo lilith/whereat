@@ -22,18 +22,23 @@ Error: UserNotFound
 ## Performance
 
 ```text
-                              Error creation time (lower is better)
+                                 Error creation time (lower is better)
 
-plain enum      ████ 27ns
-thiserror       ████ 27ns
-anyhow          █████ 34ns
-whereat (1 frame)  ██████ 40ns
-whereat (3 frames) ███████ 46ns
-backtrace       ████████████████████████████████████████████████████ 6,300ns (157x slower)
-panic + unwind  ████████████████████████ 1,290ns (32x slower)
+plain enum              ████ 27ns
+thiserror               ████ 27ns
+anyhow                  █████ 34ns         ← no location info
+whereat (1 frame)       ██████ 40ns        ← file:line:col captured
+whereat (3 frames)      ███████ 46ns
+
+With RUST_BACKTRACE=1:
+anyhow                  ██████████████████████████████████ 2,500ns (63x slower)
+backtrace crate         █████████████████████████████████████████████████████ 6,300ns
+panic + catch_unwind    █████████████████ 1,300ns
 ```
 
-*Measured on Linux x86_64. See `cargo bench` for full results.*
+*anyhow/panic only capture backtraces when `RUST_BACKTRACE=1`. whereat always captures location.*
+
+*Linux x86_64. See `cargo bench --bench nested_loops` for full results.*
 
 ## Quick Start
 
@@ -59,7 +64,7 @@ fn handle(id: u64) -> Result<User, At<MyError>> {
 
 ## Why whereat?
 
-- **40ns per error** — 157x faster than `backtrace`, 32x faster than panic
+- **40ns per error** — 63x faster than anyhow with `RUST_BACKTRACE=1`
 - **Zero cost on Ok** — No allocation until an error occurs
 - **Tiny footprint** — `At<E>` is `sizeof(E) + 8` bytes
 - **Async-friendly** — Uses `#[track_caller]`, works across `.await`
