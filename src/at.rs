@@ -189,6 +189,42 @@ impl<E> At<E> {
         self
     }
 
+    /// Add a location frame with an explicit name as context.
+    ///
+    /// Like [`at_fn`](Self::at_fn) but with an explicit label instead of
+    /// auto-detecting the function name. Useful for naming checkpoints,
+    /// phases, or operations within a function.
+    ///
+    /// ## Example
+    ///
+    /// ```rust
+    /// use errat::{at, At};
+    ///
+    /// #[derive(Debug)]
+    /// enum MyError { Failed }
+    ///
+    /// fn process() -> Result<(), At<MyError>> {
+    ///     // ... validation phase ...
+    ///     Err(at(MyError::Failed).at_named("validation"))
+    /// }
+    ///
+    /// // Output will include:
+    /// //     at src/lib.rs:10:5
+    /// //         in validation
+    /// ```
+    #[track_caller]
+    #[inline]
+    pub fn at_named(mut self, name: &'static str) -> Self {
+        let loc = Location::caller();
+        let trace = self.trace.get_or_insert_mut();
+        // Push a new location frame
+        let _ = trace.try_push(loc);
+        // Add the name as function-name-style context
+        let context = AtContext::FunctionName(name);
+        trace.try_add_context(loc, context);
+        self
+    }
+
     /// Add a static string context to the last location (or create one if empty).
     ///
     /// Zero-cost for static strings - just stores a pointer.

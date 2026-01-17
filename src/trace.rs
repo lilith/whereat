@@ -1155,6 +1155,21 @@ pub trait AtTraceable: Sized {
         self
     }
 
+    /// Add a location frame with an explicit name as context.
+    ///
+    /// Like [`at_fn`](Self::at_fn) but with an explicit label instead of
+    /// auto-detecting the function name.
+    #[track_caller]
+    #[inline]
+    fn at_named(mut self, name: &'static str) -> Self {
+        let loc = Location::caller();
+        let trace = self.trace_mut();
+        let _ = trace.try_push(loc);
+        let context = AtContext::FunctionName(name);
+        trace.try_add_context(loc, context);
+        self
+    }
+
     // ========================================================================
     // Trace manipulation methods
     // ========================================================================

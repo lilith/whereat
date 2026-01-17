@@ -143,6 +143,12 @@ pub trait ResultAtExt<T, E> {
     #[track_caller]
     fn at_fn<F: Fn()>(self, marker: F) -> Result<T, At<E>>;
 
+    /// Add a location frame with an explicit name as context.
+    ///
+    /// Like [`at_fn`](Self::at_fn) but with an explicit label.
+    #[track_caller]
+    fn at_named(self, name: &'static str) -> Result<T, At<E>>;
+
     /// Convert the error type while preserving the trace.
     ///
     /// This is a convenience method that combines `map_err` with `At::map_error`.
@@ -259,6 +265,15 @@ impl<T, E> ResultAtExt<T, E> for Result<T, At<E>> {
         match self {
             Ok(v) => Ok(v),
             Err(e) => Err(e.at_fn(marker)),
+        }
+    }
+
+    #[track_caller]
+    #[inline]
+    fn at_named(self, name: &'static str) -> Result<T, At<E>> {
+        match self {
+            Ok(v) => Ok(v),
+            Err(e) => Err(e.at_named(name)),
         }
     }
 
@@ -418,6 +433,12 @@ pub trait ResultAtTraceableExt<T, E: AtTraceable> {
     /// Pass an empty closure `|| {}` - its type includes the parent function name.
     #[track_caller]
     fn at_fn<F: Fn()>(self, marker: F) -> Result<T, E>;
+
+    /// Add a location frame with an explicit name as context.
+    ///
+    /// Like [`at_fn`](Self::at_fn) but with an explicit label.
+    #[track_caller]
+    fn at_named(self, name: &'static str) -> Result<T, E>;
 }
 
 impl<T, E: AtTraceable> ResultAtTraceableExt<T, E> for Result<T, E> {
@@ -478,5 +499,11 @@ impl<T, E: AtTraceable> ResultAtTraceableExt<T, E> for Result<T, E> {
     #[inline]
     fn at_fn<F: Fn()>(self, marker: F) -> Result<T, E> {
         self.map_err(|e| e.at_fn(marker))
+    }
+
+    #[track_caller]
+    #[inline]
+    fn at_named(self, name: &'static str) -> Result<T, E> {
+        self.map_err(|e| e.at_named(name))
     }
 }
