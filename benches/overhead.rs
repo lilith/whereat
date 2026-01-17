@@ -3,7 +3,8 @@
 //! Run with: cargo bench
 //! Run specific benchmark: cargo bench --bench overhead -- "hot_loop"
 
-use criterion::{BenchmarkId, Criterion, black_box, criterion_group, criterion_main};
+use criterion::{BenchmarkId, Criterion, criterion_group, criterion_main};
+use std::hint::black_box;
 use whereat::{At, ResultAtExt, at};
 
 use core::fmt;

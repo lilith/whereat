@@ -16,7 +16,8 @@
 // Allow unused functions - these are kept for potential future frame-depth comparison benchmarks
 #![allow(dead_code)]
 
-use criterion::{BenchmarkId, Criterion, black_box, criterion_group, criterion_main};
+use criterion::{BenchmarkId, Criterion, criterion_group, criterion_main};
+use std::hint::black_box;
 use std::panic::{AssertUnwindSafe, catch_unwind};
 use whereat::{At, ResultAtExt, at};
 
