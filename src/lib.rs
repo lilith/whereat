@@ -350,7 +350,7 @@ macro_rules! at {
     }};
 }
 
-/// Add crate boundary marker to a Result with an At<E> error.
+/// Add crate boundary marker to a Result with an `At<E>` error.
 ///
 /// Requires `define_at_crate_info!()` or a custom `at_crate_info()` function.
 /// Use at crate boundaries when consuming errors from dependencies.
@@ -416,7 +416,7 @@ mod tests {
     use alloc::vec::Vec;
     use core::fmt;
 
-    #[derive(Debug, PartialEq)]
+    #[derive(Debug, PartialEq, Eq, Hash)]
     enum TestError {
         NotFound,
         InvalidInput,
@@ -1014,5 +1014,50 @@ mod tests {
         assert_eq!(err.trace_len(), 1); // Trace preserved
         let text = err.contexts().find_map(|c| c.as_text());
         assert_eq!(text, Some("inner context")); // Context preserved
+    }
+
+    #[test]
+    fn test_hash_ignores_trace() {
+        use core::hash::{Hash, Hasher};
+
+        // Simple hasher for testing
+        struct TestHasher(u64);
+        impl Hasher for TestHasher {
+            fn finish(&self) -> u64 {
+                self.0
+            }
+            fn write(&mut self, bytes: &[u8]) {
+                for &b in bytes {
+                    self.0 = self.0.wrapping_mul(31).wrapping_add(b as u64);
+                }
+            }
+        }
+
+        fn hash_one<T: Hash>(val: &T) -> u64 {
+            let mut h = TestHasher(0);
+            val.hash(&mut h);
+            h.finish()
+        }
+
+        // Same error, different traces (different locations)
+        fn loc1() -> At<TestError> {
+            TestError::NotFound.start_at()
+        }
+        fn loc2() -> At<TestError> {
+            TestError::NotFound.start_at()
+        }
+
+        let err1 = loc1();
+        let err2 = loc2();
+
+        // Different traces
+        assert!(err1.first_location() != err2.first_location());
+
+        // But same hash (because E is the same)
+        assert_eq!(hash_one(&err1), hash_one(&err2));
+
+        // Different error = different hash
+        let err3 = at(TestError::InvalidInput);
+        assert_ne!(hash_one(&err1), hash_one(&err3));
     }
 }

@@ -5,6 +5,14 @@
 **CPU:** Run `lscpu | grep "Model name"` to document
 **Rust:** 1.85+ (edition 2024)
 
+## Visual Summary
+
+### Error Handling Approaches Compared
+![Benchmark Comparison](docs/benchmark_comparison.svg)
+
+### Frame Depth Performance
+![Frame Depth Comparison](docs/frame_depth_comparison.svg)
+
 ## Benchmark Parameters
 
 | Parameter | Value |
@@ -116,19 +124,75 @@ At 100% error rate with String allocation:
 | panic_unwind | 1300ns | 25x |
 | backtrace crate | 6200ns | 119x |
 
+## tinyvec vs smallvec Comparison (100% error rate)
+
+Tested with U64Error (Copy, no String allocation) at various frame depths.
+
+### Linux/WSL Results (ns/error)
+
+| Storage | Slots | 3 frames | 10 frames | 25 frames | 40 frames |
+|---------|-------|----------|-----------|-----------|-----------|
+| default (heap) | 0 | 34 | 93 | 161 | 314 |
+| tinyvec-128 | 12 | 29 | 51 | 146 | 258 |
+| **smallvec-128** | 12 | **23** | **47** | **129** | **254** |
+| tinyvec-256 | 28 | 31 | 69 | 178 | 265 |
+| smallvec-256 | 28 | 28 | 90 | 194 | 263 |
+
+**Linux winner: smallvec-128 across ALL frame counts!**
+
+### Windows Results (ns/error)
+
+| Storage | Slots | 3 frames | 10 frames | 25 frames | 40 frames |
+|---------|-------|----------|-----------|-----------|-----------|
+| default (heap) | 0 | 154 | 252 | 368 | 569 |
+| tinyvec-128 | 12 | 51 | 83 | 251 | 357 |
+| smallvec-128 | 12 | **43** | 100 | 203 | 316 |
+| tinyvec-256 | 28 | 55 | 84 | 152 | 337 |
+| smallvec-256 | 28 | 51 | **83** | **151** | **302** |
+
+**Windows winner: smallvec-128 for ≤12 frames, smallvec-256 for >12 frames**
+
+### Platform Comparison (best config per platform)
+
+| Frames | Linux (smallvec-128) | Windows (best) | Ratio |
+|--------|---------------------|----------------|-------|
+| 3 | 23ns | 43ns (sv-128) | 1.9x |
+| 10 | 47ns | 83ns (sv-256) | 1.8x |
+| 25 | 129ns | 151ns (sv-256) | 1.2x |
+| 40 | 254ns | 302ns (sv-256) | 1.2x |
+
+### Why the difference?
+
+- **Linux has a faster allocator** (glibc/jemalloc) - heap spill costs less
+- **Windows allocator is slower** - avoiding heap allocation matters more
+- **256-byte variants hurt on Linux** - copy overhead > allocation savings
+- **256-byte variants help on Windows** - allocation savings > copy overhead
+
+### Recommendations by platform
+
+| Platform | Recommendation |
+|----------|----------------|
+| Linux | Always use `smallvec-128-bytes` |
+| Windows (≤12 frames) | Use `smallvec-128-bytes` |
+| Windows (>12 frames) | Use `smallvec-256-bytes` |
+| Cross-platform default | Use `smallvec-128-bytes` |
+
 ## Key Findings
 
 1. **`At<E>` wrapper has zero overhead** - errat_0_frames matches plain_enum exactly
 2. **Frame capture cost: ~16ns per frame** (U64), ~25ns per frame (String)
 3. **Late tracing (outer_1fr) beats eager (inner_3fr)** when you only need 1 frame
-4. **tinyvec-128-bytes helps 10+ frame traces** but hurts shallow traces
+4. **smallvec outperforms tinyvec** by 10-15% at equivalent slot counts
 5. **errat is 119x faster** than full backtrace capture
 6. **errat is 25x faster** than panic+catch_unwind
 7. **anyhow with RUST_BACKTRACE=1 is 40x slower** than errat
+8. **Windows benefits more from inline storage** due to higher allocator overhead
 
 ## Recommendations
 
 - Use `At<E>` wrapper even without tracing - zero overhead
 - Capture frames at module boundaries (outer), not every call (inner)
-- Skip tinyvec unless you regularly have 10+ frame traces
+- **Use smallvec-128-bytes** for typical traces (≤12 frames)
+- **Use smallvec-256-bytes** for deep traces (13-28 frames)
 - For high-error-rate code paths, prefer U64/Copy error types over String
+- Windows users benefit more from inline storage features

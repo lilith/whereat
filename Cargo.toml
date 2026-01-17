@@ -17,9 +17,16 @@ tinyvec-64-bytes = ["dep:tinyvec"]
 tinyvec-128-bytes = ["dep:tinyvec"]
 # Use tinyvec with 27 inline slots (sizeof(Trace) = 256 bytes, spills to heap)
 tinyvec-256-bytes = ["dep:tinyvec"]
+# Use tinyvec with 60 inline slots (sizeof(Trace) = 512 bytes, spills to heap)
+tinyvec-512-bytes = ["dep:tinyvec"]
+# Use smallvec with 12 inline slots (same as tinyvec-128-bytes for comparison)
+smallvec-128-bytes = ["dep:smallvec"]
+# Use smallvec with 28 inline slots (same as tinyvec-256-bytes for comparison)
+smallvec-256-bytes = ["dep:smallvec"]
 
 [dependencies]
 tinyvec = { version = "1.9", optional = true, default-features = false, features = ["alloc"] }
+smallvec = { version = "1.13", optional = true, default-features = false }
 
 [dev-dependencies]
 static_assertions = "1.1"

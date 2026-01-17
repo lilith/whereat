@@ -1,0 +1,147 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 800 450">
+  <defs>
+    <style>
+      .title { font: bold 18px sans-serif; fill: #333; }
+      .subtitle { font: 12px sans-serif; fill: #666; }
+      .axis-label { font: 12px sans-serif; fill: #333; }
+      .tick-label { font: 10px sans-serif; fill: #666; }
+      .bar-label { font: 9px sans-serif; fill: white; }
+      .legend-text { font: 11px sans-serif; fill: #333; }
+      .group-label { font: bold 11px sans-serif; fill: #333; }
+    </style>
+  </defs>
+
+  <!-- Background -->
+  <rect width="800" height="450" fill="#fafafa"/>
+
+  <!-- Title -->
+  <text x="400" y="30" text-anchor="middle" class="title">errat Performance by Frame Depth</text>
+  <text x="400" y="50" text-anchor="middle" class="subtitle">Per-error latency (ns) - smallvec-128 vs default heap allocation</text>
+
+  <!-- Chart area -->
+  <g transform="translate(80, 80)">
+    <!-- Y-axis -->
+    <line x1="0" y1="0" x2="0" y2="280" stroke="#ccc" stroke-width="1"/>
+
+    <!-- Grid lines and Y labels (max 600ns) -->
+    <g class="tick-label">
+      <line x1="0" y1="0" x2="650" y2="0" stroke="#eee"/>
+      <text x="-10" y="4" text-anchor="end">600ns</text>
+
+      <line x1="0" y1="47" x2="650" y2="47" stroke="#eee"/>
+      <text x="-10" y="51" text-anchor="end">500ns</text>
+
+      <line x1="0" y1="93" x2="650" y2="93" stroke="#eee"/>
+      <text x="-10" y="97" text-anchor="end">400ns</text>
+
+      <line x1="0" y1="140" x2="650" y2="140" stroke="#eee"/>
+      <text x="-10" y="144" text-anchor="end">300ns</text>
+
+      <line x1="0" y1="187" x2="650" y2="187" stroke="#eee"/>
+      <text x="-10" y="191" text-anchor="end">200ns</text>
+
+      <line x1="0" y1="233" x2="650" y2="233" stroke="#eee"/>
+      <text x="-10" y="237" text-anchor="end">100ns</text>
+
+      <line x1="0" y1="280" x2="650" y2="280" stroke="#ccc"/>
+      <text x="-10" y="284" text-anchor="end">0ns</text>
+    </g>
+
+    <!-- X-axis -->
+    <line x1="0" y1="280" x2="650" y2="280" stroke="#ccc" stroke-width="1"/>
+
+    <!-- 3 FRAMES group -->
+    <g transform="translate(20, 0)">
+      <text x="55" y="300" text-anchor="middle" class="group-label">3 frames</text>
+      <!-- Linux default: 34ns -->
+      <rect x="0" y="264" width="25" height="16" fill="#95a5a6" rx="2"/>
+      <text x="12" y="276" text-anchor="middle" class="bar-label">34</text>
+      <!-- Linux smallvec: 23ns -->
+      <rect x="30" y="269" width="25" height="11" fill="#27ae60" rx="2"/>
+      <text x="42" y="265" text-anchor="middle" class="tick-label">23</text>
+      <!-- Windows default: 154ns -->
+      <rect x="60" y="208" width="25" height="72" fill="#7f8c8d" rx="2"/>
+      <text x="72" y="228" text-anchor="middle" class="bar-label">154</text>
+      <!-- Windows smallvec: 43ns -->
+      <rect x="90" y="260" width="25" height="20" fill="#2ecc71" rx="2"/>
+      <text x="102" y="256" text-anchor="middle" class="tick-label">43</text>
+    </g>
+
+    <!-- 10 FRAMES group -->
+    <g transform="translate(160, 0)">
+      <text x="55" y="300" text-anchor="middle" class="group-label">10 frames</text>
+      <!-- Linux default: 93ns -->
+      <rect x="0" y="237" width="25" height="43" fill="#95a5a6" rx="2"/>
+      <text x="12" y="257" text-anchor="middle" class="bar-label">93</text>
+      <!-- Linux smallvec: 47ns -->
+      <rect x="30" y="258" width="25" height="22" fill="#27ae60" rx="2"/>
+      <text x="42" y="254" text-anchor="middle" class="tick-label">47</text>
+      <!-- Windows default: 252ns -->
+      <rect x="60" y="163" width="25" height="117" fill="#7f8c8d" rx="2"/>
+      <text x="72" y="183" text-anchor="middle" class="bar-label">252</text>
+      <!-- Windows smallvec-256: 83ns -->
+      <rect x="90" y="241" width="25" height="39" fill="#2ecc71" rx="2"/>
+      <text x="102" y="237" text-anchor="middle" class="tick-label">83</text>
+    </g>
+
+    <!-- 25 FRAMES group -->
+    <g transform="translate(300, 0)">
+      <text x="55" y="300" text-anchor="middle" class="group-label">25 frames</text>
+      <!-- Linux default: 161ns -->
+      <rect x="0" y="205" width="25" height="75" fill="#95a5a6" rx="2"/>
+      <text x="12" y="225" text-anchor="middle" class="bar-label">161</text>
+      <!-- Linux smallvec: 129ns -->
+      <rect x="30" y="220" width="25" height="60" fill="#27ae60" rx="2"/>
+      <text x="42" y="240" text-anchor="middle" class="bar-label">129</text>
+      <!-- Windows default: 368ns -->
+      <rect x="60" y="109" width="25" height="171" fill="#7f8c8d" rx="2"/>
+      <text x="72" y="129" text-anchor="middle" class="bar-label">368</text>
+      <!-- Windows smallvec-256: 151ns -->
+      <rect x="90" y="210" width="25" height="70" fill="#2ecc71" rx="2"/>
+      <text x="102" y="230" text-anchor="middle" class="bar-label">151</text>
+    </g>
+
+    <!-- 40 FRAMES group -->
+    <g transform="translate(440, 0)">
+      <text x="55" y="300" text-anchor="middle" class="group-label">40 frames</text>
+      <!-- Linux default: 314ns -->
+      <rect x="0" y="134" width="25" height="146" fill="#95a5a6" rx="2"/>
+      <text x="12" y="154" text-anchor="middle" class="bar-label">314</text>
+      <!-- Linux smallvec: 254ns -->
+      <rect x="30" y="162" width="25" height="118" fill="#27ae60" rx="2"/>
+      <text x="42" y="182" text-anchor="middle" class="bar-label">254</text>
+      <!-- Windows default: 569ns -->
+      <rect x="60" y="16" width="25" height="264" fill="#7f8c8d" rx="2"/>
+      <text x="72" y="36" text-anchor="middle" class="bar-label">569</text>
+      <!-- Windows smallvec-256: 302ns -->
+      <rect x="90" y="140" width="25" height="140" fill="#2ecc71" rx="2"/>
+      <text x="102" y="160" text-anchor="middle" class="bar-label">302</text>
+    </g>
+
+    <!-- Speedup labels -->
+    <g transform="translate(580, 0)">
+      <text x="30" y="140" text-anchor="middle" class="subtitle">Speedup</text>
+      <text x="30" y="160" text-anchor="middle" class="tick-label">vs default:</text>
+
+      <text x="30" y="190" text-anchor="middle" class="tick-label">3fr: 32-72%</text>
+      <text x="30" y="210" text-anchor="middle" class="tick-label">10fr: 49-67%</text>
+      <text x="30" y="230" text-anchor="middle" class="tick-label">25fr: 20-59%</text>
+      <text x="30" y="250" text-anchor="middle" class="tick-label">40fr: 19-47%</text>
+    </g>
+  </g>
+
+  <!-- Legend -->
+  <g transform="translate(100, 400)">
+    <rect x="0" y="0" width="15" height="15" fill="#95a5a6" rx="2"/>
+    <text x="20" y="12" class="legend-text">Linux default (heap)</text>
+
+    <rect x="170" y="0" width="15" height="15" fill="#27ae60" rx="2"/>
+    <text x="190" y="12" class="legend-text">Linux smallvec-128</text>
+
+    <rect x="350" y="0" width="15" height="15" fill="#7f8c8d" rx="2"/>
+    <text x="370" y="12" class="legend-text">Windows default (heap)</text>
+
+    <rect x="550" y="0" width="15" height="15" fill="#2ecc71" rx="2"/>
+    <text x="570" y="12" class="legend-text">Windows best smallvec</text>
+  </g>
+</svg>

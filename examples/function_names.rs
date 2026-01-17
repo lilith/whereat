@@ -6,7 +6,7 @@
 //!
 //! The trick: closure types include their parent function name in their type_name.
 
-use errat::{at, At, ResultAtExt};
+use errat::{At, ResultAtExt, at};
 
 /// Helper to show the type_name_of trick
 #[inline(always)]
@@ -80,8 +80,14 @@ fn main() {
 
     fn dummy() {}
     println!("type_name_of(dummy)           = {:?}", type_name_of(dummy));
-    println!("type_name_of(app::initialize) = {:?}", type_name_of(app::initialize));
-    println!("type_name_of(config::load_file) = {:?}", type_name_of(config::load_file));
+    println!(
+        "type_name_of(app::initialize) = {:?}",
+        type_name_of(app::initialize)
+    );
+    println!(
+        "type_name_of(config::load_file) = {:?}",
+        type_name_of(config::load_file)
+    );
 
     // Nested fn trick
     fn f() {}
@@ -93,7 +99,10 @@ fn main() {
     // Closure type includes parent function
     let closure = || {};
     println!("\nClosure type in main():");
-    println!("  type_name_of_val = {:?}", std::any::type_name_of_val(&closure));
+    println!(
+        "  type_name_of_val = {:?}",
+        std::any::type_name_of_val(&closure)
+    );
 
     // Built-in at_fn approach
     println!("\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━");

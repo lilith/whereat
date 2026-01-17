@@ -18,7 +18,7 @@ use crate::AtCrateInfo;
 /// This allows storing arbitrary typed data while still being able to:
 /// - Debug-print it
 /// - Downcast it back to the original type
-pub trait AtDebugAny: core::any::Any + fmt::Debug + Send + Sync {
+pub(crate) trait AtDebugAny: core::any::Any + fmt::Debug + Send + Sync {
     /// Get a reference to self as `&dyn Any` for downcasting.
     fn as_any(&self) -> &dyn core::any::Any;
 
@@ -44,7 +44,7 @@ impl<T: core::any::Any + fmt::Debug + Send + Sync> AtDebugAny for T {
 ///
 /// Similar to `AtDebugAny` but for types that implement `Display`.
 /// Use this when you want human-readable output instead of debug format.
-pub trait AtDisplayAny: core::any::Any + fmt::Display + Send + Sync {
+pub(crate) trait AtDisplayAny: core::any::Any + fmt::Display + Send + Sync {
     /// Get a reference to self as `&dyn Any` for downcasting.
     fn as_any(&self) -> &dyn core::any::Any;
 

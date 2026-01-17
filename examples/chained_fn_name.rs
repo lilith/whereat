@@ -4,7 +4,7 @@
 //! This example demonstrates the built-in `.at_fn(|| {})` method which captures
 //! both the source location (file:line:col) AND the function name at zero runtime cost.
 
-use errat::{at, At, ResultAtExt};
+use errat::{At, ResultAtExt, at};
 
 // ============================================================================
 // Example error type
@@ -33,23 +33,19 @@ mod config {
     use super::*;
 
     pub fn load_file(path: &str) -> Result<String, At<ConfigError>> {
-        Err(at(ConfigError::NotFound(path.to_string()))
-            .at_fn(|| {}))  // <-- captures file:line + function name!
+        Err(at(ConfigError::NotFound(path.to_string())).at_fn(|| {})) // <-- captures file:line + function name!
     }
 
     pub fn parse(content: &str) -> Result<(), At<ConfigError>> {
         if content.is_empty() {
-            return Err(at(ConfigError::ParseError("empty".into()))
-                .at_fn(|| {}));
+            return Err(at(ConfigError::ParseError("empty".into())).at_fn(|| {}));
         }
         Ok(())
     }
 
     pub fn load_and_parse(path: &str) -> Result<(), At<ConfigError>> {
-        let content = load_file(path)
-            .at_fn(|| {})?;  // <-- works on Result too!
-        parse(&content)
-            .at_fn(|| {})
+        let content = load_file(path).at_fn(|| {})?; // <-- works on Result too!
+        parse(&content).at_fn(|| {})
     }
 }
 

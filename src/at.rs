@@ -7,6 +7,7 @@ use alloc::borrow::Cow;
 use alloc::boxed::Box;
 use alloc::string::String;
 use core::fmt;
+use core::hash::{Hash, Hasher};
 use core::panic::Location;
 
 use crate::AtCrateInfo;
@@ -24,6 +25,26 @@ use crate::trace::{AtFrame, AtTrace, AtTraceBoxed, AtTraceSegment};
 /// `At<E>` is `sizeof(E) + 8` bytes on 64-bit platforms:
 /// - The error `E` is stored inline
 /// - The trace is boxed (8-byte pointer, null when empty)
+///
+/// ## Equality and Hashing
+///
+/// `At<E>` implements `PartialEq`, `Eq`, and `Hash` based **only on the inner
+/// error `E`**, ignoring the trace. The trace is metadata about *where* an
+/// error was created, not *what* the error is.
+///
+/// This means two `At<E>` values are equal if their inner errors are equal,
+/// even if they were created at different source locations:
+///
+/// ```rust
+/// use errat::at;
+///
+/// #[derive(Debug, PartialEq)]
+/// struct MyError(u32);
+///
+/// let err1 = at(MyError(42));  // Created here
+/// let err2 = at(MyError(42));  // Created on different line
+/// assert_eq!(err1, err2);      // Equal because inner errors match
+/// ```
 ///
 /// ## Example
 ///
@@ -157,9 +178,7 @@ impl<E> At<E> {
         let full_name = core::any::type_name::<F>();
         // Type looks like: "crate::module::function::{{closure}}"
         // Strip "::{{closure}}" suffix if present
-        let name = full_name
-            .strip_suffix("::{{closure}}")
-            .unwrap_or(full_name);
+        let name = full_name.strip_suffix("::{{closure}}").unwrap_or(full_name);
         let loc = Location::caller();
         let trace = self.trace.get_or_insert_mut();
         // First push a new location frame
@@ -1051,6 +1070,16 @@ impl<E: PartialEq> PartialEq for At<E> {
 }
 
 impl<E: Eq> Eq for At<E> {}
+
+impl<E: Hash> Hash for At<E> {
+    /// Hash only the inner error, not the trace.
+    ///
+    /// Consistent with `PartialEq`: the trace is metadata, not identity.
+    #[inline]
+    fn hash<H: Hasher>(&self, state: &mut H) {
+        self.error.hash(state);
+    }
+}
 
 // ============================================================================
 // AsRef impl for At<E>

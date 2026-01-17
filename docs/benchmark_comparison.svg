@@ -1,0 +1,119 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 800 500">
+  <defs>
+    <style>
+      .title { font: bold 18px sans-serif; fill: #333; }
+      .subtitle { font: 12px sans-serif; fill: #666; }
+      .axis-label { font: 12px sans-serif; fill: #333; }
+      .tick-label { font: 10px sans-serif; fill: #666; }
+      .bar-label { font: bold 10px sans-serif; fill: white; }
+      .bar-value { font: 10px sans-serif; fill: #333; }
+      .legend-text { font: 11px sans-serif; fill: #333; }
+      .note { font: 10px sans-serif; fill: #888; font-style: italic; }
+    </style>
+  </defs>
+
+  <!-- Background -->
+  <rect width="800" height="500" fill="#fafafa"/>
+
+  <!-- Title -->
+  <text x="400" y="30" text-anchor="middle" class="title">Error Handling Performance Comparison</text>
+  <text x="400" y="50" text-anchor="middle" class="subtitle">Per-error latency (lower is better) - 100% error rate, String allocation</text>
+
+  <!-- Chart area -->
+  <g transform="translate(120, 80)">
+    <!-- Y-axis -->
+    <line x1="0" y1="0" x2="0" y2="300" stroke="#ccc" stroke-width="1"/>
+
+    <!-- Grid lines and Y labels -->
+    <g class="tick-label">
+      <line x1="0" y1="0" x2="580" y2="0" stroke="#eee"/>
+      <text x="-10" y="4" text-anchor="end">6200ns</text>
+
+      <line x1="0" y1="50" x2="580" y2="50" stroke="#eee"/>
+      <text x="-10" y="54" text-anchor="end">5000ns</text>
+
+      <line x1="0" y1="100" x2="580" y2="100" stroke="#eee"/>
+      <text x="-10" y="104" text-anchor="end">4000ns</text>
+
+      <line x1="0" y1="150" x2="580" y2="150" stroke="#eee"/>
+      <text x="-10" y="154" text-anchor="end">3000ns</text>
+
+      <line x1="0" y1="200" x2="580" y2="200" stroke="#eee"/>
+      <text x="-10" y="204" text-anchor="end">2000ns</text>
+
+      <line x1="0" y1="250" x2="580" y2="250" stroke="#eee"/>
+      <text x="-10" y="254" text-anchor="end">1000ns</text>
+
+      <line x1="0" y1="300" x2="580" y2="300" stroke="#ccc"/>
+      <text x="-10" y="304" text-anchor="end">0ns</text>
+    </g>
+
+    <!-- X-axis -->
+    <line x1="0" y1="300" x2="580" y2="300" stroke="#ccc" stroke-width="1"/>
+
+    <!-- Bars -->
+    <!-- backtrace crate: 6200ns (full height) -->
+    <rect x="20" y="0" width="80" height="300" fill="#e74c3c" rx="3"/>
+    <text x="60" y="20" text-anchor="middle" class="bar-label">6200ns</text>
+    <text x="60" y="320" text-anchor="middle" class="tick-label">backtrace</text>
+    <text x="60" y="335" text-anchor="middle" class="tick-label">crate</text>
+
+    <!-- anyhow+BACKTRACE: 2100ns -->
+    <rect x="120" y="198" width="80" height="102" fill="#e67e22" rx="3"/>
+    <text x="160" y="218" text-anchor="middle" class="bar-label">2100ns</text>
+    <text x="160" y="320" text-anchor="middle" class="tick-label">anyhow</text>
+    <text x="160" y="335" text-anchor="middle" class="tick-label">+BACKTRACE</text>
+
+    <!-- panic_unwind: 1300ns -->
+    <rect x="220" y="237" width="80" height="63" fill="#f39c12" rx="3"/>
+    <text x="260" y="257" text-anchor="middle" class="bar-label">1300ns</text>
+    <text x="260" y="320" text-anchor="middle" class="tick-label">panic</text>
+    <text x="260" y="335" text-anchor="middle" class="tick-label">+catch</text>
+
+    <!-- errat 3 frames: 61ns (need to scale for visibility) -->
+    <rect x="320" y="297" width="80" height="3" fill="#27ae60" rx="1"/>
+    <text x="360" y="292" text-anchor="middle" class="bar-value">61ns</text>
+    <text x="360" y="320" text-anchor="middle" class="tick-label">errat</text>
+    <text x="360" y="335" text-anchor="middle" class="tick-label">3 frames</text>
+
+    <!-- anyhow (no backtrace): 46ns -->
+    <rect x="420" y="298" width="80" height="2" fill="#3498db" rx="1"/>
+    <text x="460" y="292" text-anchor="middle" class="bar-value">46ns</text>
+    <text x="460" y="320" text-anchor="middle" class="tick-label">anyhow</text>
+    <text x="460" y="335" text-anchor="middle" class="tick-label">(no trace)</text>
+
+    <!-- errat 0 frames: 36ns -->
+    <rect x="520" y="298" width="80" height="2" fill="#2ecc71" rx="1"/>
+    <text x="560" y="292" text-anchor="middle" class="bar-value">36ns</text>
+    <text x="560" y="320" text-anchor="middle" class="tick-label">errat</text>
+    <text x="560" y="335" text-anchor="middle" class="tick-label">0 frames</text>
+  </g>
+
+  <!-- Speedup annotations -->
+  <g transform="translate(120, 80)">
+    <text x="60" y="-10" text-anchor="middle" class="note">baseline</text>
+    <text x="160" y="-10" text-anchor="middle" class="note">3x faster</text>
+    <text x="260" y="-10" text-anchor="middle" class="note">5x faster</text>
+    <text x="360" y="-10" text-anchor="middle" class="note">102x faster</text>
+    <text x="460" y="-10" text-anchor="middle" class="note">135x faster</text>
+    <text x="560" y="-10" text-anchor="middle" class="note">172x faster</text>
+  </g>
+
+  <!-- Legend -->
+  <g transform="translate(50, 440)">
+    <rect x="0" y="0" width="15" height="15" fill="#e74c3c" rx="2"/>
+    <text x="20" y="12" class="legend-text">Full stack capture</text>
+
+    <rect x="150" y="0" width="15" height="15" fill="#e67e22" rx="2"/>
+    <text x="170" y="12" class="legend-text">Optional backtrace (enabled)</text>
+
+    <rect x="360" y="0" width="15" height="15" fill="#f39c12" rx="2"/>
+    <text x="380" y="12" class="legend-text">Stack unwinding</text>
+
+    <rect x="520" y="0" width="15" height="15" fill="#27ae60" rx="2"/>
+    <text x="540" y="12" class="legend-text">errat #[track_caller]</text>
+  </g>
+
+  <!-- Footer note -->
+  <text x="400" y="480" text-anchor="middle" class="note">Benchmark: 10,000 errors with String allocation, Linux/WSL. See BENCHMARK.md for details.</text>
+</svg>
