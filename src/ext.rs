@@ -25,7 +25,7 @@ use crate::trace::AtTraceable;
 /// For types without `Error`, use the `at()` function or `at!()` macro instead.
 ///
 /// ```rust
-/// use errat::{ErrorAtExt, ResultAtExt};
+/// use whereat::{ErrorAtExt, ResultAtExt};
 /// use core::fmt;
 ///
 /// #[derive(Debug)]
@@ -39,11 +39,11 @@ use crate::trace::AtTraceable;
 ///
 /// impl core::error::Error for MyError {}
 ///
-/// fn inner() -> Result<(), errat::At<MyError>> {
+/// fn inner() -> Result<(), whereat::At<MyError>> {
 ///     Err(MyError::NotFound.start_at())
 /// }
 ///
-/// fn outer() -> Result<(), errat::At<MyError>> {
+/// fn outer() -> Result<(), whereat::At<MyError>> {
 ///     inner().at()?;  // .at() adds another location
 ///     Ok(())
 /// }
@@ -81,7 +81,7 @@ impl<E: core::error::Error> ErrorAtExt for E {
 /// ## Example
 ///
 /// ```rust
-/// use errat::{at, At, ResultAtExt};
+/// use whereat::{at, At, ResultAtExt};
 ///
 /// #[derive(Debug)]
 /// enum MyError { Oops }
@@ -156,7 +156,7 @@ pub trait ResultAtExt<T, E> {
     /// ## Example
     ///
     /// ```rust
-    /// use errat::{at, At, ResultAtExt};
+    /// use whereat::{at, At, ResultAtExt};
     ///
     /// #[derive(Debug)]
     /// struct InternalError;
@@ -301,13 +301,13 @@ impl<T, E> ResultAtExt<T, E> for Result<T, At<E>> {
 /// ## Example
 ///
 /// ```rust
-/// use errat::ResultStartAtExt;
+/// use whereat::ResultStartAtExt;
 ///
 /// fn fallible() -> Result<(), &'static str> {
 ///     Err("something went wrong")
 /// }
 ///
-/// fn wrapper() -> Result<(), errat::At<&'static str>> {
+/// fn wrapper() -> Result<(), whereat::At<&'static str>> {
 ///     fallible().start_at()?;  // converts to At and captures location
 ///     Ok(())
 /// }
@@ -315,7 +315,7 @@ impl<T, E> ResultAtExt<T, E> for Result<T, At<E>> {
 pub trait ResultStartAtExt<T, E> {
     /// Convert the error to `At<E>` and add the caller's location.
     ///
-    /// Use this to wrap errors from code that doesn't use errat.
+    /// Use this to wrap errors from code that doesn't use whereat.
     /// Chain with `ResultAtExt` methods for context: `.start_at().at_str("msg")?`
     #[track_caller]
     fn start_at(self) -> Result<T, At<E>>;
@@ -360,7 +360,7 @@ impl<T, E> ResultStartAtExt<T, E> for Result<T, E> {
 /// ## Example
 ///
 /// ```rust
-/// use errat::{AtTrace, AtTraceable, ResultAtTraceableExt};
+/// use whereat::{AtTrace, AtTraceable, ResultAtTraceableExt};
 ///
 /// struct MyError {
 ///     msg: &'static str,

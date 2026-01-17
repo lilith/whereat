@@ -63,10 +63,10 @@ fn panic_level_1() {
 }
 
 // ============================================================================
-// 4. errat - #[track_caller] locations
+// 4. whereat - #[track_caller] locations
 // ============================================================================
 
-use errat::{At, ResultAtExt, at};
+use whereat::{At, ResultAtExt, at};
 
 #[derive(Debug)]
 struct MyError(&'static str);
@@ -83,18 +83,18 @@ impl std::fmt::Display for MyError {
 // will be reported as the caller's location instead.
 
 #[inline(never)]
-fn errat_level_3() -> Result<(), At<MyError>> {
+fn whereat_level_3() -> Result<(), At<MyError>> {
     Err(at(MyError("error at level 3"))) // Line captured here
 }
 
 #[inline(never)]
-fn errat_level_2() -> Result<(), At<MyError>> {
-    errat_level_3().at() // Line captured here
+fn whereat_level_2() -> Result<(), At<MyError>> {
+    whereat_level_3().at() // Line captured here
 }
 
 #[inline(never)]
-fn errat_level_1() -> Result<(), At<MyError>> {
-    errat_level_2().at() // Line captured here
+fn whereat_level_1() -> Result<(), At<MyError>> {
+    whereat_level_2().at() // Line captured here
 }
 
 fn main() {
@@ -156,7 +156,7 @@ fn main() {
     println!("=== ERRAT (#[track_caller]) ===");
     println!("Captures: Source location at each .at() call site");
     println!();
-    let err = errat_level_1().unwrap_err();
+    let err = whereat_level_1().unwrap_err();
     println!("  Display: {}", err);
     println!();
     println!("  Debug: {:?}", err);
@@ -168,5 +168,5 @@ fn main() {
     println!("| backtrace  | Full native stack (all frames)      | ~6µs      |");
     println!("| anyhow     | Optional backtrace (RUST_BACKTRACE) | 30ns/2µs  |");
     println!("| panic      | Message + optional backtrace        | ~1.3µs    |");
-    println!("| errat      | Source locations via #[track_caller]| ~20-30ns  |");
+    println!("| whereat      | Source locations via #[track_caller]| ~20-30ns  |");
 }

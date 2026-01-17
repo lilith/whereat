@@ -4,7 +4,7 @@
 //! This example demonstrates the built-in `.at_fn(|| {})` method which captures
 //! both the source location (file:line:col) AND the function name at zero runtime cost.
 
-use errat::{At, ResultAtExt, at};
+use whereat::{At, ResultAtExt, at};
 
 // ============================================================================
 // Example error type

@@ -1,4 +1,4 @@
-//! Examples of errat usage patterns - good, bad, and ugly.
+//! Examples of whereat usage patterns - good, bad, and ugly.
 //!
 //! Run with: cargo run --example patterns
 //!
@@ -8,7 +8,7 @@
 //! - Performance implications of different approaches
 
 use core::fmt;
-use errat::{At, ResultAtExt, ResultStartAtExt, at};
+use whereat::{At, ResultAtExt, ResultStartAtExt, at};
 
 // =============================================================================
 // Error Types

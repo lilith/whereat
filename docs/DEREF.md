@@ -1,4 +1,4 @@
-# Ergonomics Improvements for errat
+# Ergonomics Improvements for whereat
 
 This document captures ideas for improving pattern matching and error handling ergonomics.
 
@@ -148,7 +148,7 @@ pub enum ErrorKind {
     IoError { reason: String },
 }
 
-pub type Error = errat::At<ErrorKind>;
+pub type Error = whereat::At<ErrorKind>;
 pub type Result<T> = core::result::Result<T, Error>;
 ```
 

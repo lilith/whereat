@@ -1,4 +1,4 @@
-# errat development commands
+# whereat development commands
 
 # Run all checks (fmt, clippy, test)
 check:

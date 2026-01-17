@@ -1,4 +1,4 @@
-# errat TODO
+# whereat TODO
 
 ## v0.1 Implementation
 
@@ -27,7 +27,7 @@
 ### Cleanup
 
 - [x] Remove `ErrorMeta` trait (replaced by `CrateInfo` in trace)
-- [x] Remove `errat-derive` crate (no longer needed)
+- [x] Remove `whereat-derive` crate (no longer needed)
 - [x] Remove unused `std` feature
 - [x] Require `E: Error` for `ErrorAtExt` blanket impl
 - [x] Fix all doctests for new API

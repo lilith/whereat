@@ -173,7 +173,7 @@ fn context_iter(vec: &ContextVec) -> impl DoubleEndedIterator<Item = &ContextEnt
 /// ## Example: Embedding in custom error
 ///
 /// ```rust
-/// use errat::{AtTrace, AtTraceable};
+/// use whereat::{AtTrace, AtTraceable};
 ///
 /// struct MyError {
 ///     kind: &'static str,
@@ -230,7 +230,7 @@ impl AtTrace {
     /// ## Example
     ///
     /// ```rust
-    /// use errat::AtTrace;
+    /// use whereat::AtTrace;
     ///
     /// struct MyError {
     ///     trace: AtTrace,
@@ -333,7 +333,7 @@ impl AtTrace {
     /// ## Example
     ///
     /// ```rust
-    /// use errat::at;
+    /// use whereat::at;
     ///
     /// #[derive(Debug)]
     /// struct MyError;
@@ -523,7 +523,7 @@ impl Default for AtTrace {
 /// ## Example: Transferring trace segments
 ///
 /// ```rust
-/// use errat::{at, At, AtTrace};
+/// use whereat::{at, At, AtTrace};
 ///
 /// #[derive(Debug)]
 /// struct Error1;
@@ -640,7 +640,7 @@ impl AtTraceSegment {
 /// ## Example
 ///
 /// ```rust
-/// use errat::at;
+/// use whereat::at;
 ///
 /// #[derive(Debug)]
 /// struct MyError;
@@ -720,7 +720,7 @@ impl fmt::Debug for AtFrame<'_> {
 /// ## Example
 ///
 /// ```rust
-/// use errat::{AtTraceBoxed, AtTrace, AtTraceable};
+/// use whereat::{AtTraceBoxed, AtTrace, AtTraceable};
 ///
 /// struct MyError {
 ///     kind: &'static str,
@@ -873,7 +873,7 @@ impl From<AtTraceBoxed> for Option<AtTrace> {
 /// ## Example: Inline trace
 ///
 /// ```rust
-/// use errat::{AtTrace, AtTraceable};
+/// use whereat::{AtTrace, AtTraceable};
 /// use std::fmt;
 ///
 /// struct MyError {
@@ -903,7 +903,7 @@ impl From<AtTraceBoxed> for Option<AtTrace> {
 /// ## Example: Boxed trace (smaller error type)
 ///
 /// ```rust
-/// use errat::{AtTrace, AtTraceable};
+/// use whereat::{AtTrace, AtTraceable};
 /// use std::fmt;
 ///
 /// struct MyError {
@@ -930,7 +930,7 @@ impl From<AtTraceBoxed> for Option<AtTrace> {
 /// ## Example: Optional boxed trace (lazy allocation)
 ///
 /// ```rust
-/// use errat::{AtTrace, AtTraceable};
+/// use whereat::{AtTrace, AtTraceable};
 /// use std::fmt;
 ///
 /// struct MyError {
@@ -987,7 +987,7 @@ pub trait AtTraceable: Sized {
     /// ## Example
     ///
     /// ```rust
-    /// use errat::{AtTrace, AtTraceable};
+    /// use whereat::{AtTrace, AtTraceable};
     /// use std::fmt;
     ///
     /// #[derive(Debug)]
@@ -1113,7 +1113,7 @@ pub trait AtTraceable: Sized {
     /// ## Example
     ///
     /// ```rust
-    /// use errat::{AtTrace, AtTraceable};
+    /// use whereat::{AtTrace, AtTraceable};
     ///
     /// struct MyError {
     ///     trace: AtTrace,
@@ -1241,7 +1241,7 @@ pub trait AtTraceable: Sized {
     /// ## Example
     ///
     /// ```rust
-    /// use errat::{AtTrace, AtTraceable};
+    /// use whereat::{AtTrace, AtTraceable};
     /// use std::fmt;
     ///
     /// struct MyError {
@@ -1285,7 +1285,7 @@ pub trait AtTraceable: Sized {
     /// ## Example
     ///
     /// ```rust
-    /// use errat::{AtTrace, AtTraceable};
+    /// use whereat::{AtTrace, AtTraceable};
     /// use std::fmt;
     ///
     /// struct MyError {

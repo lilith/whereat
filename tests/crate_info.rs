@@ -3,10 +3,10 @@
 #![allow(dead_code)]
 
 use core::mem::size_of;
-use errat::{At, AtCrateInfo, at, at_crate};
+use whereat::{At, AtCrateInfo, at, at_crate};
 
 // Define the crate-level static for at!() and at_crate!() to reference
-errat::define_at_crate_info!();
+whereat::define_at_crate_info!();
 
 #[derive(Debug)]
 struct TestError;
@@ -27,7 +27,7 @@ fn crate_info_is_static() {
 fn crate_info_captures_crate_name() {
     let info = crate::at_crate_info();
 
-    assert_eq!(info.name(), "errat", "Should capture CARGO_PKG_NAME");
+    assert_eq!(info.name(), "whereat", "Should capture CARGO_PKG_NAME");
 }
 
 #[test]
@@ -94,7 +94,7 @@ fn at_macro_embeds_crate_info() {
         "at!() should embed crate info. Got: {:?}",
         err.crate_info()
     );
-    assert_eq!(err.crate_info().unwrap().name(), "errat");
+    assert_eq!(err.crate_info().unwrap().name(), "whereat");
 }
 
 #[test]
@@ -131,7 +131,7 @@ fn crate_info_accessible_from_context() {
 
     // at!() stores crate info directly on the trace via crate_info()
     let info = err.crate_info().expect("Should find AtCrateInfo on trace");
-    assert_eq!(info.name(), "errat");
+    assert_eq!(info.name(), "whereat");
 }
 
 #[test]
@@ -140,7 +140,7 @@ fn display_with_meta_uses_crate_info() {
     let output = format!("{}", err.display_with_meta());
 
     assert!(
-        output.contains("crate: errat"),
+        output.contains("crate: whereat"),
         "display_with_meta should show crate name. Got:\n{}",
         output
     );
@@ -152,7 +152,7 @@ fn display_with_meta_uses_crate_info() {
 
 mod simulated_dep {
     //! Simulates a dependency crate
-    use errat::{At, at};
+    use whereat::{At, at};
 
     #[derive(Debug)]
     pub struct DepError;
@@ -353,7 +353,7 @@ fn github_link_format_in_display() {
         .module("test")
         .build();
 
-    let err = errat::At::new(TestError).at().at_crate(&INFO);
+    let err = whereat::At::new(TestError).at().at_crate(&INFO);
     let output = format!("{}", err.display_with_meta());
 
     // Should generate GitHub blob URL
@@ -373,7 +373,7 @@ fn github_link_includes_line_number() {
         .module("test")
         .build();
 
-    let err = errat::At::new(TestError).at().at_crate(&INFO);
+    let err = whereat::At::new(TestError).at().at_crate(&INFO);
     let output = format!("{}", err.display_with_meta());
 
     // Should have #L<number> anchor
@@ -396,7 +396,7 @@ fn repo_without_commit_no_link() {
         )
         .build();
 
-    let err = errat::At::new(TestError).at().at_crate(&INFO);
+    let err = whereat::At::new(TestError).at().at_crate(&INFO);
     let output = format!("{}", err.display_with_meta());
 
     // Should NOT have blob URL without commit (can't make permalink)
@@ -419,7 +419,7 @@ fn trailing_slash_stripped_from_repo() {
         .module("test")
         .build();
 
-    let err = errat::At::new(TestError).at().at_crate(&INFO);
+    let err = whereat::At::new(TestError).at().at_crate(&INFO);
     let output = format!("{}", err.display_with_meta());
 
     // Should not have double slashes
@@ -451,7 +451,7 @@ fn crate_boundary_switches_github_links() {
         .build();
 
     // Simulate: error in crate-a, crosses to crate-b
-    let err = errat::At::new(TestError)
+    let err = whereat::At::new(TestError)
         .at()
         .at_crate(&CRATE_A)
         .at()
@@ -483,7 +483,7 @@ fn crate_boundary_affects_subsequent_locations() {
         .build();
 
     // Locations after boundary should use that crate's info
-    let err = errat::At::new(TestError)
+    let err = whereat::At::new(TestError)
         .at_crate(&CRATE_X) // Boundary
         .at() // Should use CRATE_X
         .at(); // Should use CRATE_X
@@ -521,7 +521,7 @@ fn multiple_boundary_switches() {
         .module("c3")
         .build();
 
-    let err = errat::At::new(TestError)
+    let err = whereat::At::new(TestError)
         .at_crate(&C1)
         .at()
         .at_crate(&C2)
@@ -548,8 +548,8 @@ fn nested_at_is_wasteful() {
     #[derive(Debug)]
     struct Inner;
 
-    let inner: At<Inner> = errat::at(Inner);
-    let outer: At<At<Inner>> = errat::at(inner);
+    let inner: At<Inner> = whereat::at(Inner);
+    let outer: At<At<Inner>> = whereat::at(inner);
 
     // Both have their own traces - wasteful!
     assert_eq!(outer.trace_len(), 1, "Outer has its own trace");
@@ -563,7 +563,7 @@ fn nested_at_is_wasteful() {
 fn prefer_result_at_over_nested_at() {
     // GOOD: Use ResultAtExt to extend existing trace
     fn good_inner() -> Result<(), At<TestError>> {
-        Err(errat::at(TestError))
+        Err(whereat::at(TestError))
     }
 
     fn good_outer() -> Result<(), At<TestError>> {
@@ -575,7 +575,7 @@ fn prefer_result_at_over_nested_at() {
 
     // BAD: Wrapping At in At
     fn bad_outer() -> At<At<TestError>> {
-        errat::at(errat::at(TestError)) // Creates nested traces
+        whereat::at(whereat::at(TestError)) // Creates nested traces
     }
 
     let bad_err = bad_outer();
@@ -597,7 +597,7 @@ fn github_link_has_full_url() {
         .module("mylib")
         .build();
 
-    let err = errat::At::new(TestError).at().at_crate(&INFO);
+    let err = whereat::At::new(TestError).at().at_crate(&INFO);
     let output = format!("{}", err.display_with_meta());
 
     // Should have complete clickable URL
@@ -617,7 +617,7 @@ fn github_link_has_file_path() {
         .module("test")
         .build();
 
-    let err = errat::At::new(TestError).at().at_crate(&INFO);
+    let err = whereat::At::new(TestError).at().at_crate(&INFO);
     let output = format!("{}", err.display_with_meta());
 
     // Should include file path in URL
@@ -637,7 +637,7 @@ fn github_link_line_number_is_numeric() {
         .module("test")
         .build();
 
-    let err = errat::At::new(TestError).at().at_crate(&INFO);
+    let err = whereat::At::new(TestError).at().at_crate(&INFO);
     let output = format!("{}", err.display_with_meta());
 
     // Find #L and verify it's followed by digits
@@ -674,7 +674,7 @@ fn windows_paths_converted_to_forward_slashes() {
         .module("test")
         .build();
 
-    let err = errat::At::new(TestError).at().at_crate(&INFO);
+    let err = whereat::At::new(TestError).at().at_crate(&INFO);
     let output = format!("{}", err.display_with_meta());
 
     // URL lines should not have backslashes
@@ -802,7 +802,7 @@ fn crate_path_included_in_github_url() {
         )
         .build();
 
-    let err = errat::At::new(TestError).at().at_crate(&INFO);
+    let err = whereat::At::new(TestError).at().at_crate(&INFO);
     let output = format!("{}", err.display_with_meta());
 
     // URL should include crate_path between commit and file
@@ -826,7 +826,7 @@ fn crate_path_none_works() {
         )
         .build();
 
-    let err = errat::At::new(TestError).at().at_crate(&INFO);
+    let err = whereat::At::new(TestError).at().at_crate(&INFO);
     let output = format!("{}", err.display_with_meta());
 
     // URL should work without crate_path
@@ -850,7 +850,7 @@ fn crate_path_with_trailing_slash() {
         )
         .build();
 
-    let err = errat::At::new(TestError).at().at_crate(&INFO);
+    let err = whereat::At::new(TestError).at().at_crate(&INFO);
     let output = format!("{}", err.display_with_meta());
 
     // Should not have double slashes
@@ -879,7 +879,7 @@ fn crate_path_without_trailing_slash() {
         )
         .build();
 
-    let err = errat::At::new(TestError).at().at_crate(&INFO);
+    let err = whereat::At::new(TestError).at().at_crate(&INFO);
     let output = format!("{}", err.display_with_meta());
 
     // Should still work (file path starts with tests/)
@@ -916,7 +916,7 @@ fn crate_info_static_has_correct_name() {
     let info = err
         .crate_info()
         .expect("Should find AtCrateInfo in at!() error");
-    assert_eq!(info.name(), "errat", "Should have crate name from env");
+    assert_eq!(info.name(), "whereat", "Should have crate name from env");
 }
 
 // Test that define_at_crate_info!(path = "...") variant works
@@ -924,7 +924,7 @@ mod with_path {
     use super::*;
 
     // This would be in a workspace crate's lib.rs
-    // errat::define_at_crate_info!(path = "crates/mylib/");
+    // whereat::define_at_crate_info!(path = "crates/mylib/");
 
     #[test]
     fn path_option_sets_crate_path() {
@@ -941,7 +941,7 @@ mod with_path {
 
         assert_eq!(INFO.crate_path(), Some("crates/mylib/"));
 
-        let err = errat::At::new(TestError).at().at_crate(&INFO);
+        let err = whereat::At::new(TestError).at().at_crate(&INFO);
         let output = format!("{}", err.display_with_meta());
 
         assert!(

@@ -136,9 +136,9 @@ mod with_panic {
 // 3. ERRAT - #[track_caller] with context
 // ============================================================================
 
-mod with_errat {
+mod with_whereat {
     use super::*;
-    use errat::{At, ResultAtExt, at};
+    use whereat::{At, ResultAtExt, at};
 
     #[derive(Debug)]
     pub enum ConfigError {
@@ -288,7 +288,7 @@ fn main() {
     println!("   Captures: Source locations + context at each .at() call");
     println!("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n");
 
-    let err = with_errat::initialize_app().unwrap_err();
+    let err = with_whereat::initialize_app().unwrap_err();
 
     println!("Display (message only):\n{}\n", err);
 
@@ -302,7 +302,7 @@ fn main() {
     println!("SUMMARY: Display Quality Comparison");
     println!("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n");
 
-    println!("| Feature                    | backtrace | panic | anyhow | errat |");
+    println!("| Feature                    | backtrace | panic | anyhow | whereat |");
     println!("|----------------------------|-----------|-------|--------|-------|");
     println!("| Source file:line           | ✓ (noisy) | ✗     | ✗      | ✓     |");
     println!("| Function names             | ✓ (noisy) | ✗     | ✗      | ✗     |");

@@ -203,7 +203,7 @@ impl fmt::Display for AtContext {
 /// ## Example
 ///
 /// ```rust
-/// use errat::{at, At};
+/// use whereat::{at, At};
 ///
 /// #[derive(Debug)]
 /// enum MyError { NotFound }
@@ -253,7 +253,7 @@ impl<'a> AtContextRef<'a> {
     /// ## Example
     ///
     /// ```rust
-    /// use errat::at;
+    /// use whereat::at;
     ///
     /// #[derive(Debug)]
     /// struct RequestInfo { user_id: u64 }

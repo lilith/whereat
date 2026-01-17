@@ -1,11 +1,11 @@
-//! Demonstrates errat with manual error type setup.
+//! Demonstrates whereat with manual error type setup.
 //!
 //! Run with: cargo run --example derive_macro
 
-use errat::{At, ResultAtExt, at};
+use whereat::{At, ResultAtExt, at};
 
 // Required for at!() macro - defines at_crate_info() getter
-errat::define_at_crate_info!();
+whereat::define_at_crate_info!();
 
 #[derive(Debug)]
 #[allow(dead_code)]

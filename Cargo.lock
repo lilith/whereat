@@ -209,19 +209,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "48c757948c5ede0e46177b7add2e67155f70e33c07fea8284df6576da70b3719"
 
 [[package]]
-name = "errat"
-version = "0.1.0"
-dependencies = [
- "anyhow",
- "backtrace",
- "criterion",
- "smallvec",
- "static_assertions",
- "thiserror",
- "tinyvec",
-]
-
-[[package]]
 name = "gimli"
 version = "0.32.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -627,6 +614,19 @@ checksum = "312e32e551d92129218ea9a2452120f4aabc03529ef03e4d0d82fb2780608598"
 dependencies = [
  "js-sys",
  "wasm-bindgen",
+]
+
+[[package]]
+name = "whereat"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "backtrace",
+ "criterion",
+ "smallvec",
+ "static_assertions",
+ "thiserror",
+ "tinyvec",
 ]
 
 [[package]]

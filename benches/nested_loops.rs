@@ -4,9 +4,9 @@
 //! 1. Plain enum - no tracing overhead
 //! 2. thiserror - derive-based error with Display
 //! 3. anyhow - dynamic error with context
-//! 4. errat inner tracing - trace at every level (eager)
-//! 5. errat outer tracing - delay tracing until outer loop (lazy)
-//! 6. errat outer context - add context strings in outer loop
+//! 4. whereat inner tracing - trace at every level (eager)
+//! 5. whereat outer tracing - delay tracing until outer loop (lazy)
+//! 6. whereat outer context - add context strings in outer loop
 //! 7. backtrace - full stack capture via backtrace crate
 //! 8. panic+catch_unwind - panic-based error handling
 //!
@@ -17,7 +17,7 @@
 #![allow(dead_code)]
 
 use criterion::{BenchmarkId, Criterion, black_box, criterion_group, criterion_main};
-use errat::{At, ResultAtExt, ResultStartAtExt, at};
+use whereat::{At, ResultAtExt, ResultStartAtExt, at};
 use std::panic::{AssertUnwindSafe, catch_unwind};
 
 use core::fmt;
@@ -509,15 +509,15 @@ fn bench_nested_no_errors(c: &mut Criterion) {
         b.iter(|| run_nested_loops(OUTER, INNER, FAIL_EVERY, outer_anyhow))
     });
 
-    group.bench_function("errat_inner", |b| {
+    group.bench_function("whereat_inner", |b| {
         b.iter(|| run_nested_loops(OUTER, INNER, FAIL_EVERY, outer_traced))
     });
 
-    group.bench_function("errat_outer", |b| {
+    group.bench_function("whereat_outer", |b| {
         b.iter(|| run_nested_loops(OUTER, INNER, FAIL_EVERY, outer_late_traced))
     });
 
-    group.bench_function("errat_outer_ctx", |b| {
+    group.bench_function("whereat_outer_ctx", |b| {
         b.iter(|| run_nested_loops(OUTER, INNER, FAIL_EVERY, outer_with_context))
     });
 
@@ -548,19 +548,19 @@ fn bench_nested_1pct_errors(c: &mut Criterion) {
         b.iter(|| run_nested_loops(OUTER, INNER, FAIL_EVERY, outer_anyhow_with_context))
     });
 
-    group.bench_function("errat_inner", |b| {
+    group.bench_function("whereat_inner", |b| {
         b.iter(|| run_nested_loops(OUTER, INNER, FAIL_EVERY, outer_traced))
     });
 
-    group.bench_function("errat_outer", |b| {
+    group.bench_function("whereat_outer", |b| {
         b.iter(|| run_nested_loops(OUTER, INNER, FAIL_EVERY, outer_late_traced))
     });
 
-    group.bench_function("errat_outer_ctx", |b| {
+    group.bench_function("whereat_outer_ctx", |b| {
         b.iter(|| run_nested_loops(OUTER, INNER, FAIL_EVERY, outer_with_context))
     });
 
-    group.bench_function("errat_outer_dyn_ctx", |b| {
+    group.bench_function("whereat_outer_dyn_ctx", |b| {
         b.iter(|| run_nested_loops(OUTER, INNER, FAIL_EVERY, outer_with_dynamic_context))
     });
 
@@ -583,7 +583,7 @@ fn bench_nested_5pct_errors(c: &mut Criterion) {
         b.iter(|| run_nested_loops(OUTER, INNER, FAIL_EVERY, outer_thiserror))
     });
 
-    group.bench_function("errat_0_frames", |b| {
+    group.bench_function("whereat_0_frames", |b| {
         b.iter(|| run_nested_loops(OUTER, INNER, FAIL_EVERY, outer_at_no_frames))
     });
 
@@ -591,15 +591,15 @@ fn bench_nested_5pct_errors(c: &mut Criterion) {
         b.iter(|| run_nested_loops(OUTER, INNER, FAIL_EVERY, outer_anyhow))
     });
 
-    group.bench_function("errat_outer", |b| {
+    group.bench_function("whereat_outer", |b| {
         b.iter(|| run_nested_loops(OUTER, INNER, FAIL_EVERY, outer_late_traced))
     });
 
-    group.bench_function("errat_inner", |b| {
+    group.bench_function("whereat_inner", |b| {
         b.iter(|| run_nested_loops(OUTER, INNER, FAIL_EVERY, outer_traced))
     });
 
-    group.bench_function("errat_outer_ctx", |b| {
+    group.bench_function("whereat_outer_ctx", |b| {
         b.iter(|| run_nested_loops(OUTER, INNER, FAIL_EVERY, outer_with_context))
     });
 
@@ -630,15 +630,15 @@ fn bench_nested_10pct_errors(c: &mut Criterion) {
         b.iter(|| run_nested_loops(OUTER, INNER, FAIL_EVERY, outer_anyhow_with_context))
     });
 
-    group.bench_function("errat_inner", |b| {
+    group.bench_function("whereat_inner", |b| {
         b.iter(|| run_nested_loops(OUTER, INNER, FAIL_EVERY, outer_traced))
     });
 
-    group.bench_function("errat_outer", |b| {
+    group.bench_function("whereat_outer", |b| {
         b.iter(|| run_nested_loops(OUTER, INNER, FAIL_EVERY, outer_late_traced))
     });
 
-    group.bench_function("errat_outer_ctx", |b| {
+    group.bench_function("whereat_outer_ctx", |b| {
         b.iter(|| run_nested_loops(OUTER, INNER, FAIL_EVERY, outer_with_context))
     });
 
@@ -673,24 +673,24 @@ fn bench_nested_100pct_errors(c: &mut Criterion) {
         b.iter(|| run_nested_loops(OUTER, INNER, FAIL_EVERY, outer_anyhow_with_dynamic_context))
     });
 
-    // errat with 0 frames - just At<E> wrapper overhead
-    group.bench_function("errat_0_frames", |b| {
+    // whereat with 0 frames - just At<E> wrapper overhead
+    group.bench_function("whereat_0_frames", |b| {
         b.iter(|| run_nested_loops(OUTER, INNER, FAIL_EVERY, outer_at_no_frames))
     });
 
-    group.bench_function("errat_inner", |b| {
+    group.bench_function("whereat_inner", |b| {
         b.iter(|| run_nested_loops(OUTER, INNER, FAIL_EVERY, outer_traced))
     });
 
-    group.bench_function("errat_outer", |b| {
+    group.bench_function("whereat_outer", |b| {
         b.iter(|| run_nested_loops(OUTER, INNER, FAIL_EVERY, outer_late_traced))
     });
 
-    group.bench_function("errat_outer_ctx", |b| {
+    group.bench_function("whereat_outer_ctx", |b| {
         b.iter(|| run_nested_loops(OUTER, INNER, FAIL_EVERY, outer_with_context))
     });
 
-    group.bench_function("errat_outer_dyn_ctx", |b| {
+    group.bench_function("whereat_outer_dyn_ctx", |b| {
         b.iter(|| run_nested_loops(OUTER, INNER, FAIL_EVERY, outer_with_dynamic_context))
     });
 
@@ -780,15 +780,15 @@ fn bench_single_error_overhead(c: &mut Criterion) {
         })
     });
 
-    // errat with 0 frames (just At<E> wrapper, no location capture)
-    group.bench_function("errat_0_frames", |b| {
+    // whereat with 0 frames (just At<E> wrapper, no location capture)
+    group.bench_function("whereat_0_frames", |b| {
         b.iter(|| {
             let err = outer_at_no_frames(black_box(0), black_box(0));
             black_box(err)
         })
     });
 
-    group.bench_function("errat_1_frame", |b| {
+    group.bench_function("whereat_1_frame", |b| {
         b.iter(|| {
             let err: Result<u32, At<StringError>> = Err(at(StringError::InnerFailed(format!(
                 "at {}",
@@ -798,28 +798,28 @@ fn bench_single_error_overhead(c: &mut Criterion) {
         })
     });
 
-    group.bench_function("errat_3_frames", |b| {
+    group.bench_function("whereat_3_frames", |b| {
         b.iter(|| {
             let err = outer_traced(black_box(0), black_box(0));
             black_box(err)
         })
     });
 
-    group.bench_function("errat_late_1_frame", |b| {
+    group.bench_function("whereat_late_1_frame", |b| {
         b.iter(|| {
             let err = outer_late_traced(black_box(0), black_box(0));
             black_box(err)
         })
     });
 
-    group.bench_function("errat_static_ctx", |b| {
+    group.bench_function("whereat_static_ctx", |b| {
         b.iter(|| {
             let err = outer_with_context(black_box(0), black_box(0));
             black_box(err)
         })
     });
 
-    group.bench_function("errat_dynamic_ctx", |b| {
+    group.bench_function("whereat_dynamic_ctx", |b| {
         b.iter(|| {
             let err = outer_with_dynamic_context(black_box(0), black_box(0));
             black_box(err)
@@ -869,13 +869,13 @@ fn bench_reproducible(c: &mut Criterion) {
         group.bench_function("thiserror", |b| {
             b.iter(|| run_nested_loops(OUTER, INNER, FAIL_EVERY, outer_thiserror))
         });
-        group.bench_function("errat_0_frames", |b| {
+        group.bench_function("whereat_0_frames", |b| {
             b.iter(|| run_nested_loops(OUTER, INNER, FAIL_EVERY, outer_at_no_frames))
         });
-        group.bench_function("errat_outer_1fr", |b| {
+        group.bench_function("whereat_outer_1fr", |b| {
             b.iter(|| run_nested_loops(OUTER, INNER, FAIL_EVERY, outer_late_traced))
         });
-        group.bench_function("errat_inner_3fr", |b| {
+        group.bench_function("whereat_inner_3fr", |b| {
             b.iter(|| run_nested_loops(OUTER, INNER, FAIL_EVERY, outer_traced))
         });
         group.bench_function("anyhow", |b| {
@@ -902,16 +902,16 @@ fn bench_reproducible(c: &mut Criterion) {
         group.bench_function("thiserror", |b| {
             b.iter(|| run_nested_loops(OUTER, INNER, FAIL_EVERY, outer_u64_thiserror))
         });
-        group.bench_function("errat_0_frames", |b| {
+        group.bench_function("whereat_0_frames", |b| {
             b.iter(|| run_nested_loops(OUTER, INNER, FAIL_EVERY, outer_u64_at_no_frames))
         });
-        group.bench_function("errat_outer_1fr", |b| {
+        group.bench_function("whereat_outer_1fr", |b| {
             b.iter(|| run_nested_loops(OUTER, INNER, FAIL_EVERY, outer_u64_late_traced))
         });
-        group.bench_function("errat_inner_3fr", |b| {
+        group.bench_function("whereat_inner_3fr", |b| {
             b.iter(|| run_nested_loops(OUTER, INNER, FAIL_EVERY, outer_u64_traced))
         });
-        group.bench_function("errat_inner_10fr", |b| {
+        group.bench_function("whereat_inner_10fr", |b| {
             b.iter(|| run_nested_loops(OUTER, INNER, FAIL_EVERY, u64_level_1))
         });
         group.finish();
@@ -928,13 +928,13 @@ fn bench_reproducible(c: &mut Criterion) {
         group.bench_function("thiserror", |b| {
             b.iter(|| run_nested_loops(OUTER, INNER, FAIL_EVERY, outer_thiserror))
         });
-        group.bench_function("errat_0_frames", |b| {
+        group.bench_function("whereat_0_frames", |b| {
             b.iter(|| run_nested_loops(OUTER, INNER, FAIL_EVERY, outer_at_no_frames))
         });
-        group.bench_function("errat_outer_1fr", |b| {
+        group.bench_function("whereat_outer_1fr", |b| {
             b.iter(|| run_nested_loops(OUTER, INNER, FAIL_EVERY, outer_late_traced))
         });
-        group.bench_function("errat_inner_3fr", |b| {
+        group.bench_function("whereat_inner_3fr", |b| {
             b.iter(|| run_nested_loops(OUTER, INNER, FAIL_EVERY, outer_traced))
         });
         group.bench_function("anyhow", |b| {
@@ -961,16 +961,16 @@ fn bench_reproducible(c: &mut Criterion) {
         group.bench_function("thiserror", |b| {
             b.iter(|| run_nested_loops(OUTER, INNER, FAIL_EVERY, outer_u64_thiserror))
         });
-        group.bench_function("errat_0_frames", |b| {
+        group.bench_function("whereat_0_frames", |b| {
             b.iter(|| run_nested_loops(OUTER, INNER, FAIL_EVERY, outer_u64_at_no_frames))
         });
-        group.bench_function("errat_outer_1fr", |b| {
+        group.bench_function("whereat_outer_1fr", |b| {
             b.iter(|| run_nested_loops(OUTER, INNER, FAIL_EVERY, outer_u64_late_traced))
         });
-        group.bench_function("errat_inner_3fr", |b| {
+        group.bench_function("whereat_inner_3fr", |b| {
             b.iter(|| run_nested_loops(OUTER, INNER, FAIL_EVERY, outer_u64_traced))
         });
-        group.bench_function("errat_inner_10fr", |b| {
+        group.bench_function("whereat_inner_10fr", |b| {
             b.iter(|| run_nested_loops(OUTER, INNER, FAIL_EVERY, u64_level_1))
         });
         group.finish();
@@ -1055,17 +1055,17 @@ fn bench_at_vs_at_fn(c: &mut Criterion) {
         b.iter(|| run_nested_loops(OUTER, INNER, FAIL_EVERY, outer_u64_plain))
     });
 
-    // errat .at() only - file:line, 3 frames
+    // whereat .at() only - file:line, 3 frames
     group.bench_function("at_3fr", |b| {
         b.iter(|| run_nested_loops(OUTER, INNER, FAIL_EVERY, outer_at_only))
     });
 
-    // errat .at_fn() - file:line + function name, 4 frames (at + at_fn adds a frame)
+    // whereat .at_fn() - file:line + function name, 4 frames (at + at_fn adds a frame)
     group.bench_function("at_fn_4fr", |b| {
         b.iter(|| run_nested_loops(OUTER, INNER, FAIL_EVERY, outer_at_fn))
     });
 
-    // errat .at().at_str() - file:line + context string, 6 frames (at + at_str each add a frame)
+    // whereat .at().at_str() - file:line + context string, 6 frames (at + at_str each add a frame)
     group.bench_function("at_str_6fr", |b| {
         b.iter(|| run_nested_loops(OUTER, INNER, FAIL_EVERY, outer_at_str))
     });
@@ -1154,7 +1154,7 @@ criterion_group!(
 criterion_main!(benches);
 
 // ============================================================================
-// Fair comparison: Same frame depth for backtrace vs errat
+// Fair comparison: Same frame depth for backtrace vs whereat
 // ============================================================================
 
 // 10-level deep call chain for backtrace
@@ -1207,7 +1207,7 @@ fn bt_level_1(i: u32, fail_at: u32) -> Result<u32, BacktraceError> {
     bt_level_2(i, fail_at).map(|x| black_box(x + 1))
 }
 
-// 10-level deep call chain for errat at_fn()
+// 10-level deep call chain for whereat at_fn()
 #[inline(never)]
 fn atfn_level_10(i: u32, fail_at: u32) -> Result<u32, At<U64Error>> {
     if i == fail_at {
@@ -1272,7 +1272,7 @@ fn atfn_level_1(i: u32, fail_at: u32) -> Result<u32, At<U64Error>> {
         .map(|x| black_box(x + 1))
 }
 
-// 10-level deep call chain for errat at() only
+// 10-level deep call chain for whereat at() only
 #[inline(never)]
 fn at_level_10(i: u32, fail_at: u32) -> Result<u32, At<U64Error>> {
     if i == fail_at {

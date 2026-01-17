@@ -1,7 +1,7 @@
 //! Benchmark 25-frame deep traces (fits in 28 slots without spill)
 //! Run: cargo run --release --example frames_25
 
-use errat::{At, ResultAtExt, at};
+use whereat::{At, ResultAtExt, at};
 use std::hint::black_box;
 use std::time::Instant;
 
@@ -57,7 +57,7 @@ fn main() {
     }
     let elapsed = start.elapsed();
     println!(
-        "errat 25 frames, {} errors: {:.3}ms ({:.1}ns/error)",
+        "whereat 25 frames, {} errors: {:.3}ms ({:.1}ns/error)",
         ITERS,
         elapsed.as_secs_f64() * 1000.0,
         elapsed.as_nanos() as f64 / ITERS as f64

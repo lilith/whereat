@@ -1,9 +1,9 @@
-//! Worst-case scenarios for errat usage patterns.
+//! Worst-case scenarios for whereat usage patterns.
 //!
 //! These tests explore edge cases and problematic patterns to ensure
 //! the library behaves correctly under stress and misuse.
 
-use errat::{At, ResultAtExt, ResultStartAtExt, at};
+use whereat::{At, ResultAtExt, ResultStartAtExt, at};
 
 #[allow(dead_code)]
 #[derive(Debug, Clone, PartialEq)]

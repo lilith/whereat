@@ -1,6 +1,6 @@
-//! Demonstrates errat stack traces in a realistic scenario.
+//! Demonstrates whereat stack traces in a realistic scenario.
 
-use errat::{At, ErrorAtExt, ResultAtExt};
+use whereat::{At, ErrorAtExt, ResultAtExt};
 
 #[derive(Debug)]
 #[allow(dead_code)]

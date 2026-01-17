@@ -1,7 +1,7 @@
 //! Benchmark 40-frame deep traces
 //! Run: cargo run --release --example frames_40
 
-use errat::{At, ResultAtExt, at};
+use whereat::{At, ResultAtExt, at};
 use std::hint::black_box;
 use std::time::Instant;
 
@@ -61,7 +61,7 @@ fn main() {
     }
     let elapsed = start.elapsed();
     println!(
-        "errat 40 frames, {} errors: {:.3}ms ({:.1}ns/error)",
+        "whereat 40 frames, {} errors: {:.3}ms ({:.1}ns/error)",
         ITERS,
         elapsed.as_secs_f64() * 1000.0,
         elapsed.as_nanos() as f64 / ITERS as f64

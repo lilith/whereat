@@ -1,10 +1,10 @@
 //! Integration tests for error output formatting.
 
 use core::error::Error;
-use errat::{At, ErrorAtExt, ResultAtExt, ResultStartAtExt, at};
+use whereat::{At, ErrorAtExt, ResultAtExt, ResultStartAtExt, at};
 
 // Define the crate-level static for at!() to reference
-errat::define_at_crate_info!();
+whereat::define_at_crate_info!();
 
 #[derive(Debug)]
 enum TestError {
@@ -326,7 +326,7 @@ fn display_with_meta_shows_crate_name() {
     let output = format!("{}", err.display_with_meta());
 
     assert!(
-        output.contains("crate: errat"),
+        output.contains("crate: whereat"),
         "display_with_meta should show crate name. Got:\n{}",
         output
     );

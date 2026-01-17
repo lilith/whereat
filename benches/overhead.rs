@@ -1,10 +1,10 @@
-//! Benchmarks for errat overhead in various scenarios.
+//! Benchmarks for whereat overhead in various scenarios.
 //!
 //! Run with: cargo bench
 //! Run specific benchmark: cargo bench --bench overhead -- "hot_loop"
 
 use criterion::{BenchmarkId, Criterion, black_box, criterion_group, criterion_main};
-use errat::{At, ResultAtExt, ResultStartAtExt, at};
+use whereat::{At, ResultAtExt, ResultStartAtExt, at};
 
 use core::fmt;
 
@@ -49,7 +49,7 @@ fn plain_result_err(_n: u64) -> Result<u64, BenchError> {
 }
 
 // ============================================================================
-// At<E> (errat tracing)
+// At<E> (whereat tracing)
 // ============================================================================
 
 fn at_result_ok(n: u64) -> Result<u64, At<BenchError>> {

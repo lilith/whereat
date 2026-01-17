@@ -6,7 +6,7 @@
 //!
 //! The trick: closure types include their parent function name in their type_name.
 
-use errat::{At, ResultAtExt, at};
+use whereat::{At, ResultAtExt, at};
 
 /// Helper to show the type_name_of trick
 #[inline(always)]

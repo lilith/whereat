@@ -1,13 +1,13 @@
-//! # errat - Top 5 Use Cases
+//! # whereat - Top 5 Use Cases
 //!
 //! Run with: `cargo run --example use_cases`
 
 #![allow(dead_code)]
 
-use errat::{At, ErrorAtExt, ResultAtExt, ResultStartAtExt, at, at_crate};
+use whereat::{At, ErrorAtExt, ResultAtExt, ResultStartAtExt, at, at_crate};
 
 // Required for at!() and at_crate!() macros - defines at_crate_info() getter
-errat::define_at_crate_info!();
+whereat::define_at_crate_info!();
 
 // ============================================================================
 // Use Case 1: Basic Error Propagation
@@ -213,7 +213,7 @@ mod use_case_4 {
 // Use Case 5: Late Tracing for Legacy Code
 // ============================================================================
 //
-// When integrating with code that doesn't use errat, mark the entry point.
+// When integrating with code that doesn't use whereat, mark the entry point.
 
 mod use_case_5 {
     use super::*;

@@ -1,25 +1,25 @@
-# errat
+# whereat
 
-[![CI](https://github.com/imazen/errat/actions/workflows/ci.yml/badge.svg)](https://github.com/imazen/errat/actions/workflows/ci.yml)
-[![Crates.io](https://img.shields.io/crates/v/errat.svg)](https://crates.io/crates/errat)
-[![Documentation](https://docs.rs/errat/badge.svg)](https://docs.rs/errat)
-[![codecov](https://codecov.io/gh/imazen/errat/branch/main/graph/badge.svg)](https://codecov.io/gh/imazen/errat)
-[![License](https://img.shields.io/crates/l/errat.svg)](LICENSE)
+[![CI](https://github.com/imazen/whereat/actions/workflows/ci.yml/badge.svg)](https://github.com/imazen/whereat/actions/workflows/ci.yml)
+[![Crates.io](https://img.shields.io/crates/v/whereat.svg)](https://crates.io/crates/whereat)
+[![Documentation](https://docs.rs/whereat/badge.svg)](https://docs.rs/whereat)
+[![codecov](https://codecov.io/gh/imazen/whereat/branch/main/graph/badge.svg)](https://codecov.io/gh/imazen/whereat)
+[![License](https://img.shields.io/crates/l/whereat.svg)](LICENSE)
 
-# Why `errat`? 
+# Why `whereat`? 
 
 *After a decade of distributing server binaries, I'm finally extracting this approach into its own crate!*
 
 In production, you need to immediately know 'err the bug is `at()` -- without panic!, debuginfo, or overhead. Just replace `?` with `.at()?` in your call tree to get beautiful build-time & async-friendly stacktraces. 
 Compatible with plain enums, errors, structs, thiserror, anyhow, or any type with #[derive(Debug)]. No changes to your error type are required! 
 
-Just `use errat::*` and `Err(at!(MyEnum::Problem))` to get an `Err(At<MyEnum>)`. 
+Just `use whereat::*` and `Err(at!(MyEnum::Problem))` to get an `Err(At<MyEnum>)`. 
 
 At<YourErr> is maximally minimal, and only adds 8 bytes to the stack plus a boxed (under 64 byte) struct for traces. It's `no_std+alloc`, and offers `tinyvec` features to cut total allocs down from 2 to 1. 
 
 Add arbitrary debug info at any time with `at_debug(|| impls_debug)`, `at_data(|| impls_display)`, `at_string(|| String)`, or `at_str("user_cursor_is_here")` on `Result` or `At<_>`, for one additional allocation each. 
 
-`errat` can (optionally, and with no runtime cost) have backtraces link to the exact commit and line number on github/etc! 
+`whereat` can (optionally, and with no runtime cost) have backtraces link to the exact commit and line number on github/etc! 
 
 **DO: Keep your hot loops zero-alloc:**
 * You do NOT need to use/add At<> inside hot loops or until you want to incur that allocation. `.start_at_late()` will start the stacktrace with `[...]` to avoid confusion. Skipping frames? `.at_skipped_frames()` will do the same.
@@ -29,16 +29,16 @@ Add arbitrary debug info at any time with `at_debug(|| impls_debug)`, `at_data(|
 We suggest the features `tinyvec-128-bytes` or `tinyvec-256-bytes` to give you 11 or 27  stacktrace lines (8 bytes each on 64-bit systems) *without* a 2nd allocation.
 
 **DO: Use `at_crate!()` when consuming a result or error from another crate**
-This will ensure backtrace lines specify the crate name (no more confusing `src/lib.rs:305` lines!). Requires `errat::define_at_crate_info!()` once in your crate root.
+This will ensure backtrace lines specify the crate name (no more confusing `src/lib.rs:305` lines!). Requires `whereat::define_at_crate_info!()` once in your crate root.
 
 **DO: Feel free to add an ergomonic alias**, like `type MyError = At<MyInternalError>`
 
 
-**Setup:** Add `errat::define_at_crate_info!();` once in your lib.rs or main.rs. This defines a `at_crate_info()` getter that `at!()` and `at_crate!()` use to embed crate metadata (name, repo URL, commit) for GitHub-linked backtraces.
+**Setup:** Add `whereat::define_at_crate_info!();` once in your lib.rs or main.rs. This defines a `at_crate_info()` getter that `at!()` and `at_crate!()` use to embed crate metadata (name, repo URL, commit) for GitHub-linked backtraces.
 
 ## Design Philosophy
 
-**You define your own error types.** errat doesn't impose any structure on your errors - use enums, structs, or whatever suits your domain. errat just wraps them in `At<E>` to add location+context+crate tracking.
+**You define your own error types.** whereat doesn't impose any structure on your errors - use enums, structs, or whatever suits your domain. whereat just wraps them in `At<E>` to add location+context+crate tracking.
 
 This means you can:
 - Use `thiserror` for ergonomic `Display`/`From` impls, or `anyhow`
@@ -62,9 +62,9 @@ This means you can:
 
 ```rust
 // In lib.rs or main.rs - required for at!() and at_crate!() macros
-errat::define_at_crate_info!();
+whereat::define_at_crate_info!();
 
-use errat::{At, ResultAtExt, at};
+use whereat::{At, ResultAtExt, at};
 
 #[derive(Debug)]
 enum MyError {
@@ -85,7 +85,7 @@ fn process(id: u64) -> Result<String, At<MyError>> {
 }
 ```
 
-For workspace crates, set the path: `errat::define_at_crate_info!(path = "crates/mylib/");`
+For workspace crates, set the path: `whereat::define_at_crate_info!(path = "crates/mylib/");`
 
 ## Crate Metadata Options
 
@@ -94,7 +94,7 @@ For workspace crates, set the path: `errat::define_at_crate_info!(path = "crates
 Add custom key-value pairs at compile time:
 
 ```rust
-errat::define_at_crate_info!(
+whereat::define_at_crate_info!(
     path = "crates/mylib/",
     meta = &[("team", "platform"), ("oncall", "platform@example.com")],
 );
@@ -108,7 +108,7 @@ For runtime-determined values (instance IDs, environment config), define your ow
 
 ```rust
 use std::sync::OnceLock;
-use errat::AtCrateInfo;
+use whereat::AtCrateInfo;
 
 static CRATE_INFO: OnceLock<AtCrateInfo> = OnceLock::new();
 
@@ -140,7 +140,7 @@ Enable inline storage for traces to avoid heap allocation for short traces:
 
 ```toml
 [dependencies]
-errat = { version = "0.1", features = ["tinyvec-128-bytes"] }
+whereat = { version = "0.1", features = ["tinyvec-128-bytes"] }
 ```
 
 ## Embedded Traces (Advanced)
@@ -148,7 +148,7 @@ errat = { version = "0.1", features = ["tinyvec-128-bytes"] }
 Instead of wrapping errors with `At<E>`, you can embed the trace directly in your error type using `AtTraceable`. This gives you full control over your error's layout.
 
 ```rust
-use errat::{AtTrace, AtTraceable, ResultAtTraceableExt};
+use whereat::{AtTrace, AtTraceable, ResultAtTraceableExt};
 use std::fmt;
 
 struct MyError {

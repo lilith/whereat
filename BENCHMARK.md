@@ -1,4 +1,4 @@
-# errat Benchmark Results
+# whereat Benchmark Results
 
 **Date:** 2026-01-16
 **Commit:** Run `git rev-parse HEAD` after committing
@@ -54,10 +54,10 @@ RUST_BACKTRACE=1 cargo bench --bench nested_loops -- "repr_.*string.*anyhow"
 |--------|------|-------------|
 | plain_enum | 43.9µs | 1.00x |
 | thiserror | 43.6µs | 0.99x |
-| errat_0_frames | 43.8µs | 1.00x |
-| errat_inner_3fr | 60.8µs | 1.39x |
-| errat_outer_1fr | 62.6µs | 1.43x |
-| errat_inner_10fr | 161.5µs | 3.68x |
+| whereat_0_frames | 43.8µs | 1.00x |
+| whereat_inner_3fr | 60.8µs | 1.39x |
+| whereat_outer_1fr | 62.6µs | 1.43x |
+| whereat_inner_10fr | 161.5µs | 3.68x |
 
 ### 100% Error Rate (10,000 errors)
 
@@ -65,18 +65,18 @@ RUST_BACKTRACE=1 cargo bench --bench nested_loops -- "repr_.*string.*anyhow"
 |--------|------|-------------|-----------|
 | plain_enum | 11.9µs | 1.00x | 1.2ns |
 | thiserror | 13.7µs | 1.15x | 1.4ns |
-| errat_0_frames | 16.2µs | 1.36x | 1.6ns |
-| errat_outer_1fr | 288µs | 24x | 28.8ns |
-| errat_inner_3fr | 318µs | 27x | 31.8ns |
-| errat_inner_10fr | 1012µs | 85x | 101ns |
+| whereat_0_frames | 16.2µs | 1.36x | 1.6ns |
+| whereat_outer_1fr | 288µs | 24x | 28.8ns |
+| whereat_inner_3fr | 318µs | 27x | 31.8ns |
+| whereat_inner_10fr | 1012µs | 85x | 101ns |
 
 ### 100% Error Rate with tinyvec-128-bytes
 
 | Method | Default | tinyvec-128 | Change |
 |--------|---------|-------------|--------|
-| errat_outer_1fr | 288µs | 260µs | -10% |
-| errat_inner_3fr | 318µs | 409µs | +29% |
-| errat_inner_10fr | 1012µs | 790µs | **-22%** |
+| whereat_outer_1fr | 288µs | 260µs | -10% |
+| whereat_inner_3fr | 318µs | 409µs | +29% |
+| whereat_inner_10fr | 1012µs | 790µs | **-22%** |
 
 **Conclusion:** tinyvec-128-bytes helps for deep traces (10+ frames), hurts for shallow (3 frames).
 
@@ -88,9 +88,9 @@ RUST_BACKTRACE=1 cargo bench --bench nested_loops -- "repr_.*string.*anyhow"
 |--------|------|-------------|
 | plain_enum | 65.9µs | 1.00x |
 | thiserror | 67.8µs | 1.03x |
-| errat_0_frames | 66.3µs | 1.01x |
-| errat_outer_1fr | 78.3µs | 1.19x |
-| errat_inner_3fr | 80.8µs | 1.23x |
+| whereat_0_frames | 66.3µs | 1.01x |
+| whereat_outer_1fr | 78.3µs | 1.19x |
+| whereat_inner_3fr | 80.8µs | 1.23x |
 | anyhow | 44.7µs | 0.68x (?) |
 | backtrace | 3126µs | 47x |
 | panic_unwind | 699µs | 10.6x |
@@ -103,22 +103,22 @@ Note: anyhow being faster at 5% is suspicious - may be branch prediction or meas
 |--------|------|-------------|-----------|
 | plain_enum | 360µs | 1.00x | 36ns |
 | thiserror | 361µs | 1.00x | 36ns |
-| errat_0_frames | 360µs | 1.00x | 36ns |
-| errat_outer_1fr | 525µs | 1.46x | 52.5ns |
-| errat_inner_3fr | 612µs | 1.70x | 61.2ns |
+| whereat_0_frames | 360µs | 1.00x | 36ns |
+| whereat_outer_1fr | 525µs | 1.46x | 52.5ns |
+| whereat_inner_3fr | 612µs | 1.70x | 61.2ns |
 | anyhow | 463µs | 1.29x | 46.3ns |
 | backtrace | 61,611µs | 171x | 6.2µs |
 | panic_unwind | 12,984µs | 36x | 1.3µs |
 
-## Comparison: errat vs Alternatives
+## Comparison: whereat vs Alternatives
 
 At 100% error rate with String allocation:
 
-| Method | Per-error | vs errat_1fr |
+| Method | Per-error | vs whereat_1fr |
 |--------|-----------|--------------|
-| **errat_0_frames** | 36ns | 0.69x |
-| **errat_outer_1fr** | 52ns | 1.00x |
-| **errat_inner_3fr** | 61ns | 1.17x |
+| **whereat_0_frames** | 36ns | 0.69x |
+| **whereat_outer_1fr** | 52ns | 1.00x |
+| **whereat_inner_3fr** | 61ns | 1.17x |
 | anyhow | 46ns | 0.88x |
 | anyhow (RUST_BACKTRACE=1) | ~2100ns | 40x |
 | panic_unwind | 1300ns | 25x |
@@ -179,13 +179,13 @@ Tested with U64Error (Copy, no String allocation) at various frame depths.
 
 ## Key Findings
 
-1. **`At<E>` wrapper has zero overhead** - errat_0_frames matches plain_enum exactly
+1. **`At<E>` wrapper has zero overhead** - whereat_0_frames matches plain_enum exactly
 2. **Frame capture cost: ~16ns per frame** (U64), ~25ns per frame (String)
 3. **Late tracing (outer_1fr) beats eager (inner_3fr)** when you only need 1 frame
 4. **smallvec outperforms tinyvec** by 10-15% at equivalent slot counts
-5. **errat is 119x faster** than full backtrace capture
-6. **errat is 25x faster** than panic+catch_unwind
-7. **anyhow with RUST_BACKTRACE=1 is 40x slower** than errat
+5. **whereat is 119x faster** than full backtrace capture
+6. **whereat is 25x faster** than panic+catch_unwind
+7. **anyhow with RUST_BACKTRACE=1 is 40x slower** than whereat
 8. **Windows benefits more from inline storage** due to higher allocator overhead
 
 ## Recommendations

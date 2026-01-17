@@ -1,4 +1,4 @@
-# errat - Project Instructions
+# whereat - Project Instructions
 
 Lightweight error location tracking crate. See [FEEDBACK.md](FEEDBACK.md) for user feedback log.
 

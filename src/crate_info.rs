@@ -19,7 +19,7 @@ use alloc::vec::Vec;
 /// ## Builder Pattern (Recommended)
 ///
 /// ```rust
-/// use errat::AtCrateInfo;
+/// use whereat::AtCrateInfo;
 ///
 /// static INFO: AtCrateInfo = AtCrateInfo::builder()
 ///     .name("mylib")
@@ -32,7 +32,7 @@ use alloc::vec::Vec;
 /// ## With Custom Metadata
 ///
 /// ```rust
-/// use errat::AtCrateInfo;
+/// use whereat::AtCrateInfo;
 ///
 /// static INFO: AtCrateInfo = AtCrateInfo::builder()
 ///     .name("mylib")
@@ -57,7 +57,7 @@ impl AtCrateInfo {
     /// ## Example
     ///
     /// ```rust
-    /// use errat::AtCrateInfo;
+    /// use whereat::AtCrateInfo;
     ///
     /// static INFO: AtCrateInfo = AtCrateInfo::builder()
     ///     .name(env!("CARGO_PKG_NAME"))
@@ -103,7 +103,7 @@ impl AtCrateInfo {
     /// ## Example
     ///
     /// ```rust
-    /// use errat::AtCrateInfo;
+    /// use whereat::AtCrateInfo;
     ///
     /// static INFO: AtCrateInfo = AtCrateInfo::builder()
     ///     .name("mylib")
@@ -150,7 +150,7 @@ const fn const_str_eq(a: &str, b: &str) -> bool {
 /// ## Example
 ///
 /// ```rust
-/// use errat::AtCrateInfo;
+/// use whereat::AtCrateInfo;
 ///
 /// static INFO: AtCrateInfo = AtCrateInfo::builder()
 ///     .name("mylib")
@@ -218,7 +218,7 @@ impl AtCrateInfoBuilder {
     /// ## Example
     ///
     /// ```rust
-    /// use errat::AtCrateInfo;
+    /// use whereat::AtCrateInfo;
     ///
     /// static INFO: AtCrateInfo = AtCrateInfo::builder()
     ///     .name("mylib")
@@ -297,7 +297,7 @@ impl AtCrateInfoBuilder {
     ///
     /// ```rust
     /// use std::sync::OnceLock;
-    /// use errat::AtCrateInfo;
+    /// use whereat::AtCrateInfo;
     ///
     /// static CRATE_INFO: OnceLock<AtCrateInfo> = OnceLock::new();
     ///

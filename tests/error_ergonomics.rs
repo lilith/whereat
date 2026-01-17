@@ -1,7 +1,7 @@
-//! Test ergonomics of errat with different error handling approaches.
+//! Test ergonomics of whereat with different error handling approaches.
 //!
 //! Tests interaction with:
-//! - At<E> (errat's wrapper)
+//! - At<E> (whereat's wrapper)
 //! - AtTraceable (embedded traces)
 //! - Regular enums
 //! - anyhow
@@ -10,7 +10,7 @@
 // Allow large error types in tests - we're demonstrating API usage, not optimizing for size
 #![allow(clippy::result_large_err)]
 
-use errat::{
+use whereat::{
     At, AtTrace, AtTraceBoxed, AtTraceable, ResultAtExt, ResultAtTraceableExt, ResultStartAtExt, at,
 };
 use std::error::Error;
@@ -462,12 +462,12 @@ fn map_error_preserves_trace() {
 
 #[test]
 fn anyhow_wraps_at_error() {
-    fn errat_fn() -> Result<(), At<PlainError>> {
+    fn whereat_fn() -> Result<(), At<PlainError>> {
         Err(at(PlainError::NotFound).at_str("looking up user"))
     }
 
     fn anyhow_fn() -> anyhow::Result<()> {
-        errat_fn()?; // At<E> implements Error, so this works
+        whereat_fn()?; // At<E> implements Error, so this works
         Ok(())
     }
 
@@ -475,7 +475,7 @@ fn anyhow_wraps_at_error() {
     let text = format!("{:?}", err); // anyhow uses Debug for full chain
 
     assert!(text.contains("not found"), "Should show error");
-    // Note: anyhow captures its own backtrace, errat trace is in our Display
+    // Note: anyhow captures its own backtrace, whereat trace is in our Display
 }
 
 // ============================================================================

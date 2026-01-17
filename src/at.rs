@@ -1,7 +1,7 @@
 //! The `At<E>` wrapper type for error location tracking.
 //!
 //! This module provides the core [`At<E>`] type that wraps any error with a trace
-//! of source locations. It's the primary API surface for errat.
+//! of source locations. It's the primary API surface for whereat.
 
 use alloc::borrow::Cow;
 use alloc::boxed::Box;
@@ -36,7 +36,7 @@ use crate::trace::{AtFrame, AtTrace, AtTraceBoxed, AtTraceSegment};
 /// even if they were created at different source locations:
 ///
 /// ```rust
-/// use errat::at;
+/// use whereat::at;
 ///
 /// #[derive(Debug, PartialEq)]
 /// struct MyError(u32);
@@ -49,7 +49,7 @@ use crate::trace::{AtFrame, AtTrace, AtTraceBoxed, AtTraceSegment};
 /// ## Example
 ///
 /// ```rust
-/// use errat::{at, At};
+/// use whereat::{at, At};
 ///
 /// #[derive(Debug)]
 /// enum MyError { Oops }
@@ -66,7 +66,7 @@ use crate::trace::{AtFrame, AtTrace, AtTraceBoxed, AtTraceSegment};
 /// instead of one. Use `.at()` on Results to extend the existing trace:
 ///
 /// ```rust
-/// use errat::{at, At};
+/// use whereat::{at, At};
 ///
 /// #[derive(Debug)]
 /// struct MyError;
@@ -129,7 +129,7 @@ impl<E> At<E> {
     /// ## Example
     ///
     /// ```rust
-    /// use errat::At;
+    /// use whereat::At;
     ///
     /// #[derive(Debug)]
     /// enum MyError { Oops }
@@ -159,7 +159,7 @@ impl<E> At<E> {
     /// ## Example
     ///
     /// ```rust
-    /// use errat::{at, At};
+    /// use whereat::{at, At};
     ///
     /// #[derive(Debug)]
     /// enum MyError { NotFound }
@@ -198,7 +198,7 @@ impl<E> At<E> {
     /// ## Example
     ///
     /// ```rust
-    /// use errat::{at, At};
+    /// use whereat::{at, At};
     ///
     /// #[derive(Debug)]
     /// enum MyError { Failed }
@@ -237,7 +237,7 @@ impl<E> At<E> {
     /// ## Frame behavior
     ///
     /// ```rust
-    /// use errat::at;
+    /// use whereat::at;
     ///
     /// #[derive(Debug)]
     /// struct E;
@@ -254,7 +254,7 @@ impl<E> At<E> {
     /// ## Example
     ///
     /// ```rust
-    /// use errat::{at, At, ResultAtExt};
+    /// use whereat::{at, At, ResultAtExt};
     ///
     /// #[derive(Debug)]
     /// enum MyError { IoError }
@@ -290,7 +290,7 @@ impl<E> At<E> {
     /// ## Example
     ///
     /// ```rust
-    /// use errat::{at, At, ResultAtExt};
+    /// use whereat::{at, At, ResultAtExt};
     ///
     /// #[derive(Debug)]
     /// enum MyError { NotFound }
@@ -331,7 +331,7 @@ impl<E> At<E> {
     /// ## Example
     ///
     /// ```rust
-    /// use errat::{at, At};
+    /// use whereat::{at, At};
     ///
     /// #[derive(Debug)]
     /// enum MyError { NotFound }
@@ -380,7 +380,7 @@ impl<E> At<E> {
     /// ## Example
     ///
     /// ```rust
-    /// use errat::at;
+    /// use whereat::at;
     ///
     /// #[derive(Debug)]
     /// struct RequestInfo { user_id: u64, path: String }
@@ -424,13 +424,13 @@ impl<E> At<E> {
     /// ## Example
     ///
     /// ```rust
-    /// use errat::at;
+    /// use whereat::at;
     /// use std::io;
     ///
     /// #[derive(Debug)]
     /// struct MyError;
     ///
-    /// fn wrap_io_error(io_err: io::Error) -> errat::At<MyError> {
+    /// fn wrap_io_error(io_err: io::Error) -> whereat::At<MyError> {
     ///     at(MyError).at_error(io_err)
     /// }
     /// ```
@@ -460,9 +460,9 @@ impl<E> At<E> {
     ///
     /// ```rust,ignore
     /// // Requires define_at_crate_info!() setup
-    /// use errat::{at, At};
+    /// use whereat::{at, At};
     ///
-    /// errat::define_at_crate_info!();
+    /// whereat::define_at_crate_info!();
     ///
     /// #[derive(Debug)]
     /// enum MyError { Wrapped(String) }
@@ -491,7 +491,7 @@ impl<E> At<E> {
     /// ## Example
     ///
     /// ```rust
-    /// use errat::{at, At};
+    /// use whereat::{at, At};
     ///
     /// #[derive(Debug)]
     /// enum MyError { NotFound }
@@ -517,7 +517,7 @@ impl<E> At<E> {
     ///
     /// ```rust,ignore
     /// // Requires define_at_crate_info!() setup
-    /// errat::define_at_crate_info!();
+    /// whereat::define_at_crate_info!();
     ///
     /// #[derive(Debug)]
     /// enum MyError { Oops }
@@ -605,7 +605,7 @@ impl<E> At<E> {
     /// ## Example
     ///
     /// ```rust
-    /// use errat::at;
+    /// use whereat::at;
     ///
     /// #[derive(Debug)]
     /// struct MyError;
@@ -631,7 +631,7 @@ impl<E> At<E> {
     /// ## Example
     ///
     /// ```rust
-    /// use errat::at;
+    /// use whereat::at;
     ///
     /// #[derive(Debug)]
     /// struct MyError;
@@ -706,7 +706,7 @@ impl<E> At<E> {
     /// ## Example
     ///
     /// ```rust
-    /// use errat::{at, At};
+    /// use whereat::{at, At};
     ///
     /// #[derive(Debug)]
     /// struct Error1;
@@ -740,7 +740,7 @@ impl<E> At<E> {
     /// ## Example
     ///
     /// ```rust
-    /// use errat::{at, At, AtTrace, AtTraceable};
+    /// use whereat::{at, At, AtTrace, AtTraceable};
     ///
     /// #[derive(Debug)]
     /// struct Inner;
@@ -833,9 +833,9 @@ impl<E: fmt::Debug> At<E> {
     ///
     /// ```rust,ignore
     /// // Requires define_at_crate_info!() setup
-    /// use errat::{at, At};
+    /// use whereat::{at, At};
     ///
-    /// errat::define_at_crate_info!();
+    /// whereat::define_at_crate_info!();
     ///
     /// #[derive(Debug)]
     /// struct MyError;
@@ -955,7 +955,7 @@ impl<E: fmt::Display> At<E> {
     /// ## Example
     ///
     /// ```rust
-    /// use errat::{at, At};
+    /// use whereat::{at, At};
     ///
     /// #[derive(Debug)]
     /// struct MyError(&'static str);
@@ -987,7 +987,7 @@ impl<E: fmt::Display> At<E> {
     /// ## Example
     ///
     /// ```rust
-    /// use errat::{at, At};
+    /// use whereat::{at, At};
     ///
     /// #[derive(Debug)]
     /// struct MyError(&'static str);

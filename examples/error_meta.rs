@@ -1,9 +1,9 @@
 //! Demonstrates enhanced trace display with AtCrateInfo and GitHub links.
 
-use errat::{At, ResultAtExt, at};
+use whereat::{At, ResultAtExt, at};
 
 // Required for at!() macro - defines at_crate_info() getter
-errat::define_at_crate_info!();
+whereat::define_at_crate_info!();
 
 #[derive(Debug)]
 #[allow(dead_code)]

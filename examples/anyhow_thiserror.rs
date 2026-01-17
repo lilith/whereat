@@ -1,11 +1,11 @@
-//! Demonstrates errat integration with thiserror and anyhow.
+//! Demonstrates whereat integration with thiserror and anyhow.
 //!
 //! Run with: cargo run --example anyhow_thiserror
 
 // Note: This example requires std feature and external crates
 // For now, we'll simulate what the integration would look like
 
-use errat::{At, ErrorAtExt, ResultAtExt};
+use whereat::{At, ErrorAtExt, ResultAtExt};
 
 // ============================================================================
 // Simulating thiserror-style errors
@@ -40,7 +40,7 @@ impl std::error::Error for AppError {
 }
 
 // ============================================================================
-// Example 1: Wrapping thiserror-style error with errat
+// Example 1: Wrapping thiserror-style error with whereat
 // ============================================================================
 
 fn read_config_file(path: &str) -> Result<String, At<AppError>> {
@@ -61,7 +61,7 @@ fn init_app() -> Result<(), At<AppError>> {
 }
 
 // ============================================================================
-// Example 2: Converting between errat and anyhow-style
+// Example 2: Converting between whereat and anyhow-style
 // ============================================================================
 
 /// Simulating anyhow::Error (boxed trait object)
@@ -72,9 +72,9 @@ fn traced_to_any<E: std::error::Error + Send + Sync + 'static>(err: At<E>) -> An
     Box::new(err)
 }
 
-/// Wrap an anyhow-style error with errat tracing
+/// Wrap an anyhow-style error with whereat tracing
 fn any_to_traced(err: AnyError) -> At<AnyError> {
-    errat::at(err)
+    whereat::at(err)
 }
 
 // ============================================================================
@@ -104,7 +104,7 @@ fn outer_layer() -> Result<(), At<AppError>> {
 // ============================================================================
 
 fn main() {
-    println!("=== Example 1: thiserror-style with errat ===\n");
+    println!("=== Example 1: thiserror-style with whereat ===\n");
     if let Err(e) = init_app() {
         println!("{:?}", e);
     }
@@ -114,7 +114,7 @@ fn main() {
         let boxed: AnyError = traced_to_any(e);
         println!("Boxed error: {}", boxed);
 
-        // Can wrap it again with errat
+        // Can wrap it again with whereat
         let retraced = any_to_traced(boxed);
         println!("\nRe-traced:");
         println!("{:?}", retraced);
@@ -136,7 +136,7 @@ fn main() {
     println!("\n=== Summary ===");
     println!(
         "
-errat works well with thiserror-style errors:
+whereat works well with thiserror-style errors:
 - Wrap any error with .start_at() to start collecting locations
 - Use .at_str() to add context as errors propagate
 - At<E> implements Error, so it can be boxed like anyhow
@@ -144,7 +144,7 @@ errat works well with thiserror-style errors:
 
 Key patterns:
 - thiserror defines the error types
-- errat adds location tracking on top
+- whereat adds location tracking on top
 - Can convert to Box<dyn Error> for anyhow-style usage
 "
     );

@@ -1,4 +1,4 @@
-//! # errat - Lightweight error location tracking
+//! # whereat - Lightweight error location tracking
 //!
 //! A minimal error tracing library that adds location tracking to any error type
 //! with small `sizeof` overhead and `no_std` support.
@@ -15,7 +15,7 @@
 //! ## Quick Start
 //!
 //! ```rust
-//! use errat::{at, At, ResultAtExt};
+//! use whereat::{at, At, ResultAtExt};
 //!
 //! #[derive(Debug)]
 //! enum MyError {
@@ -41,7 +41,7 @@
 //! Use `.at_str()` for static strings, `.at_string()` for lazy strings, `.at_data()` for Display, `.at_debug()` for Debug:
 //!
 //! ```rust
-//! use errat::{at, At, ResultAtExt};
+//! use whereat::{at, At, ResultAtExt};
 //!
 //! #[derive(Debug)]
 //! enum MyError { IoError }
@@ -59,7 +59,7 @@
 //! String context with closure for lazy evaluation (only runs on error):
 //!
 //! ```rust
-//! use errat::{at, At, ResultAtExt};
+//! use whereat::{at, At, ResultAtExt};
 //!
 //! #[derive(Debug)]
 //! enum MyError { NotFound }
@@ -79,7 +79,7 @@
 //! Use `.start_at()` on Results with non-traced errors:
 //!
 //! ```rust
-//! use errat::{At, ResultStartAtExt, ResultAtExt};
+//! use whereat::{At, ResultStartAtExt, ResultAtExt};
 //!
 //! fn external_api() -> Result<(), &'static str> {
 //!     Err("external error")
@@ -119,16 +119,16 @@ pub use ext::{ErrorAtExt, ResultAtExt, ResultAtTraceableExt, ResultStartAtExt};
 pub use trace::{AtFrame, AtTrace, AtTraceBoxed, AtTraceSegment, AtTraceable};
 
 // ============================================================================
-// Crate-level error tracking info (for errat's own at!() / at_crate!() usage)
+// Crate-level error tracking info (for whereat's own at!() / at_crate!() usage)
 // ============================================================================
 //
 // This is what `define_at_crate_info!()` generates. We define it manually here
 // because the macro isn't defined yet at this point in the file.
 
-// errat's own crate info for internal at!() usage in doctests
+// whereat's own crate info for internal at!() usage in doctests
 #[doc(hidden)]
 pub(crate) static __AT_CRATE_INFO: AtCrateInfo = AtCrateInfo::builder()
-    .name("errat")
+    .name("whereat")
     .repo(option_env!("CARGO_PKG_REPOSITORY"))
     .commit(match option_env!("GIT_COMMIT") {
         Some(c) => Some(c),
@@ -140,7 +140,7 @@ pub(crate) static __AT_CRATE_INFO: AtCrateInfo = AtCrateInfo::builder()
             },
         },
     })
-    .module("errat")
+    .module("whereat")
     .build();
 
 #[doc(hidden)]
@@ -151,7 +151,7 @@ pub fn at_crate_info() -> &'static AtCrateInfo {
 /// Internal macro for commit detection chain.
 #[doc(hidden)]
 #[macro_export]
-macro_rules! __errat_detect_commit {
+macro_rules! __whereat_detect_commit {
     () => {
         match option_env!("GIT_COMMIT") {
             Some(c) => Some(c),
@@ -176,13 +176,13 @@ macro_rules! __errat_detect_commit {
 ///
 /// ```rust,ignore
 /// // In lib.rs or main.rs
-/// errat::define_at_crate_info!();
+/// whereat::define_at_crate_info!();
 /// ```
 ///
 /// ## With Options
 ///
 /// ```rust,ignore
-/// errat::define_at_crate_info!(
+/// whereat::define_at_crate_info!(
 ///     path = "crates/mylib/",
 ///     meta = &[("team", "platform"), ("service", "auth")],
 /// );
@@ -194,7 +194,7 @@ macro_rules! __errat_detect_commit {
 ///
 /// ```rust,ignore
 /// use std::sync::OnceLock;
-/// use errat::AtCrateInfo;
+/// use whereat::AtCrateInfo;
 ///
 /// static CRATE_INFO: OnceLock<AtCrateInfo> = OnceLock::new();
 ///
@@ -228,7 +228,7 @@ macro_rules! define_at_crate_info {
         static __AT_CRATE_INFO: $crate::AtCrateInfo = $crate::AtCrateInfo::builder()
             .name(env!("CARGO_PKG_NAME"))
             .repo(option_env!("CARGO_PKG_REPOSITORY"))
-            .commit($crate::__errat_detect_commit!())
+            .commit($crate::__whereat_detect_commit!())
             .path(option_env!("CRATE_PATH"))
             .module(module_path!())
             .build();
@@ -247,7 +247,7 @@ macro_rules! define_at_crate_info {
         static __AT_CRATE_INFO: $crate::AtCrateInfo = $crate::AtCrateInfo::builder()
             .name(env!("CARGO_PKG_NAME"))
             .repo(option_env!("CARGO_PKG_REPOSITORY"))
-            .commit($crate::__errat_detect_commit!())
+            .commit($crate::__whereat_detect_commit!())
             .path(Some($path))
             .module(module_path!())
             .build();
@@ -266,7 +266,7 @@ macro_rules! define_at_crate_info {
         static __AT_CRATE_INFO: $crate::AtCrateInfo = $crate::AtCrateInfo::builder()
             .name(env!("CARGO_PKG_NAME"))
             .repo(option_env!("CARGO_PKG_REPOSITORY"))
-            .commit($crate::__errat_detect_commit!())
+            .commit($crate::__whereat_detect_commit!())
             .path(option_env!("CRATE_PATH"))
             .module(module_path!())
             .meta($meta)
@@ -286,7 +286,7 @@ macro_rules! define_at_crate_info {
         static __AT_CRATE_INFO: $crate::AtCrateInfo = $crate::AtCrateInfo::builder()
             .name(env!("CARGO_PKG_NAME"))
             .repo(option_env!("CARGO_PKG_REPOSITORY"))
-            .commit($crate::__errat_detect_commit!())
+            .commit($crate::__whereat_detect_commit!())
             .path(Some($path))
             .module(module_path!())
             .meta($meta)
@@ -312,13 +312,13 @@ macro_rules! define_at_crate_info {
 /// ## Setup (once in lib.rs)
 ///
 /// ```rust,ignore
-/// errat::define_at_crate_info!();
+/// whereat::define_at_crate_info!();
 /// ```
 ///
 /// ## Usage
 ///
 /// ```rust,ignore
-/// use errat::{at, At};
+/// use whereat::{at, At};
 ///
 /// fn find_user(id: u64) -> Result<String, At<MyError>> {
 ///     if id == 0 {
@@ -333,7 +333,7 @@ macro_rules! define_at_crate_info {
 /// If you don't need GitHub links, use the `at()` function instead:
 ///
 /// ```rust
-/// use errat::{at, At};
+/// use whereat::{at, At};
 ///
 /// #[derive(Debug)]
 /// struct MyError;
@@ -358,13 +358,13 @@ macro_rules! at {
 /// ## Setup (once in lib.rs)
 ///
 /// ```rust,ignore
-/// errat::define_at_crate_info!();
+/// whereat::define_at_crate_info!();
 /// ```
 ///
 /// ## Usage
 ///
 /// ```rust,ignore
-/// use errat::{at_crate, At, ResultAtExt};
+/// use whereat::{at_crate, At, ResultAtExt};
 ///
 /// fn my_function() -> Result<(), At<DepError>> {
 ///     at_crate!(dependency::call())?;  // Mark crate boundary
@@ -386,7 +386,7 @@ macro_rules! at_crate {
 /// ## Example
 ///
 /// ```rust
-/// use errat::{at, At};
+/// use whereat::{at, At};
 ///
 /// #[derive(Debug)]
 /// struct SimpleError { code: u32 }
