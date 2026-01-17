@@ -581,6 +581,13 @@ impl<E> At<E> {
         self.locations().last()
     }
 
+    /// Get a reference to the underlying trace, if any.
+    #[inline]
+    #[allow(dead_code)] // Used in format module
+    pub(crate) fn trace_ref(&self) -> Option<&AtTrace> {
+        self.trace.as_ref()
+    }
+
     /// Iterate over all context entries, newest first.
     ///
     /// Each call to `at_str()`, `at_string()`, `at_data()`, or `at_debug()` creates

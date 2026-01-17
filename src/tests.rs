@@ -662,3 +662,80 @@ fn test_hash_ignores_trace() {
     let err3 = at(TestError::InvalidInput);
     assert_ne!(hash_one(&err1), hash_one(&err3));
 }
+
+// ============================================================================
+// Pretty Formatter Tests
+// ============================================================================
+
+#[cfg(feature = "_termcolor")]
+#[test]
+fn test_termcolor_display_contains_error() {
+    let err = at(TestError::NotFound).at_str("context");
+    let output = alloc::format!("{}", err.display_color());
+
+    // Should contain the error type
+    assert!(output.contains("NotFound"), "Output: {}", output);
+    // Should contain the context
+    assert!(output.contains("context"), "Output: {}", output);
+    // Should contain location info
+    assert!(output.contains("tests.rs"), "Output: {}", output);
+}
+
+#[cfg(feature = "_termcolor")]
+#[test]
+fn test_termcolor_meta_display_contains_crate_info() {
+    let err = crate::at!(TestError::NotFound);
+    let output = alloc::format!("{}", err.display_color_meta());
+
+    // Should contain crate info
+    assert!(output.contains("whereat"), "Output: {}", output);
+}
+
+#[cfg(feature = "_html")]
+#[test]
+fn test_html_display_contains_markup() {
+    let err = at(TestError::NotFound).at_str("context");
+    let output = alloc::format!("{}", err.display_html());
+
+    // Should have the wrapper div
+    assert!(
+        output.contains("class=\"whereat-error\""),
+        "Output: {}",
+        output
+    );
+    // Should have error header
+    assert!(
+        output.contains("class=\"error-header\""),
+        "Output: {}",
+        output
+    );
+    // Should contain the error
+    assert!(output.contains("NotFound"), "Output: {}", output);
+    // Should contain context
+    assert!(output.contains("context"), "Output: {}", output);
+}
+
+#[cfg(feature = "_html")]
+#[test]
+fn test_html_styled_includes_css() {
+    let err = at(TestError::NotFound);
+    let output = alloc::format!("{}", err.display_html_styled());
+
+    // Should include style tag
+    assert!(output.contains("<style>"), "Output: {}", output);
+    assert!(output.contains(".whereat-error"), "Output: {}", output);
+}
+
+#[cfg(feature = "_html")]
+#[test]
+fn test_html_escapes_special_chars() {
+    let err = at(TestError::NotFound)
+        .at_string(|| alloc::string::String::from("<script>alert('xss')</script>"));
+    let output = alloc::format!("{}", err.display_html());
+
+    // Should escape angle brackets
+    assert!(output.contains("&lt;script&gt;"), "Output: {}", output);
+    assert!(output.contains("&#39;"), "Output: {}", output);
+    // Should NOT contain unescaped script tag
+    assert!(!output.contains("<script>"), "Output: {}", output);
+}

@@ -11,6 +11,7 @@ categories = ["rust-patterns", "no-std"]
 
 [features]
 default = []
+std = []
 # Internal/unstable features - prefixed with _ to indicate not part of public API
 _tinyvec-64-bytes = ["dep:tinyvec"]
 _tinyvec-128-bytes = ["dep:tinyvec"]
@@ -18,10 +19,13 @@ _tinyvec-256-bytes = ["dep:tinyvec"]
 _tinyvec-512-bytes = ["dep:tinyvec"]
 _smallvec-128-bytes = ["dep:smallvec"]
 _smallvec-256-bytes = ["dep:smallvec"]
+_termcolor = ["dep:owo-colors"]
+_html = []
 
 [dependencies]
 tinyvec = { version = "1.9", optional = true, default-features = false, features = ["alloc"] }
 smallvec = { version = "1.13", optional = true, default-features = false }
+owo-colors = { version = "4.2", optional = true, default-features = false }
 
 [dev-dependencies]
 static_assertions = "1.1"

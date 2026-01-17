@@ -110,6 +110,8 @@ mod at;
 mod context;
 mod crate_info;
 mod ext;
+#[cfg(any(feature = "_termcolor", feature = "_html"))]
+mod format;
 pub mod prelude;
 mod trace;
 
