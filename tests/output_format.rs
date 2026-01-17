@@ -1,7 +1,7 @@
 //! Integration tests for error output formatting.
 
 use core::error::Error;
-use whereat::{At, ErrorAtExt, ResultAtExt, ResultStartAtExt, at};
+use whereat::{At, ErrorAtExt, ResultAtExt, at};
 
 // Define the crate-level static for at!() to reference
 whereat::define_at_crate_info!();
@@ -182,17 +182,19 @@ fn at_skipped_frames_adds_skip_marker() {
 }
 
 #[test]
-fn start_at_late_adds_skip_marker() {
+fn late_tracing_adds_skip_marker() {
     fn fallible() -> Result<(), &'static str> {
         Err("legacy error")
     }
 
-    let err = fallible().start_at_late().unwrap_err();
+    let err = fallible()
+        .map_err(|e| At::new(e).at_skipped_frames())
+        .unwrap_err();
     let output = format!("{:?}", err);
 
     assert!(
         output.contains("[...]"),
-        "trace_skipped() should add '[...]' marker. Got:\n{}",
+        "at_skipped_frames() should add '[...]' marker. Got:\n{}",
         output
     );
 }

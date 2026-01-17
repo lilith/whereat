@@ -8,7 +8,7 @@
 //! - Performance implications of different approaches
 
 use core::fmt;
-use whereat::{At, ResultAtExt, ResultStartAtExt, at};
+use whereat::{At, ResultAtExt, at};
 
 // =============================================================================
 // Error Types
@@ -90,8 +90,7 @@ mod good_patterns {
 
         // Convert std::io::Error to AppError, then start tracing
         io_result
-            .map_err(AppError::Io)
-            .start_at()
+            .map_err(|e| at(AppError::Io(e)))
             .at_str("reading config file")
     }
 
@@ -101,9 +100,9 @@ mod good_patterns {
             Err(AppError::Parse("unexpected token".into()))
         }
 
-        // start_at_late() adds a [...] marker to show trace started late
+        // at_skipped_frames() adds a [...] marker to show trace started late
         untraced_library()
-            .start_at_late()
+            .map_err(|e| At::new(e).at_skipped_frames())
             .at_str("parsing user input")
     }
 

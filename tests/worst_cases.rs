@@ -3,7 +3,7 @@
 //! These tests explore edge cases and problematic patterns to ensure
 //! the library behaves correctly under stress and misuse.
 
-use whereat::{At, ResultAtExt, ResultStartAtExt, at};
+use whereat::{At, ResultAtExt, at};
 
 #[allow(dead_code)]
 #[derive(Debug, Clone, PartialEq)]
@@ -294,7 +294,7 @@ fn start_at_external_errors() {
     }
 
     fn wrapper() -> Result<(), At<&'static str>> {
-        external_api().start_at()
+        external_api().map_err(at)
     }
 
     fn outer() -> Result<(), At<&'static str>> {
@@ -302,11 +302,11 @@ fn start_at_external_errors() {
     }
 
     let err = outer().unwrap_err();
-    assert_eq!(err.frame_count(), 2); // start_at + at
+    assert_eq!(err.frame_count(), 2); // map_err(at) + at
     assert_eq!(*err.error(), "external error");
 }
 
-/// Mixing start_at and at in call chain
+/// Mixing map_err(at) and at in call chain
 #[test]
 fn mixed_start_at_and_at() {
     fn level_0() -> Result<(), &'static str> {
@@ -314,7 +314,7 @@ fn mixed_start_at_and_at() {
     }
 
     fn level_1() -> Result<(), At<&'static str>> {
-        level_0().start_at()
+        level_0().map_err(at)
     }
 
     fn level_2() -> Result<(), At<&'static str>> {

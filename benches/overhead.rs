@@ -4,7 +4,7 @@
 //! Run specific benchmark: cargo bench --bench overhead -- "hot_loop"
 
 use criterion::{BenchmarkId, Criterion, black_box, criterion_group, criterion_main};
-use whereat::{At, ResultAtExt, ResultStartAtExt, at};
+use whereat::{At, ResultAtExt, at};
 
 use core::fmt;
 
@@ -376,15 +376,15 @@ fn bench_start_at(c: &mut Criterion) {
         Err("external error")
     }
 
-    group.bench_function("start_at_conversion", |b| {
+    group.bench_function("map_err_at_conversion", |b| {
         b.iter(|| {
-            let _ = external_error().start_at();
+            let _ = external_error().map_err(at);
         })
     });
 
-    group.bench_function("start_at_late_conversion", |b| {
+    group.bench_function("at_new_skipped_frames_conversion", |b| {
         b.iter(|| {
-            let _ = external_error().start_at_late();
+            let _ = external_error().map_err(|e| At::new(e).at_skipped_frames());
         })
     });
 

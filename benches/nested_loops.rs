@@ -18,7 +18,7 @@
 
 use criterion::{BenchmarkId, Criterion, black_box, criterion_group, criterion_main};
 use std::panic::{AssertUnwindSafe, catch_unwind};
-use whereat::{At, ResultAtExt, ResultStartAtExt, at};
+use whereat::{At, ResultAtExt, at};
 
 use core::fmt;
 
@@ -149,7 +149,7 @@ fn middle_plain(i: u32, fail_at: u32) -> Result<u32, StringError> {
 /// Outer function - converts to At<E> at boundary
 #[inline(never)]
 fn outer_late_traced(i: u32, fail_at: u32) -> Result<u32, At<StringError>> {
-    middle_plain(i, fail_at).start_at()
+    middle_plain(i, fail_at).map_err(at)
 }
 
 // ============================================================================
@@ -160,7 +160,7 @@ fn outer_late_traced(i: u32, fail_at: u32) -> Result<u32, At<StringError>> {
 #[inline(never)]
 fn outer_with_context(i: u32, fail_at: u32) -> Result<u32, At<StringError>> {
     middle_plain(i, fail_at)
-        .start_at()
+        .map_err(at)
         .at_str("processing batch")
 }
 
@@ -168,7 +168,7 @@ fn outer_with_context(i: u32, fail_at: u32) -> Result<u32, At<StringError>> {
 #[inline(never)]
 fn outer_with_dynamic_context(i: u32, fail_at: u32) -> Result<u32, At<StringError>> {
     middle_plain(i, fail_at)
-        .start_at()
+        .map_err(at)
         .at_string(|| format!("processing item {}", i))
 }
 
@@ -248,7 +248,7 @@ fn outer_u64_traced(i: u32, fail_at: u32) -> Result<u32, At<U64Error>> {
 
 #[inline(never)]
 fn outer_u64_late_traced(i: u32, fail_at: u32) -> Result<u32, At<U64Error>> {
-    middle_u64_plain(i, fail_at).start_at()
+    middle_u64_plain(i, fail_at).map_err(at)
 }
 
 #[inline(never)]

@@ -4,7 +4,7 @@
 
 #![allow(dead_code)]
 
-use whereat::{At, ErrorAtExt, ResultAtExt, ResultStartAtExt, at, at_crate};
+use whereat::{At, ErrorAtExt, ResultAtExt, at, at_crate};
 
 // Required for at!() and at_crate!() macros - defines at_crate_info() getter
 whereat::define_at_crate_info!();
@@ -76,7 +76,7 @@ mod use_case_2 {
     // Wrap std::io::Error
     fn read_config(path: &str) -> Result<String, At<io::Error>> {
         std::fs::read_to_string(path)
-            .start_at()
+            .map_err(|e| e.start_at())
             .at_str("reading config file")
     }
 
@@ -228,7 +228,7 @@ mod use_case_5 {
     // Wrapper that starts tracing late
     pub fn wrap_legacy() -> Result<(), At<&'static str>> {
         legacy::old_function()
-            .start_at_late() // Marks that earlier frames were skipped
+            .map_err(|e| At::new(e).at_skipped_frames()) // Marks that earlier frames were skipped
             .at_str("calling legacy code")
     }
 

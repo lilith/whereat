@@ -5,7 +5,6 @@
 //!
 //! - [`ErrorAtExt`]: Call `.start_at()` on `Error` types to wrap in `At<E>`
 //! - [`ResultAtExt`]: Call `.at()` on `Result<T, At<E>>` to extend the trace
-//! - [`ResultStartAtExt`]: Call `.start_at()` on `Result<T, E>` to begin tracing
 //! - [`ResultAtTraceableExt`]: Call `.at()` on `Result<T, E>` where E: AtTraceable
 
 use alloc::string::String;
@@ -285,65 +284,6 @@ impl<T, E> ResultAtExt<T, E> for Result<T, At<E>> {
         match self {
             Ok(v) => Ok(v),
             Err(e) => Err(e.map_error(f)),
-        }
-    }
-}
-
-// ============================================================================
-// ResultStartAtExt - for starting traces on non-At errors
-// ============================================================================
-
-/// Extension trait for converting non-traced errors to traced errors.
-///
-/// Use `.start_at()` on `Result<T, E>` to wrap the error in `At<E>` and capture
-/// the first location. For Results that already have `At<E>`, use `ResultAtExt::at()`.
-///
-/// ## Example
-///
-/// ```rust
-/// use whereat::ResultStartAtExt;
-///
-/// fn fallible() -> Result<(), &'static str> {
-///     Err("something went wrong")
-/// }
-///
-/// fn wrapper() -> Result<(), whereat::At<&'static str>> {
-///     fallible().start_at()?;  // converts to At and captures location
-///     Ok(())
-/// }
-/// ```
-pub trait ResultStartAtExt<T, E> {
-    /// Convert the error to `At<E>` and add the caller's location.
-    ///
-    /// Use this to wrap errors from code that doesn't use whereat.
-    /// Chain with `ResultAtExt` methods for context: `.start_at().at_str("msg")?`
-    #[track_caller]
-    fn start_at(self) -> Result<T, At<E>>;
-
-    /// Convert to `At<E>` with a skip marker indicating late tracing.
-    ///
-    /// Use when wrapping errors where earlier frames were not traced.
-    /// The `[...]` marker indicates the trace started late.
-    #[track_caller]
-    fn start_at_late(self) -> Result<T, At<E>>;
-}
-
-impl<T, E> ResultStartAtExt<T, E> for Result<T, E> {
-    #[track_caller]
-    #[inline]
-    fn start_at(self) -> Result<T, At<E>> {
-        match self {
-            Ok(v) => Ok(v),
-            Err(e) => Err(At::new(e).at()),
-        }
-    }
-
-    #[track_caller]
-    #[inline]
-    fn start_at_late(self) -> Result<T, At<E>> {
-        match self {
-            Ok(v) => Ok(v),
-            Err(e) => Err(At::new(e).at_skipped_frames()),
         }
     }
 }

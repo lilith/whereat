@@ -22,5 +22,4 @@
 
 pub use crate::At;
 pub use crate::ResultAtExt;
-pub use crate::ResultStartAtExt;
 pub use crate::at;

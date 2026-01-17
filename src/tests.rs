@@ -5,7 +5,7 @@
 
 use crate::context::AtContext;
 use crate::trace::AtTrace;
-use crate::{At, ErrorAtExt, ResultAtExt, ResultStartAtExt, at};
+use crate::{At, ErrorAtExt, ResultAtExt, at};
 use alloc::boxed::Box;
 use alloc::string::String;
 use alloc::vec::Vec;
@@ -165,13 +165,13 @@ fn test_propagation() {
 }
 
 #[test]
-fn test_result_trace_ext() {
+fn test_result_map_err_at() {
     fn fallible() -> Result<(), &'static str> {
         Err("oops")
     }
 
     fn wrapper() -> Result<(), At<&'static str>> {
-        fallible().start_at()?;
+        fallible().map_err(at)?;
         Ok(())
     }
 
@@ -301,13 +301,13 @@ fn test_str_propagation() {
 }
 
 #[test]
-fn test_start_at_with_context() {
+fn test_map_err_at_with_context() {
     fn fallible() -> Result<(), &'static str> {
         Err("oops")
     }
 
     fn wrapper() -> Result<(), At<&'static str>> {
-        fallible().start_at().at_str("while doing something")?;
+        fallible().map_err(at).at_str("while doing something")?;
         Ok(())
     }
 

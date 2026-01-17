@@ -76,17 +76,17 @@
 //!
 //! ## Converting Non-Traced Errors
 //!
-//! Use `.start_at()` on Results with non-traced errors:
+//! Use `map_err(at)` on Results with non-traced errors:
 //!
 //! ```rust
-//! use whereat::{At, ResultStartAtExt, ResultAtExt};
+//! use whereat::{At, at, ResultAtExt};
 //!
 //! fn external_api() -> Result<(), &'static str> {
 //!     Err("external error")
 //! }
 //!
 //! fn wrapper() -> Result<(), At<&'static str>> {
-//!     external_api().start_at()?;  // converts to At
+//!     external_api().map_err(at)?;  // converts to At
 //!     Ok(())
 //! }
 //! ```
@@ -119,7 +119,7 @@ pub use crate_info::{
     AtCrateInfo, AtCrateInfoBuilder, BITBUCKET_LINK_FORMAT, GITEA_LINK_FORMAT, GITHUB_LINK_FORMAT,
     GITLAB_LINK_FORMAT,
 };
-pub use ext::{ErrorAtExt, ResultAtExt, ResultAtTraceableExt, ResultStartAtExt};
+pub use ext::{ErrorAtExt, ResultAtExt, ResultAtTraceableExt};
 pub use trace::{AtFrame, AtFrameOwned, AtTrace, AtTraceBoxed, AtTraceable};
 
 // ============================================================================

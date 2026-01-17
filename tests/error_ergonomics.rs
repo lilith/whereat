@@ -14,7 +14,7 @@ use std::error::Error;
 use std::fmt;
 use std::io;
 use whereat::{
-    At, AtTrace, AtTraceBoxed, AtTraceable, ResultAtExt, ResultAtTraceableExt, ResultStartAtExt, at,
+    At, AtTrace, AtTraceBoxed, AtTraceable, ErrorAtExt, ResultAtExt, ResultAtTraceableExt, at,
 };
 
 // ============================================================================
@@ -232,8 +232,7 @@ fn thiserror_source_chain_with_at_error() {
     fn db_operation() -> Result<(), At<ThiserrorError>> {
         // Convert io::Error to ThiserrorError::Io via From, then wrap in At
         io_operation()
-            .map_err(ThiserrorError::from)
-            .start_at()
+            .map_err(|e| ThiserrorError::from(e).start_at())
             .at_str("reading config file")?;
         Ok(())
     }
@@ -267,8 +266,7 @@ fn nested_thiserror_with_at() {
 
     fn outer_wraps() -> Result<(), At<OuterThiserror>> {
         inner_fails()
-            .map_err(OuterThiserror::from)
-            .start_at()
+            .map_err(|e| OuterThiserror::from(e).start_at())
             .at_str("executing user query")?;
         Ok(())
     }
