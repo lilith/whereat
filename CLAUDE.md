@@ -23,7 +23,7 @@ GitHub Actions workflow at `.github/workflows/ci.yml`:
 
 ## Design Notes
 
-- `Traced<E>` is `sizeof(E) + 8` bytes (error inline, trace boxed)
+- `At<E>` is `sizeof(E) + 8` bytes (error inline, trace boxed)
 - All allocations are fallible where stable APIs allow (Vec/String use try_reserve)
 - `Box::try_new` not yet stable - using `Box::new` which can panic on OOM
 - Error `E` always propagates since stored inline

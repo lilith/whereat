@@ -48,6 +48,14 @@
 - [ ] `Box::try_new` when stabilized (track rust-lang/rust#32838)
 - [ ] Consider `first-location-free` feature to inline first location in `At<E>`
 
+### Ergonomics (see docs/DEREF.md)
+
+- [ ] `Deref<Target=E>` for `At<E>` - enables `&*err` pattern matching
+- [ ] `AsRef<E>` and `Borrow<E>` for `At<E>` - consistency
+- [ ] `map_err_at()` extension trait - `result.map_err_at(|k| convert(k))`
+- [ ] Consider `DerefMut` - if use cases emerge
+- [ ] Consider `PartialEq` for `At<E>` based on inner `E` only
+
 ### API Extensions
 
 - [ ] `at_source(|| impl Error)` - for wrapping source errors with context
