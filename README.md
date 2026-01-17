@@ -83,11 +83,8 @@ For workspace crates: `whereat::define_at_crate_info!(path = "crates/mylib/");`
 ## Best Practices
 
 **DO: Keep your hot loops zero-alloc**
-- You do NOT need At<> inside hot loops. Defer tracing until you exit.
+- You do NOT need `At<>` inside hot loops. Defer tracing until you exit.
 - `.at_skipped_frames()` adds a `[...]` marker to indicate frames were skipped.
-
-**DO: Halve allocations with tinyvec**
-- Features `_tinyvec-128-bytes` or `_tinyvec-256-bytes` give you 12 or 28 inline stacktrace slots without a 2nd allocation.
 
 **DO: Use `at_crate!()` at crate boundaries**
 - When consuming errors from other crates, this ensures backtraces show `myapp @ src/lib.rs:42` instead of confusing paths.
@@ -110,21 +107,23 @@ This means you can:
 
 - **Small sizeof**: `At<E>` is only `sizeof(E) + 8` bytes (one pointer for boxed trace)
 - **Zero allocation on Ok path**: No heap allocation until an error occurs
-- **Ergonomic API**: `.at()` on Results, `.start_at()` on errors, `.map_err(at)` for conversions
-- **Context options**: `.at_str("msg")`, `.at_fn(|| {})`, `.at_debug(|| data)`, `.at_string(|| format!(...))`
-- **Cross-crate tracing**: `at!()` and `at_crate!()` macros capture crate info for GitHub links
+- **Ergonomic API**: `.at()` on Results, `.start_at()` on errors, `.map_err_at()` for trace-preserving conversions
+- **Context options**: `.at_str()`, `.at_string()`, `.at_fn()`, `.at_named()`, `.at_data()`, `.at_debug()`, `.at_error()`
+- **Cross-crate tracing**: `at!()` and `at_crate!()` macros capture crate info for GitHub/GitLab/Gitea/Bitbucket links
 - **Equality/Hashing**: `PartialEq`, `Eq`, `Hash` compare only the error, not the trace
 - **no_std compatible**: Works with just `core` + `alloc`
-- **Fallible allocations**: Vec/String ops use `try_reserve` and silently fail on OOM
 
 ## Adding Context
 
 ```rust
-result.at()?                           // Just add location
-result.at_str("loading config")?       // Static message
+result.at()?                              // Just add location
+result.at_str("loading config")?          // Static message (zero-cost)
 result.at_string(|| format!("id={}", id))?  // Dynamic message (lazy)
-result.at_debug(|| request_info)?      // Attach debug data (lazy)
-result.at_fn(|| {})?                   // Capture function name
+result.at_data(|| path_context)?          // Typed context via Display (lazy)
+result.at_debug(|| request_info)?         // Typed context via Debug (lazy)
+result.at_fn(|| {})?                      // Capture function name
+result.at_named("validation")?            // Custom phase/checkpoint label
+result.at_error(io_err)?                  // Attach a source error
 ```
 
 ## Cross-Crate Tracing
@@ -155,14 +154,16 @@ whereat::define_at_crate_info!(
 
 ### Runtime
 
+For runtime-determined values (instance IDs, environment config), define your own `at_crate_info()` getter:
+
 ```rust
 use std::sync::OnceLock;
 use whereat::AtCrateInfo;
 
-static INFO: OnceLock<AtCrateInfo> = OnceLock::new();
+static CRATE_INFO: OnceLock<AtCrateInfo> = OnceLock::new();
 
 pub(crate) fn at_crate_info() -> &'static AtCrateInfo {
-    INFO.get_or_init(|| {
+    CRATE_INFO.get_or_init(|| {
         AtCrateInfo::builder()
             .name(env!("CARGO_PKG_NAME"))
             .repo(option_env!("CARGO_PKG_REPOSITORY"))
@@ -174,6 +175,24 @@ pub(crate) fn at_crate_info() -> &'static AtCrateInfo {
 }
 ```
 
+The `_owned()` builder methods (`name_owned()`, `meta_owned()`, etc.) leak strings via `Box::leak` to get `'static` lifetime — appropriate for one-time initialization.
+
+### Link Formats
+
+By default, links use GitHub format. For other forges:
+
+```rust
+use whereat::{AtCrateInfo, GITLAB_LINK_FORMAT};
+
+static INFO: AtCrateInfo = AtCrateInfo::builder()
+    .name("mylib")
+    .repo(Some("https://gitlab.com/org/repo"))
+    .link_format(GITLAB_LINK_FORMAT)  // or GITEA_LINK_FORMAT, BITBUCKET_LINK_FORMAT
+    .build();
+```
+
+Or use `.link_format_auto()` to auto-detect from the repo URL.
+
 ## Embedded Traces
 
 For full control, embed `AtTrace` directly in your error type:
@@ -183,7 +202,7 @@ use whereat::{AtTrace, AtTraceable, ResultAtTraceableExt};
 
 struct MyError {
     kind: ErrorKind,
-    trace: AtTrace,  // 40 bytes, or Box<AtTrace> for 8 bytes
+    trace: AtTrace,
 }
 
 impl AtTraceable for MyError {
@@ -192,6 +211,22 @@ impl AtTraceable for MyError {
     fn fmt_message(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(f, "{:?}", self.kind)
     }
+}
+```
+
+**Storage options:**
+
+| Field Type | Size | When to use |
+|------------|------|-------------|
+| `AtTrace` | 40 bytes | Trace always captured at construction |
+| `Box<AtTrace>` | 8 bytes | Smaller error, trace always allocated |
+| `Option<Box<AtTrace>>` | 8 bytes | Lazy allocation on first `.at_*()` call |
+
+For `Option<Box<AtTrace>>`, implement `trace_mut` with lazy init:
+
+```rust
+fn trace_mut(&mut self) -> &mut AtTrace {
+    self.trace.get_or_insert_with(|| Box::new(AtTrace::new()))
 }
 ```
 
@@ -208,12 +243,11 @@ fn process_batch(items: &[Item]) -> Result<(), MyError> {
 }
 
 fn caller() -> Result<(), At<MyError>> {
-    process_batch(&items).map_err(|e| at!(e))?;  // Wrap on exit
+    process_batch(&items)
+        .map_err(|e| at!(e).at_skipped_frames())?;  // Wrap on exit, mark skipped
     Ok(())
 }
 ```
-
-Use `.at_skipped_frames()` to add a `[...]` marker when you know frames were skipped.
 
 ## License
 
