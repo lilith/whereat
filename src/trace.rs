@@ -1043,6 +1043,7 @@ pub trait AtTraceable: Sized {
 
     /// Add a skip marker to indicate skipped frames.
     /// Displayed as `[...]` in trace output.
+    #[doc(hidden)]
     #[inline]
     fn at_skipped_frames(mut self) -> Self {
         // None in locations vec = skipped frame marker

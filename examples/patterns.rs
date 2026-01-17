@@ -94,16 +94,14 @@ mod good_patterns {
             .at_str("reading config file")
     }
 
-    /// Pattern 5: Late tracing when you don't control the origin
-    pub fn late_tracing() -> Result<String, At<AppError>> {
+    /// Pattern 5: Wrapping untraced library errors
+    pub fn wrap_untraced() -> Result<String, At<AppError>> {
         fn untraced_library() -> Result<String, AppError> {
             Err(AppError::Parse("unexpected token".into()))
         }
 
-        // at_skipped_frames() adds a [...] marker to show trace started late
-        untraced_library()
-            .map_err(|e| At::new(e).at_skipped_frames())
-            .at_str("parsing user input")
+        // Start tracing at the boundary where you receive the error
+        untraced_library().map_err(at).at_str("parsing user input")
     }
 
     /// Pattern 6: Multiple contexts on same location
@@ -292,9 +290,9 @@ fn main() {
         println!("Debug:\n{:?}\n", e);
     }
 
-    // Pattern 5: Late tracing
-    println!("Pattern 5: Late tracing with start_at_late");
-    if let Err(e) = good_patterns::late_tracing() {
+    // Pattern 5: Wrapping untraced errors
+    println!("Pattern 5: Wrapping untraced library errors");
+    if let Err(e) = good_patterns::wrap_untraced() {
         println!("Debug:\n{:?}\n", e);
     }
 
@@ -334,7 +332,7 @@ Guidelines:
 2. Use .at() to extend trace at call boundaries
 3. Use .at_str() for context (doesn't create new location)
 4. Avoid at() in tight loops - validate first, error once
-5. Use start_at_late() when wrapping untraced errors
+5. Use .map_err(at) when wrapping untraced errors at boundaries
 "
     );
 }

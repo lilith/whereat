@@ -210,10 +210,10 @@ mod use_case_4 {
 }
 
 // ============================================================================
-// Use Case 5: Late Tracing for Legacy Code
+// Use Case 5: Wrapping Legacy/External Code
 // ============================================================================
 //
-// When integrating with code that doesn't use whereat, mark the entry point.
+// When integrating with code that doesn't use whereat, wrap at the boundary.
 
 mod use_case_5 {
     use super::*;
@@ -225,30 +225,17 @@ mod use_case_5 {
         }
     }
 
-    // Wrapper that starts tracing late
+    // Wrapper that starts tracing at the boundary
     pub fn wrap_legacy() -> Result<(), At<&'static str>> {
         legacy::old_function()
-            .map_err(|e| At::new(e).at_skipped_frames()) // Marks that earlier frames were skipped
+            .map_err(at)
             .at_str("calling legacy code")
     }
 
-    // Alternative: direct construction with at() + at_skipped_frames()
-    pub fn wrap_legacy_alt() -> At<&'static str> {
-        match legacy::old_function() {
-            Ok(()) => unreachable!(),
-            Err(e) => at(e).at_skipped_frames(),
-        }
-    }
-
     pub fn demo() {
-        println!("=== Use Case 5: Late Tracing (Legacy Code) ===\n");
+        println!("=== Use Case 5: Wrapping Legacy Code ===\n");
 
         let err = wrap_legacy().unwrap_err();
-        println!("With start_at_late():");
-        println!("{:?}", err);
-
-        println!("\nWith at().at_skipped_frames():");
-        let err = wrap_legacy_alt();
         println!("{:?}", err);
         println!();
     }
@@ -267,8 +254,8 @@ fn main() {
 
     println!("=== Summary ===\n");
     println!("1. Basic:      .start_at() + .at() / .at_str() / .at_string()");
-    println!("2. External:   .start_at() / .trace_str() to wrap non-At errors");
+    println!("2. External:   .map_err(at) to wrap non-At errors");
     println!("3. Cross-crate: at!() + at_crate!() for GitHub links");
     println!("4. Typed ctx:  .at_debug() / .at_data() + .downcast_ref()");
-    println!("5. Legacy:     .start_at_late() / at().at_skipped_frames() for [...]");
+    println!("5. Legacy:     .map_err(at) at the boundary");
 }

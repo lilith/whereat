@@ -22,7 +22,7 @@ Add arbitrary debug info at any time with `at_debug(|| impls_debug)`, `at_data(|
 `whereat` can (optionally, and with no runtime cost) have backtraces link to the exact commit and line number on github/etc! 
 
 **DO: Keep your hot loops zero-alloc:**
-* You do NOT need to use/add At<> inside hot loops or until you want to incur that allocation. `.start_at_late()` will start the stacktrace with `[...]` to avoid confusion. Skipping frames? `.at_skipped_frames()` will do the same.
+* You do NOT need to use/add `At<>` inside hot loops. Defer wrapping until you exit the hot path and want to incur the allocation.
 
 **DO: Halve allocations with tinyvec**
 

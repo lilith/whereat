@@ -16,9 +16,8 @@ Initial release.
 - `AtTraceable` trait for custom error types with embedded traces
 - Extension traits for ergonomic Result handling:
   - `ResultAtExt` - `.at()`, `.at_str("msg")`, `.at_fn(|| {})`, `.at_named("label")`, `.map_err_at(|e| ...)`, etc.
-  - `ResultStartAtExt` - `.start_at()`, `.start_at_late()`
   - `ResultAtTraceableExt` - same methods for `AtTraceable` errors
-  - `ErrorAtExt` - `.start_at()` on error values
+  - `ErrorAtExt` - `.start_at()` on error values implementing `core::error::Error`
 - Context attachment methods (attach to last frame, no new location):
   - `.at_str("msg")` - static string context
   - `.at_string(|| format!(...))` - dynamic string context
@@ -37,9 +36,9 @@ Initial release.
 - `PartialEq`, `Eq`, `Hash` for `At<E>` (compares only inner error, not trace)
 - `AsRef<E>` for `At<E>`
 - Tinyvec feature flags for inline trace storage:
-  - `tinyvec-64-bytes` (3 inline slots)
-  - `tinyvec-128-bytes` (11 inline slots)
-  - `tinyvec-256-bytes` (27 inline slots)
+  - `tinyvec-64-bytes` (4 inline slots)
+  - `tinyvec-128-bytes` (12 inline slots)
+  - `tinyvec-256-bytes` (28 inline slots)
   - `tinyvec-512-bytes` (60 inline slots)
 - Smallvec feature flags for comparison:
   - `smallvec-128-bytes`

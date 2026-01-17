@@ -487,20 +487,7 @@ impl<E> At<E> {
     /// Use this to indicate that some frames were skipped, either because
     /// tracing started late in the call stack or because intermediate frames
     /// are not meaningful.
-    ///
-    /// ## Example
-    ///
-    /// ```rust
-    /// use whereat::{at, At};
-    ///
-    /// #[derive(Debug)]
-    /// enum MyError { NotFound }
-    ///
-    /// // When you receive an error but want to indicate the origin is elsewhere
-    /// fn handle_legacy_error() -> At<MyError> {
-    ///     at(MyError::NotFound).at_skipped_frames()
-    /// }
-    /// ```
+    #[doc(hidden)]
     #[inline]
     pub fn at_skipped_frames(mut self) -> Self {
         let trace = self.trace.get_or_insert_mut();
