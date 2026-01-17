@@ -225,10 +225,31 @@ impl<E> At<E> {
         self
     }
 
-    /// Add a static string context to the last location (or create one if empty).
+    /// Add a static string context to the last location frame.
+    ///
+    /// **Does not add a new location frame** - attaches context to the most recent
+    /// frame in the trace. If the trace is empty, creates a frame at the caller's
+    /// location first.
     ///
     /// Zero-cost for static strings - just stores a pointer.
-    /// For dynamically-computed strings, use `at_string()` instead.
+    /// For dynamically-computed strings, use [`at_string()`](Self::at_string).
+    ///
+    /// ## Frame behavior
+    ///
+    /// ```rust
+    /// use errat::at;
+    ///
+    /// #[derive(Debug)]
+    /// struct E;
+    ///
+    /// // One frame with two contexts
+    /// let e = at(E).at_str("a").at_str("b");
+    /// assert_eq!(e.trace_len(), 1);
+    ///
+    /// // Two frames: first from at(), second gets the context
+    /// let e = at(E).at().at_str("on second frame");
+    /// assert_eq!(e.trace_len(), 2);
+    /// ```
     ///
     /// ## Example
     ///
@@ -257,10 +278,14 @@ impl<E> At<E> {
         self
     }
 
-    /// Add a lazily-computed string context to the last location (or create one if empty).
+    /// Add a lazily-computed string context to the last location frame.
+    ///
+    /// **Does not add a new location frame** - attaches context to the most recent
+    /// frame in the trace. If the trace is empty, creates a frame at the caller's
+    /// location first.
     ///
     /// The closure is only called on error path, avoiding allocation on success.
-    /// For static strings, use `at_str()` instead for zero overhead.
+    /// For static strings, use [`at_str()`](Self::at_str) instead for zero overhead.
     ///
     /// ## Example
     ///
@@ -290,14 +315,18 @@ impl<E> At<E> {
         self
     }
 
-    /// Add lazily-computed typed context (Display) to the last location (or create one if empty).
+    /// Add lazily-computed typed context (Display) to the last location frame.
+    ///
+    /// **Does not add a new location frame** - attaches context to the most recent
+    /// frame in the trace. If the trace is empty, creates a frame at the caller's
+    /// location first.
     ///
     /// The closure is only called on error path, avoiding allocation on success.
     /// Use for typed data that you want to format with `Display` and later retrieve
-    /// via `downcast_ref::<T>()`.
+    /// via [`downcast_ref::<T>()`](crate::AtContextRef::downcast_ref).
     ///
-    /// For plain string messages, prefer `at_str()` or `at_string()`.
-    /// For Debug-formatted data, use `at_debug()`.
+    /// For plain string messages, prefer [`at_str()`](Self::at_str) or [`at_string()`](Self::at_string).
+    /// For Debug-formatted data, use [`at_debug()`](Self::at_debug).
     ///
     /// ## Example
     ///
@@ -338,10 +367,15 @@ impl<E> At<E> {
         self
     }
 
-    /// Add lazily-computed typed context (Debug) to the last location (or create one if empty).
+    /// Add lazily-computed typed context (Debug) to the last location frame.
+    ///
+    /// **Does not add a new location frame** - attaches context to the most recent
+    /// frame in the trace. If the trace is empty, creates a frame at the caller's
+    /// location first.
     ///
     /// The closure is only called on error path, avoiding allocation on success.
-    /// Use `contexts()` to retrieve entries and `downcast_ref` to access typed data.
+    /// Use [`contexts()`](Self::contexts) to retrieve entries and
+    /// [`downcast_ref()`](crate::AtContextRef::downcast_ref) to access typed data.
     ///
     /// ## Example
     ///
@@ -378,7 +412,11 @@ impl<E> At<E> {
         self
     }
 
-    /// Add an error as context to the last location (or create one if empty).
+    /// Add an error as context to the last location frame.
+    ///
+    /// **Does not add a new location frame** - attaches context to the most recent
+    /// frame in the trace. If the trace is empty, creates a frame at the caller's
+    /// location first.
     ///
     /// Use this to attach a source error that implements `core::error::Error`.
     /// The error's `.source()` chain is preserved and can be traversed.
@@ -406,7 +444,11 @@ impl<E> At<E> {
         self
     }
 
-    /// Add a crate boundary marker to the last location (or create one if empty).
+    /// Add a crate boundary marker to the last location frame.
+    ///
+    /// **Does not add a new location frame** - attaches context to the most recent
+    /// frame in the trace. If the trace is empty, creates a frame at the caller's
+    /// location first.
     ///
     /// This marks that subsequent locations belong to a different crate,
     /// enabling correct GitHub links in cross-crate traces.
