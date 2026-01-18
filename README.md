@@ -30,9 +30,9 @@ Compatible with plain enums, errors, structs, thiserror, anyhow, or any type wit
 
 Ok path (no error)      █ <1ns            ← ZERO overhead on success
 plain enum error        █ <1ns
-whereat (1 frame)       ████ 19ns         ← file:line:col captured
-whereat (3 frames)      ████ 20ns
-whereat (10 frames)     ████████ 42ns
+whereat (1 frame)       ███ 18ns          ← file:line:col captured
+whereat (3 frames)      ███ 19ns
+whereat (10 frames)     ██████████ 67ns
 
 With RUST_BACKTRACE=1:
 anyhow                  █████████████████████████████████████████████████ 2,500ns
@@ -42,14 +42,14 @@ panic + catch_unwind    ██████████████████�
 
 **Fair comparison (same 10-frame depth, 10k iterations):**
 ```text
-whereat .at()           █ 671µs           ← 168x faster than backtrace
-panic + catch_unwind    ███████████████████████████████████ 24ms
-backtrace crate         ██████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████ 113ms
+whereat .at()           █ 1.2ms           ← 100x faster than backtrace
+panic + catch_unwind    ██████████████████████ 27ms
+backtrace crate         ████████████████████████████████████████████████████████████████████████████████████████████████████ 119ms
 ```
 
 *anyhow/panic only capture backtraces when `RUST_BACKTRACE=1`. whereat always captures location.*
 
-*Linux x86_64, 2025-01-17. See `cargo bench --bench overhead` and `cargo bench --bench nested_loops "fair_10fr"`.*
+*Linux x86_64 (WSL2), 2026-01-18. See `cargo bench --bench overhead` and `cargo bench --bench nested_loops "fair_10fr"`.*
 
 ## Quick Start
 
