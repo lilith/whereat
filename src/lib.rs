@@ -189,7 +189,7 @@ pub use crate_info::{
 };
 pub use ext::{ErrorAtExt, ResultAtExt, ResultAtTraceableExt};
 pub use trace::{
-    AtFrame, AtFrameOwned, AtTrace, AtTraceBoxed, AtTraceable, AT_MAX_CONTEXTS, AT_MAX_FRAMES,
+    AT_MAX_CONTEXTS, AT_MAX_FRAMES, AtFrame, AtFrameOwned, AtTrace, AtTraceBoxed, AtTraceable,
 };
 
 // ============================================================================

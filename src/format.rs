@@ -36,8 +36,26 @@ mod term {
 
             writeln!(f)?;
 
+            // Track current crate for boundary display
+            let mut current_crate: Option<&str> = trace.crate_info().map(|i| i.name());
+
             // Walk locations
             for (i, loc_opt) in trace.iter().enumerate() {
+                // Check for crate boundary before showing location
+                for context in trace.contexts_at(i) {
+                    if let AtContext::Crate(info) = context {
+                        let from = current_crate.unwrap_or("?");
+                        let to = info.name();
+                        write!(f, "    {} ", "───".dimmed())?;
+                        write!(f, "{}", from.bright_blue())?;
+                        write!(f, "{}", " (above) → ".dimmed())?;
+                        write!(f, "{}", to.bright_blue())?;
+                        write!(f, "{}", " (below)".dimmed())?;
+                        writeln!(f, " {}", "───".dimmed())?;
+                        current_crate = Some(to);
+                    }
+                }
+
                 match loc_opt {
                     Some(loc) => {
                         // "at" in dim, location in cyan
@@ -46,8 +64,11 @@ mod term {
                         write!(f, "{}", ":".dimmed())?;
                         writeln!(f, "{}", loc.line().to_string().yellow())?;
 
-                        // Contexts with corner prefix
+                        // Contexts with corner prefix (skip crate boundaries, already shown)
                         for context in trace.contexts_at(i) {
+                            if matches!(context, AtContext::Crate(_)) {
+                                continue;
+                            }
                             write!(f, "       {} ", "╰─".dimmed())?;
                             match context {
                                 AtContext::Text(msg) => writeln!(f, "{}", msg.as_ref().green())?,
@@ -65,7 +86,7 @@ mod term {
                                     write!(f, "{} ", "caused by:".dimmed())?;
                                     writeln!(f, "{}", format!("{}", e).red())?
                                 }
-                                AtContext::Crate(_) => {}
+                                AtContext::Crate(_) => unreachable!(),
                             }
                         }
                     }
@@ -102,14 +123,26 @@ mod term {
 
             writeln!(f)?;
 
+            // Track current crate for boundary display
+            let mut current_crate: Option<&str> = trace.crate_info().map(|i| i.name());
+
             // Build link template from crate info
             let mut link_template: Option<String> = trace.crate_info().and_then(build_link_base);
 
             // Walk locations
             for (i, loc_opt) in trace.iter().enumerate() {
-                // Check for crate boundary context
+                // Check for crate boundary context - display prominently and update link template
                 for context in trace.contexts_at(i) {
                     if let AtContext::Crate(info) = context {
+                        let from = current_crate.unwrap_or("?");
+                        let to = info.name();
+                        write!(f, "    {} ", "───".dimmed())?;
+                        write!(f, "{}", from.bright_blue())?;
+                        write!(f, "{}", " (above) → ".dimmed())?;
+                        write!(f, "{}", to.bright_blue())?;
+                        write!(f, "{}", " (below)".dimmed())?;
+                        writeln!(f, " {}", "───".dimmed())?;
+                        current_crate = Some(to);
                         link_template = build_link_base(info);
                     }
                 }
@@ -134,8 +167,11 @@ mod term {
                             writeln!(f, "{}", loc.line().to_string().yellow())?;
                         }
 
-                        // Contexts
+                        // Contexts (skip crate boundaries, already shown)
                         for context in trace.contexts_at(i) {
+                            if matches!(context, AtContext::Crate(_)) {
+                                continue;
+                            }
                             write!(f, "       {} ", "╰─".dimmed())?;
                             match context {
                                 AtContext::Text(msg) => writeln!(f, "{}", msg.as_ref().green())?,
@@ -153,7 +189,7 @@ mod term {
                                     write!(f, "{} ", "caused by:".dimmed())?;
                                     writeln!(f, "{}", format!("{}", e).red())?
                                 }
-                                AtContext::Crate(_) => {}
+                                AtContext::Crate(_) => unreachable!(),
                             }
                         }
                     }
@@ -251,6 +287,16 @@ mod html {
     margin-left: 16px;
     color: #6c7086;
 }
+.whereat-error .crate-boundary {
+    margin-left: 16px;
+    color: #6c7086;
+    margin-top: 4px;
+    margin-bottom: 4px;
+}
+.whereat-error .crate-boundary .crate-name {
+    color: #89b4fa;
+    font-weight: 500;
+}
 .whereat-error a {
     color: inherit;
     text-decoration: underline;
@@ -293,14 +339,26 @@ mod html {
                 writeln!(f, "</span></div>")?;
             }
 
+            // Track current crate for boundary display
+            let mut current_crate: Option<&str> = trace.crate_info().map(|i| i.name());
+
             // Build link template
             let mut link_template: Option<String> = trace.crate_info().and_then(build_link_base);
 
             // Locations
             for (i, loc_opt) in trace.iter().enumerate() {
-                // Check for crate boundary context
+                // Check for crate boundary context - display prominently and update link template
                 for context in trace.contexts_at(i) {
                     if let AtContext::Crate(info) = context {
+                        let from = current_crate.unwrap_or("?");
+                        let to = info.name();
+                        write!(f, "<div class=\"crate-boundary\">─── ")?;
+                        write!(f, "<span class=\"crate-name\">")?;
+                        write_html_escaped(f, from)?;
+                        write!(f, "</span> (above) → <span class=\"crate-name\">")?;
+                        write_html_escaped(f, to)?;
+                        writeln!(f, "</span> (below) ───</div>")?;
+                        current_crate = Some(to);
                         link_template = build_link_base(info);
                     }
                 }
@@ -332,8 +390,11 @@ mod html {
                         }
                         writeln!(f, "</div>")?;
 
-                        // Contexts
+                        // Contexts (skip crate boundaries, already shown)
                         for context in trace.contexts_at(i) {
+                            if matches!(context, AtContext::Crate(_)) {
+                                continue;
+                            }
                             write!(f, "<div class=\"context\">╰─ ")?;
                             match context {
                                 AtContext::Text(msg) => {
@@ -361,7 +422,7 @@ mod html {
                                     write_html_escaped(f, &format!("{}", e))?;
                                     writeln!(f, "</span></div>")?;
                                 }
-                                AtContext::Crate(_) => {}
+                                AtContext::Crate(_) => unreachable!(),
                             }
                         }
                     }

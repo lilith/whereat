@@ -1361,15 +1361,31 @@ impl<E: AtTraceable> fmt::Display for FullTraceDisplay<'_, E> {
 
         // Show trace frames
         if let Some(trace) = self.error.trace() {
+            // Track current crate for boundary display
+            let mut current_crate: Option<&str> = trace.crate_info().map(|i| i.name());
+
             for frame in trace.frames() {
+                // Check for crate boundary before showing location
+                for ctx in frame.contexts() {
+                    if let Some(info) = ctx.as_crate_info() {
+                        let from = current_crate.unwrap_or("?");
+                        let to = info.name();
+                        write!(f, "\n    ─── {} (above) → {} (below) ───", from, to)?;
+                        current_crate = Some(to);
+                    }
+                }
+
                 if let Some(loc) = frame.location() {
                     write!(f, "\n    at {}:{}:{}", loc.file(), loc.line(), loc.column())?;
                 } else {
                     write!(f, "\n    [...]")?;
                 }
 
-                // Show contexts for this frame
+                // Show contexts for this frame (skip crate boundaries, already shown)
                 for ctx in frame.contexts() {
+                    if ctx.as_crate_info().is_some() {
+                        continue;
+                    }
                     if let Some(text) = ctx.as_text() {
                         write!(f, "\n        {}", text)?;
                     } else if let Some(fn_name) = ctx.as_function_name() {
