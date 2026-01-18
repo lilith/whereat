@@ -69,9 +69,14 @@ fn test_sizeof_trace() {
         feature = "_smallvec-128-bytes",
         feature = "_smallvec-256-bytes"
     )))]
+    // InlineVec<LocationElem, 4> with 4 inline slots:
+    // - len: u8 (1 byte, padded to 8)
+    // - inline: [Option<Option<&Location>>; 4] = 64 bytes
+    // - heap: Vec<T> = 24 bytes (ptr + len + capacity)
+    // Plus crate_info (8) + contexts (8) = 112 bytes total
     assert_eq!(
-        trace_size, 40,
-        "AtTrace should be 40 bytes without tinyvec/smallvec"
+        trace_size, 112,
+        "AtTrace should be 112 bytes with 4 inline slots"
     );
 
     #[cfg(all(

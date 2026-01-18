@@ -60,7 +60,8 @@ type LocationVec = smallvec::SmallVec<[LocationElem; 12]>;
 #[cfg(feature = "_smallvec-256-bytes")]
 type LocationVec = smallvec::SmallVec<[LocationElem; 28]>;
 
-/// Heap-allocated location storage (default, no tinyvec/smallvec feature).
+/// Inline-first location storage with 4 inline slots (default, no tinyvec/smallvec feature).
+/// Falls back to heap when more than 4 frames are needed.
 #[cfg(not(any(
     feature = "_tinyvec-64-bytes",
     feature = "_tinyvec-128-bytes",
@@ -69,20 +70,9 @@ type LocationVec = smallvec::SmallVec<[LocationElem; 28]>;
     feature = "_smallvec-128-bytes",
     feature = "_smallvec-256-bytes"
 )))]
-type LocationVec = Vec<LocationElem>;
+type LocationVec = crate::inline_vec::InlineVec<LocationElem, 4>;
 
-/// Default capacity for Vec-based storage. Avoids reallocations for typical traces.
-#[cfg(not(any(
-    feature = "_tinyvec-64-bytes",
-    feature = "_tinyvec-128-bytes",
-    feature = "_tinyvec-256-bytes",
-    feature = "_tinyvec-512-bytes",
-    feature = "_smallvec-128-bytes",
-    feature = "_smallvec-256-bytes"
-)))]
-const DEFAULT_LOCATION_CAPACITY: usize = 12;
-
-/// Create a new LocationVec with appropriate default capacity.
+/// Create a new LocationVec (inline storage, no pre-allocation needed).
 #[cfg(not(any(
     feature = "_tinyvec-64-bytes",
     feature = "_tinyvec-128-bytes",
@@ -93,7 +83,7 @@ const DEFAULT_LOCATION_CAPACITY: usize = 12;
 )))]
 #[inline]
 fn location_vec_new() -> LocationVec {
-    Vec::with_capacity(DEFAULT_LOCATION_CAPACITY)
+    LocationVec::new()
 }
 
 /// Create a new LocationVec (tinyvec/smallvec version - no pre-allocation needed).
@@ -139,7 +129,7 @@ pub(crate) fn try_box<T>(value: T) -> Option<Box<T>> {
 }
 
 /// Try to push a location onto a LocationVec, returning false on allocation failure.
-/// For Vec: uses try_reserve. For TinyVec/SmallVec: spills to heap if needed.
+/// For InlineVec: stores inline first, spills to heap when capacity exceeded.
 #[cfg(not(any(
     feature = "_tinyvec-64-bytes",
     feature = "_tinyvec-128-bytes",
@@ -150,11 +140,7 @@ pub(crate) fn try_box<T>(value: T) -> Option<Box<T>> {
 )))]
 #[inline]
 fn try_push_location(vec: &mut LocationVec, elem: LocationElem) -> bool {
-    if vec.try_reserve(1).is_err() {
-        return false;
-    }
-    vec.push(elem);
-    true
+    vec.try_push(elem)
 }
 
 /// Try to push a location onto a LocationVec (TinyVec/SmallVec version).
@@ -366,8 +352,33 @@ impl AtTrace {
 
     /// Iterate over all location entries, oldest first.
     /// Returns Option where None = skipped frame marker.
+    #[cfg(not(any(
+        feature = "_tinyvec-64-bytes",
+        feature = "_tinyvec-128-bytes",
+        feature = "_tinyvec-256-bytes",
+        feature = "_tinyvec-512-bytes",
+        feature = "_smallvec-128-bytes",
+        feature = "_smallvec-256-bytes"
+    )))]
     #[inline]
     pub(crate) fn iter(&self) -> impl Iterator<Item = Option<&'static Location<'static>>> + '_ {
+        // InlineVec yields T directly (not &T)
+        self.locations.iter()
+    }
+
+    /// Iterate over all location entries, oldest first.
+    /// Returns Option where None = skipped frame marker.
+    #[cfg(any(
+        feature = "_tinyvec-64-bytes",
+        feature = "_tinyvec-128-bytes",
+        feature = "_tinyvec-256-bytes",
+        feature = "_tinyvec-512-bytes",
+        feature = "_smallvec-128-bytes",
+        feature = "_smallvec-256-bytes"
+    ))]
+    #[inline]
+    pub(crate) fn iter(&self) -> impl Iterator<Item = Option<&'static Location<'static>>> + '_ {
+        // TinyVec/SmallVec yields &T
         self.locations.iter().copied()
     }
 
@@ -416,10 +427,37 @@ impl AtTrace {
     ///     }
     /// }
     /// ```
+    /// Frames iterator for InlineVec (yields T directly)
+    #[cfg(not(any(
+        feature = "_tinyvec-64-bytes",
+        feature = "_tinyvec-128-bytes",
+        feature = "_tinyvec-256-bytes",
+        feature = "_tinyvec-512-bytes",
+        feature = "_smallvec-128-bytes",
+        feature = "_smallvec-256-bytes"
+    )))]
     #[inline]
     pub fn frames(&self) -> impl Iterator<Item = AtFrame<'_>> {
         self.locations.iter().enumerate().map(|(idx, loc)| AtFrame {
-            location: *loc,
+            location: loc, // InlineVec yields T directly
+            trace: self,
+            index: idx,
+        })
+    }
+
+    /// Frames iterator for TinyVec/SmallVec (yields &T)
+    #[cfg(any(
+        feature = "_tinyvec-64-bytes",
+        feature = "_tinyvec-128-bytes",
+        feature = "_tinyvec-256-bytes",
+        feature = "_tinyvec-512-bytes",
+        feature = "_smallvec-128-bytes",
+        feature = "_smallvec-256-bytes"
+    ))]
+    #[inline]
+    pub fn frames(&self) -> impl Iterator<Item = AtFrame<'_>> {
+        self.locations.iter().enumerate().map(|(idx, loc)| AtFrame {
+            location: *loc, // TinyVec/SmallVec yields &T, need to deref
             trace: self,
             index: idx,
         })
@@ -544,7 +582,7 @@ impl AtTrace {
     /// On allocation failure, the operation is silently skipped.
     #[inline]
     pub fn push_first(&mut self, segment: AtFrameOwned) {
-        // Reserve space for location insert (Vec only, TinyVec/SmallVec handle inline)
+        // For InlineVec: use insert_first which handles allocation internally
         #[cfg(not(any(
             feature = "_tinyvec-64-bytes",
             feature = "_tinyvec-128-bytes",
@@ -553,29 +591,61 @@ impl AtTrace {
             feature = "_smallvec-128-bytes",
             feature = "_smallvec-256-bytes"
         )))]
-        if self.locations.try_reserve(1).is_err() {
-            return;
-        }
-
-        // Shift all existing indices up by 1
-        if let Some(ref mut ctx_vec) = self.contexts {
-            for (idx, _) in ctx_vec.iter_mut() {
-                *idx = idx.saturating_add(1);
+        {
+            // Shift all existing context indices up by 1
+            if let Some(ref mut ctx_vec) = self.contexts {
+                for (idx, _) in ctx_vec.iter_mut() {
+                    *idx = idx.saturating_add(1);
+                }
             }
-        }
 
-        // Insert location at beginning
-        self.locations.insert(0, segment.location);
-
-        // Insert contexts at beginning with index 0
-        if !segment.contexts.is_empty() {
-            let ctx_vec = self.contexts.get_or_insert_with(|| Box::new(Vec::new()));
-            // Reserve space for all contexts
-            if ctx_vec.try_reserve(segment.contexts.len()).is_err() {
+            // Insert location at beginning (returns false on allocation failure)
+            if !self.locations.insert_first(segment.location) {
                 return;
             }
-            for (i, ctx) in segment.contexts.into_iter().enumerate() {
-                ctx_vec.insert(i, (0, ctx));
+
+            // Insert contexts at beginning with index 0
+            if !segment.contexts.is_empty() {
+                let ctx_vec = self.contexts.get_or_insert_with(|| Box::new(Vec::new()));
+                if ctx_vec.try_reserve(segment.contexts.len()).is_err() {
+                    return;
+                }
+                for (i, ctx) in segment.contexts.into_iter().enumerate() {
+                    ctx_vec.insert(i, (0, ctx));
+                }
+            }
+        }
+
+        // For TinyVec/SmallVec: use insert method
+        #[cfg(any(
+            feature = "_tinyvec-64-bytes",
+            feature = "_tinyvec-128-bytes",
+            feature = "_tinyvec-256-bytes",
+            feature = "_tinyvec-512-bytes",
+            feature = "_smallvec-128-bytes",
+            feature = "_smallvec-256-bytes"
+        ))]
+        {
+            // Shift all existing indices up by 1
+            if let Some(ref mut ctx_vec) = self.contexts {
+                for (idx, _) in ctx_vec.iter_mut() {
+                    *idx = idx.saturating_add(1);
+                }
+            }
+
+            // Insert location at beginning
+            self.locations.insert(0, segment.location);
+
+            // Insert contexts at beginning with index 0
+            if !segment.contexts.is_empty() {
+                let ctx_vec = self.contexts.get_or_insert_with(|| Box::new(Vec::new()));
+                // Reserve space for all contexts
+                if ctx_vec.try_reserve(segment.contexts.len()).is_err() {
+                    return;
+                }
+                for (i, ctx) in segment.contexts.into_iter().enumerate() {
+                    ctx_vec.insert(i, (0, ctx));
+                }
             }
         }
     }

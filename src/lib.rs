@@ -177,6 +177,7 @@ mod crate_info;
 mod ext;
 #[cfg(any(feature = "_termcolor", feature = "_html"))]
 mod format;
+mod inline_vec;
 pub mod prelude;
 mod trace;
 
