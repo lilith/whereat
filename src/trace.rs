@@ -432,6 +432,14 @@ impl AtTrace {
         // but we need to extract those with matching index)
         let mut contexts = Vec::new();
         if let Some(ref mut ctx_vec) = self.contexts {
+            // Count matching contexts first for reservation
+            let count = ctx_vec
+                .iter()
+                .rev()
+                .take_while(|(idx, _)| *idx == last_idx)
+                .count();
+            let _ = contexts.try_reserve(count); // Best effort
+
             // Remove contexts with matching index from the end
             while let Some(&(idx, _)) = ctx_vec.last() {
                 if idx == last_idx {
@@ -476,6 +484,10 @@ impl AtTrace {
         // Collect and remove contexts for index 0, decrement remaining indices
         let mut contexts = Vec::new();
         if let Some(ref mut ctx_vec) = self.contexts {
+            // Count matching contexts first for reservation
+            let count = ctx_vec.iter().filter(|(idx, _)| *idx == 0).count();
+            let _ = contexts.try_reserve(count); // Best effort
+
             let mut i = 0;
             while i < ctx_vec.len() {
                 if ctx_vec[i].0 == 0 {
@@ -494,7 +506,21 @@ impl AtTrace {
     /// Insert a segment (location + contexts) at the beginning of the trace.
     ///
     /// Note: This is O(n) as it shifts all existing elements.
+    /// On allocation failure, the operation is silently skipped.
     pub fn push_first(&mut self, segment: AtFrameOwned) {
+        // Reserve space for location insert (Vec only, TinyVec/SmallVec handle inline)
+        #[cfg(not(any(
+            feature = "_tinyvec-64-bytes",
+            feature = "_tinyvec-128-bytes",
+            feature = "_tinyvec-256-bytes",
+            feature = "_tinyvec-512-bytes",
+            feature = "_smallvec-128-bytes",
+            feature = "_smallvec-256-bytes"
+        )))]
+        if self.locations.try_reserve(1).is_err() {
+            return;
+        }
+
         // Shift all existing indices up by 1
         if let Some(ref mut ctx_vec) = self.contexts {
             for (idx, _) in ctx_vec.iter_mut() {
@@ -508,6 +534,10 @@ impl AtTrace {
         // Insert contexts at beginning with index 0
         if !segment.contexts.is_empty() {
             let ctx_vec = self.contexts.get_or_insert_with(|| Box::new(Vec::new()));
+            // Reserve space for all contexts
+            if ctx_vec.try_reserve(segment.contexts.len()).is_err() {
+                return;
+            }
             for (i, ctx) in segment.contexts.into_iter().enumerate() {
                 ctx_vec.insert(i, (0, ctx));
             }
@@ -525,10 +555,14 @@ impl AtTrace {
 
     /// Prepend all segments from another trace to the beginning of this trace.
     ///
-    /// The source trace is consumed.
+    /// The source trace is consumed. On allocation failure, partial prepend may occur.
     pub fn prepend(&mut self, mut other: AtTrace) {
         // Pop from other's end and insert at our beginning (reverse order)
+        let count = other.frame_count();
         let mut segments = Vec::new();
+        if segments.try_reserve(count).is_err() {
+            return; // Silently skip on OOM, like other trace operations
+        }
         while let Some(seg) = other.pop() {
             segments.push(seg);
         }
