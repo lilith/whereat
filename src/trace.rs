@@ -81,7 +81,6 @@ type LocationVec = Vec<LocationElem>;
     feature = "_smallvec-256-bytes"
 )))]
 const DEFAULT_LOCATION_CAPACITY: usize = 12;
-const DEFAULT_CONTEXT_CAPACITY: usize = 6;
 
 /// Create a new LocationVec with appropriate default capacity.
 #[cfg(not(any(
@@ -187,7 +186,7 @@ fn context_vec_new() -> ContextVec {
 /// Try to push a context entry (lazily allocates on first push).
 #[inline]
 fn try_push_context(vec: &mut ContextVec, entry: ContextEntry) -> bool {
-    let inner = vec.get_or_insert_with(|| Box::new(Vec::with_capacity(DEFAULT_CONTEXT_CAPACITY)));
+    let inner = vec.get_or_insert_with(|| Box::new(Vec::new()));
     if inner.try_reserve(1).is_err() {
         return false;
     }
@@ -304,6 +303,32 @@ impl AtTrace {
     #[inline]
     pub fn crate_info(&self) -> Option<&'static AtCrateInfo> {
         self.crate_info
+    }
+
+    /// Add crate boundary marker, using inline storage when possible.
+    ///
+    /// - If no crate_info is set, stores it inline (no allocation)
+    /// - If same crate_info is already set, does nothing
+    /// - If different crate_info, adds a context entry (marks boundary crossing)
+    #[inline]
+    pub(crate) fn try_add_crate_boundary(
+        &mut self,
+        loc: &'static Location<'static>,
+        info: &'static AtCrateInfo,
+    ) {
+        match self.crate_info {
+            None => {
+                // First crate info - store inline, no allocation
+                self.crate_info = Some(info);
+            }
+            Some(existing) if core::ptr::eq(existing, info) => {
+                // Same crate - nothing to do
+            }
+            Some(_) => {
+                // Different crate - add boundary context
+                self.try_add_context(loc, AtContext::Crate(info));
+            }
+        }
     }
 
     /// Try to push a location. Returns false if allocation fails.
@@ -534,7 +559,7 @@ impl AtTrace {
 
         // Insert contexts at beginning with index 0
         if !segment.contexts.is_empty() {
-            let ctx_vec = self.contexts.get_or_insert_with(|| Box::new(Vec::with_capacity(DEFAULT_CONTEXT_CAPACITY)));
+            let ctx_vec = self.contexts.get_or_insert_with(|| Box::new(Vec::new()));
             // Reserve space for all contexts
             if ctx_vec.try_reserve(segment.contexts.len()).is_err() {
                 return;
@@ -1106,12 +1131,14 @@ pub trait AtTraceable: Sized {
     }
 
     /// Add a crate boundary marker to the last location (or create one if empty).
+    ///
+    /// Uses inline storage if no crate_info is set yet; only allocates a context
+    /// entry when crossing to a different crate.
     #[track_caller]
     #[inline]
     fn at_crate(mut self, info: &'static AtCrateInfo) -> Self {
-        let context = AtContext::Crate(info);
         self.trace_mut()
-            .try_add_context(Location::caller(), context);
+            .try_add_crate_boundary(Location::caller(), info);
         self
     }
 

@@ -479,9 +479,8 @@ impl<E> At<E> {
     #[inline]
     pub fn at_crate(mut self, info: &'static AtCrateInfo) -> Self {
         let loc = Location::caller();
-        let context = AtContext::Crate(info);
         let trace = self.trace.get_or_insert_mut();
-        trace.try_add_context(loc, context);
+        trace.try_add_crate_boundary(loc, info);
         self
     }
 

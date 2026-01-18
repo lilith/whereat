@@ -98,7 +98,7 @@ fn at_macro_embeds_crate_info() {
 }
 
 #[test]
-fn at_crate_adds_boundary_marker() {
+fn at_crate_uses_inline_storage_for_same_crate() {
     fn inner() -> Result<(), At<TestError>> {
         Err(at!(TestError))
     }
@@ -110,15 +110,16 @@ fn at_crate_adds_boundary_marker() {
 
     let err = outer().unwrap_err();
 
-    // at!() sets crate_info on trace (not a context), at_crate!() adds a context
-    // So we should have 1 crate boundary in contexts (from at_crate!)
+    // at!() sets crate_info inline on trace
+    // at_crate!() with same crate uses inline storage (no context allocation)
+    // Only different crates add boundary contexts
     let crate_count = err.contexts().filter(|ctx| ctx.is_crate_boundary()).count();
-    assert!(
-        crate_count >= 1,
-        "Should have at least one crate boundary from at_crate!(). Got: {}",
+    assert_eq!(
+        crate_count, 0,
+        "Same-crate at_crate!() should use inline storage, not add context. Got: {}",
         crate_count
     );
-    // And the trace should have crate_info set (from at!())
+    // But crate_info should still be set
     assert!(
         err.crate_info().is_some(),
         "Should have crate_info set from at!()"
@@ -163,7 +164,12 @@ mod simulated_dep {
 }
 
 #[test]
-fn cross_crate_trace_has_multiple_boundaries() {
+fn simulated_dep_same_crate_no_boundary() {
+    // simulated_dep is a module in THIS crate, so at_crate!() sees the same
+    // at_crate_info() as the caller. No boundary context is added because
+    // there's no actual crate crossing - just inline storage is used.
+    //
+    // For true cross-crate tests, see tests/cross_crate.rs which uses fake-dep.
     use simulated_dep::DepError;
 
     fn my_wrapper() -> Result<(), At<DepError>> {
@@ -173,22 +179,21 @@ fn cross_crate_trace_has_multiple_boundaries() {
 
     let err = my_wrapper().unwrap_err();
 
-    // at!() in dep sets crate_info on trace (not a context)
-    // at_crate!() in wrapper adds a crate boundary context
-    // So we have: crate_info from at!() + 1 context from at_crate!()
+    // at!() in dep sets crate_info on trace (inline storage)
     assert!(
         err.crate_info().is_some(),
         "Should have crate_info from at!()"
     );
 
+    // No boundary contexts because simulated_dep shares the same crate_info
     let boundary_contexts: Vec<_> = err
         .contexts()
         .filter_map(|ctx| ctx.as_crate_info())
         .collect();
 
     assert!(
-        !boundary_contexts.is_empty(),
-        "Should have at least one boundary context from at_crate!(). Got: {}",
+        boundary_contexts.is_empty(),
+        "Same-crate at_crate!() should not add boundary context. Got: {}",
         boundary_contexts.len()
     );
 }
@@ -521,19 +526,22 @@ fn multiple_boundary_switches() {
         .module("c3")
         .build();
 
+    // C1 goes to inline storage (first crate). Need at least one location
+    // before C2 boundary so C1's link appears in output.
     let err = whereat::At::wrap(TestError)
         .at_crate(&C1)
-        .at()
+        .at()  // loc0 - uses C1 (inline)
+        .at()  // loc1 - still C1, but C2 boundary attaches here
         .at_crate(&C2)
-        .at()
+        .at()  // loc2 - uses C2
         .at_crate(&C3)
-        .at();
+        .at(); // loc3 - uses C3
 
     let output = format!("{}", err.display_with_meta());
 
-    assert!(output.contains("c1/blob/111"), "Should have c1 link");
-    assert!(output.contains("c2/blob/222"), "Should have c2 link");
-    assert!(output.contains("c3/blob/333"), "Should have c3 link");
+    assert!(output.contains("c1/blob/111"), "Should have c1 link. Got:\n{}", output);
+    assert!(output.contains("c2/blob/222"), "Should have c2 link. Got:\n{}", output);
+    assert!(output.contains("c3/blob/333"), "Should have c3 link. Got:\n{}", output);
 }
 
 // ============================================================================
