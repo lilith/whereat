@@ -28,28 +28,28 @@ Compatible with plain enums, errors, structs, thiserror, anyhow, or any type wit
 ```text
                                  Error creation time (lower is better)
 
-plain enum              ████ 27ns
-thiserror               ████ 27ns
-anyhow                  █████ 34ns         ← no location info
-whereat (1 frame)       ██████ 40ns        ← file:line:col captured
-whereat (3 frames)      ███████ 46ns
+Ok path (no error)      █ <1ns            ← ZERO overhead on success
+plain enum error        █ <1ns
+whereat (1 frame)       ████ 19ns         ← file:line:col captured
+whereat (3 frames)      ████ 20ns
+whereat (10 frames)     ████████ 42ns
 
 With RUST_BACKTRACE=1:
-anyhow                  ██████████████████████████████████ 2,500ns (63x slower)
-backtrace crate         █████████████████████████████████████████████████████ 6,300ns
-panic + catch_unwind    █████████████████ 1,300ns
+anyhow                  █████████████████████████████████████████████████ 2,500ns
+backtrace crate         ████████████████████████████████████████████████████████████████████████████████████████████████████ 6,300ns
+panic + catch_unwind    ██████████████████████████ 1,300ns
 ```
 
-**Fair comparison (same 10-frame depth, 10k errors):**
+**Fair comparison (same 10-frame depth, 10k iterations):**
 ```text
-whereat .at()           ██ 656µs          ← 150x faster than backtrace
-panic + catch_unwind    ██████████████████████ 22ms
-backtrace crate         ██████████████████████████████████████████████████ 99ms
+whereat .at()           █ 671µs           ← 168x faster than backtrace
+panic + catch_unwind    ███████████████████████████████████ 24ms
+backtrace crate         ██████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████ 113ms
 ```
 
 *anyhow/panic only capture backtraces when `RUST_BACKTRACE=1`. whereat always captures location.*
 
-*Linux x86_64. See `cargo bench --bench nested_loops "fair_10fr"` for full results.*
+*Linux x86_64, 2025-01-17. See `cargo bench --bench overhead` and `cargo bench --bench nested_loops "fair_10fr"`.*
 
 ## Quick Start
 
