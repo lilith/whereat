@@ -50,5 +50,9 @@ harness = false
 name = "inline_first"
 harness = false
 
+[[bench]]
+name = "at_depth"
+harness = false
+
 [lints.rust]
 unsafe_code = "deny"
