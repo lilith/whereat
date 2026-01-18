@@ -27,7 +27,7 @@ _html = []
 
 [dependencies]
 tinyvec = { version = "1.9", optional = true, default-features = false, features = ["alloc"] }
-smallvec = { version = "1.13", optional = true, default-features = false }
+smallvec = { version = "1.13", optional = true, default-features = false, features = ["const_generics"] }
 owo-colors = { version = "4.2", optional = true, default-features = false }
 
 [dev-dependencies]
