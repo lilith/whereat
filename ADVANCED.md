@@ -208,6 +208,73 @@ whereat = { version = "0.1", features = ["_tinyvec-128-bytes"] }
 - `Box` allocations use `Box::new` — can panic (waiting for `Box::try_new` stabilization)
 - The error `E` is always stored inline in `At<E>`, so errors propagate even if tracing fails
 
+## Pretty Output Formatters
+
+whereat includes optional formatters for terminal colors and HTML output.
+
+### Terminal Colors (`_termcolor` feature)
+
+```toml
+[dependencies]
+whereat = { version = "0.1", features = ["_termcolor"] }
+```
+
+```rust
+use whereat::{at, At};
+
+#[derive(Debug)]
+struct MyError;
+
+let err: At<MyError> = at(MyError).at_str("loading config");
+
+// Colored output (uses owo-colors)
+println!("{}", err.display_color());
+
+// Colored output with GitHub/GitLab links
+println!("{}", err.display_color_meta());
+```
+
+Output uses ANSI colors:
+- Error type in **red**
+- File paths in **cyan**
+- Line numbers in **yellow**
+- Context strings in **dimmed**
+
+### HTML Output (`_html` feature)
+
+```toml
+[dependencies]
+whereat = { version = "0.1", features = ["_html"] }
+```
+
+```rust
+// Basic HTML (no styles, use your own CSS)
+println!("{}", err.display_html());
+
+// HTML with embedded <style> block
+println!("{}", err.display_html_styled());
+```
+
+Example styled HTML output:
+
+```html
+<div class="whereat-error">
+  <div class="error-header">Error: <span class="error-type">MyError</span></div>
+  <div class="trace">
+    <div class="frame">
+      <span class="location">at src/main.rs:42</span>
+      <div class="context">loading config</div>
+    </div>
+  </div>
+</div>
+```
+
+### Running the Example
+
+```bash
+cargo run --example pretty_output --features "_termcolor,_html"
+```
+
 ## Benchmarks
 
 See [docs/BENCHMARK.md](docs/BENCHMARK.md) for detailed performance comparisons.
