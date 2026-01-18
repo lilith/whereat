@@ -420,6 +420,7 @@ impl<E: fmt::Debug> At<E> {
     /// Format the error with terminal colors.
     ///
     /// Requires the `_termcolor` feature.
+    #[inline]
     #[cfg(feature = "_termcolor")]
     pub fn display_color(&self) -> TermColorDisplay<'_, E> {
         TermColorDisplay { traced: self }
@@ -428,6 +429,7 @@ impl<E: fmt::Debug> At<E> {
     /// Format the error with terminal colors and metadata links.
     ///
     /// Requires the `_termcolor` feature.
+    #[inline]
     #[cfg(feature = "_termcolor")]
     pub fn display_color_meta(&self) -> TermColorMetaDisplay<'_, E> {
         TermColorMetaDisplay { traced: self }
@@ -436,6 +438,7 @@ impl<E: fmt::Debug> At<E> {
     /// Format the error as HTML.
     ///
     /// Requires the `_html` feature.
+    #[inline]
     #[cfg(feature = "_html")]
     pub fn display_html(&self) -> HtmlDisplay<'_, E> {
         HtmlDisplay {
@@ -447,6 +450,7 @@ impl<E: fmt::Debug> At<E> {
     /// Format the error as HTML with embedded CSS styles.
     ///
     /// Requires the `_html` feature.
+    #[inline]
     #[cfg(feature = "_html")]
     pub fn display_html_styled(&self) -> HtmlDisplay<'_, E> {
         HtmlDisplay {

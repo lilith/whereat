@@ -110,6 +110,7 @@ impl<E> At<E> {
     /// Create an `At<E>` from an error and an existing trace.
     ///
     /// Used for transferring traces between error types.
+    #[inline]
     pub fn from_parts(error: E, trace: AtTrace) -> Self {
         let mut boxed = AtTraceBoxed::new();
         boxed.set(trace);
@@ -612,6 +613,7 @@ impl<E> At<E> {
     ///     .collect();
     /// assert_eq!(texts, vec!["initializing", "loading config"]); // newest first
     /// ```
+    #[inline]
     pub fn contexts(&self) -> impl Iterator<Item = AtContextRef<'_>> {
         self.trace.as_ref().into_iter().flat_map(|t| t.contexts())
     }
@@ -642,6 +644,7 @@ impl<E> At<E> {
     ///     }
     /// }
     /// ```
+    #[inline]
     pub fn frames(&self) -> impl Iterator<Item = AtFrame<'_>> {
         self.trace.frames()
     }
@@ -659,11 +662,13 @@ impl<E> At<E> {
     /// Pop the most recent location and its contexts from the trace.
     ///
     /// Returns `None` if the trace is empty.
+    #[inline]
     pub fn at_pop(&mut self) -> Option<AtFrameOwned> {
         self.trace.as_mut()?.pop()
     }
 
     /// Push a segment (location + contexts) to the end of the trace.
+    #[inline]
     pub fn at_push(&mut self, segment: AtFrameOwned) {
         self.ensure_trace().push(segment);
     }
@@ -671,21 +676,25 @@ impl<E> At<E> {
     /// Pop the oldest location and its contexts from the trace.
     ///
     /// Returns `None` if the trace is empty.
+    #[inline]
     pub fn at_first_pop(&mut self) -> Option<AtFrameOwned> {
         self.trace.as_mut()?.pop_first()
     }
 
     /// Insert a segment (location + contexts) at the beginning of the trace.
+    #[inline]
     pub fn at_first_insert(&mut self, segment: AtFrameOwned) {
         self.ensure_trace().push_first(segment);
     }
 
     /// Take the entire trace, leaving self with an empty trace.
+    #[inline]
     pub fn take_trace(&mut self) -> Option<AtTrace> {
         self.trace.take()
     }
 
     /// Set the trace, replacing any existing trace.
+    #[inline]
     pub fn set_trace(&mut self, trace: AtTrace) {
         self.trace.set(trace);
     }
@@ -714,6 +723,7 @@ impl<E> At<E> {
     /// let err2: At<Error2> = err1.map_error(Error2::from);
     /// assert_eq!(err2.frame_count(), 1);
     /// ```
+    #[inline]
     pub fn map_error<E2, F>(self, f: F) -> At<E2>
     where
         F: FnOnce(E) -> E2,
@@ -753,6 +763,7 @@ impl<E> At<E> {
     /// let at_err: At<Inner> = at(Inner).at_str("context");
     /// let my_err: MyError = at_err.into_traceable(|_| MyError { trace: AtTrace::new() });
     /// ```
+    #[inline]
     pub fn into_traceable<E2, F>(mut self, f: F) -> E2
     where
         F: FnOnce(E) -> E2,
@@ -836,6 +847,7 @@ impl<E: fmt::Debug> At<E> {
     /// let err = at!(MyError);
     /// println!("{}", err.display_with_meta());
     /// ```
+    #[inline]
     pub fn display_with_meta(&self) -> impl fmt::Display + '_ {
         DisplayWithMeta { traced: self }
     }
@@ -1012,6 +1024,7 @@ impl<E: fmt::Display> At<E> {
     /// //     at src/main.rs:10:1
     /// //         loading config
     /// ```
+    #[inline]
     pub fn full_trace(&self) -> impl fmt::Display + '_ {
         AtFullTraceDisplay { at: self }
     }
@@ -1043,6 +1056,7 @@ impl<E: fmt::Display> At<E> {
     /// // failed
     /// //     at src/main.rs:10:1
     /// ```
+    #[inline]
     pub fn last_error_trace(&self) -> impl fmt::Display + '_ {
         AtLastErrorTraceDisplay { at: self }
     }
@@ -1053,6 +1067,7 @@ impl<E: fmt::Display> At<E> {
     /// Use this when you want to show the error without any trace information.
     ///
     /// This is equivalent to using the `Display` impl directly.
+    #[inline]
     pub fn last_error(&self) -> impl fmt::Display + '_ {
         AtLastErrorDisplay { at: self }
     }

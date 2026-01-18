@@ -324,12 +324,14 @@ impl AtCrateInfoBuilder {
     /// Set the crate name from an owned string (leaks memory for static lifetime).
     ///
     /// Use for runtime configuration with `OnceLock`.
+    #[inline]
     pub fn name_owned(mut self, name: String) -> Self {
         self.name = Box::leak(name.into_boxed_str());
         self
     }
 
     /// Set the repository URL from an owned string (leaks memory for static lifetime).
+    #[inline]
     pub fn repo_owned(mut self, repo: Option<String>) -> Self {
         self.repo = repo.map(|s| {
             let leaked: &'static str = Box::leak(s.into_boxed_str());
@@ -339,6 +341,7 @@ impl AtCrateInfoBuilder {
     }
 
     /// Set the commit hash from an owned string (leaks memory for static lifetime).
+    #[inline]
     pub fn commit_owned(mut self, commit: Option<String>) -> Self {
         self.commit = commit.map(|s| {
             let leaked: &'static str = Box::leak(s.into_boxed_str());
@@ -348,6 +351,7 @@ impl AtCrateInfoBuilder {
     }
 
     /// Set the crate path from an owned string (leaks memory for static lifetime).
+    #[inline]
     pub fn path_owned(mut self, path: Option<String>) -> Self {
         self.crate_path = path.map(|s| {
             let leaked: &'static str = Box::leak(s.into_boxed_str());
@@ -357,6 +361,7 @@ impl AtCrateInfoBuilder {
     }
 
     /// Set the module path from an owned string (leaks memory for static lifetime).
+    #[inline]
     pub fn module_owned(mut self, module: String) -> Self {
         self.module = Box::leak(module.into_boxed_str());
         self
@@ -384,6 +389,7 @@ impl AtCrateInfoBuilder {
     ///     });
     /// }
     /// ```
+    #[inline]
     pub fn meta_owned(mut self, entries: Vec<(String, String)>) -> Self {
         let leaked: &'static [(&'static str, &'static str)] = Box::leak(
             entries
@@ -401,6 +407,7 @@ impl AtCrateInfoBuilder {
     }
 
     /// Set the link format from an owned string (leaks memory for static lifetime).
+    #[inline]
     pub fn link_format_owned(mut self, format: String) -> Self {
         self.link_format = Box::leak(format.into_boxed_str());
         self
@@ -428,6 +435,7 @@ impl AtCrateInfoBuilder {
     ///     .link_format_auto()
     ///     .build();
     /// ```
+    #[inline]
     pub fn link_format_auto(mut self) -> Self {
         self.link_format = match self.repo {
             Some(url) => detect_link_format(url),

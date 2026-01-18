@@ -349,6 +349,7 @@ impl AtTrace {
     /// Use `try_push()` first if you need a new location, then call this for context.
     ///
     /// On allocation failure, the context may be lost but existing data is preserved.
+    #[inline]
     pub(crate) fn try_add_context(&mut self, loc: &'static Location<'static>, context: AtContext) {
         // If empty, push a location first
         let idx = if self.locations.is_empty() {
@@ -365,12 +366,14 @@ impl AtTrace {
 
     /// Iterate over all location entries, oldest first.
     /// Returns Option where None = skipped frame marker.
+    #[inline]
     pub(crate) fn iter(&self) -> impl Iterator<Item = Option<&'static Location<'static>>> + '_ {
         self.locations.iter().copied()
     }
 
     /// Iterate over all context entries, newest first (loses location association).
     /// Prefer `frames()` for unified iteration.
+    #[inline]
     pub(crate) fn contexts(&self) -> impl Iterator<Item = AtContextRef<'_>> {
         context_iter(&self.contexts)
             .rev()
@@ -378,6 +381,7 @@ impl AtTrace {
     }
 
     /// Get all contexts at a specific location index.
+    #[inline]
     pub(crate) fn contexts_at(&self, idx: usize) -> impl Iterator<Item = &AtContext> {
         context_iter(&self.contexts)
             .filter(move |(i, _)| *i as usize == idx)
@@ -412,6 +416,7 @@ impl AtTrace {
     ///     }
     /// }
     /// ```
+    #[inline]
     pub fn frames(&self) -> impl Iterator<Item = AtFrame<'_>> {
         self.locations.iter().enumerate().map(|(idx, loc)| AtFrame {
             location: *loc,
@@ -435,6 +440,7 @@ impl AtTrace {
     /// Take the entire trace, leaving self empty.
     ///
     /// Preserves crate_info in self (not transferred).
+    #[inline]
     pub fn take(&mut self) -> AtTrace {
         AtTrace {
             locations: core::mem::take(&mut self.locations),
@@ -446,6 +452,7 @@ impl AtTrace {
     /// Pop the most recent location and its contexts from the end.
     ///
     /// Returns `None` if the trace is empty.
+    #[inline]
     pub fn pop(&mut self) -> Option<AtFrameOwned> {
         if self.locations.is_empty() {
             return None;
@@ -481,6 +488,7 @@ impl AtTrace {
     }
 
     /// Push a segment (location + contexts) to the end of the trace.
+    #[inline]
     pub fn push(&mut self, segment: AtFrameOwned) {
         let idx = self.locations.len() as u16;
 
@@ -500,6 +508,7 @@ impl AtTrace {
     /// Returns `None` if the trace is empty.
     ///
     /// Note: This is O(n) as it shifts all remaining elements.
+    #[inline]
     pub fn pop_first(&mut self) -> Option<AtFrameOwned> {
         if self.locations.is_empty() {
             return None;
@@ -533,6 +542,7 @@ impl AtTrace {
     ///
     /// Note: This is O(n) as it shifts all existing elements.
     /// On allocation failure, the operation is silently skipped.
+    #[inline]
     pub fn push_first(&mut self, segment: AtFrameOwned) {
         // Reserve space for location insert (Vec only, TinyVec/SmallVec handle inline)
         #[cfg(not(any(
@@ -573,6 +583,7 @@ impl AtTrace {
     /// Append all segments from another trace to the end of this trace.
     ///
     /// The source trace is consumed.
+    #[inline]
     pub fn append(&mut self, mut other: AtTrace) {
         while let Some(seg) = other.pop_first() {
             self.push(seg);
@@ -582,6 +593,7 @@ impl AtTrace {
     /// Prepend all segments from another trace to the beginning of this trace.
     ///
     /// The source trace is consumed. On allocation failure, partial prepend may occur.
+    #[inline]
     pub fn prepend(&mut self, mut other: AtTrace) {
         // Pop from other's end and insert at our beginning (reverse order)
         let count = other.frame_count();
@@ -624,6 +636,7 @@ pub struct AtFrameOwned {
 
 impl AtFrameOwned {
     /// Create a new segment with a location and no contexts.
+    #[inline]
     pub fn new(location: Option<&'static Location<'static>>) -> Self {
         Self {
             location,
@@ -632,44 +645,52 @@ impl AtFrameOwned {
     }
 
     /// Create a new segment capturing the caller's location.
+    #[inline]
     #[track_caller]
     pub fn capture() -> Self {
         Self::new(Some(Location::caller()))
     }
 
     /// Get the location (None means skipped frames marker).
+    #[inline]
     pub fn location(&self) -> Option<&'static Location<'static>> {
         self.location
     }
 
     /// Check if this is a skipped frames marker.
+    #[inline]
     pub fn is_skipped(&self) -> bool {
         self.location.is_none()
     }
 
     /// Iterate over contexts in this segment.
+    #[inline]
     pub fn contexts(&self) -> impl Iterator<Item = AtContextRef<'_>> {
         self.contexts.iter().map(|c| AtContextRef { inner: c })
     }
 
     /// Number of contexts in this segment.
+    #[inline]
     pub fn context_count(&self) -> usize {
         self.contexts.len()
     }
 
     /// Add a static string context.
+    #[inline]
     pub fn with_str(mut self, msg: &'static str) -> Self {
         self.contexts.push(AtContext::Text(Cow::Borrowed(msg)));
         self
     }
 
     /// Add a dynamic string context.
+    #[inline]
     pub fn with_string(mut self, msg: String) -> Self {
         self.contexts.push(AtContext::Text(Cow::Owned(msg)));
         self
     }
 
     /// Add typed context (Display).
+    #[inline]
     pub fn with_data<T: fmt::Display + Send + Sync + 'static>(mut self, data: T) -> Self {
         if let Some(boxed) = try_box(data) {
             self.contexts.push(AtContext::Display(boxed));
@@ -678,6 +699,7 @@ impl AtFrameOwned {
     }
 
     /// Add typed context (Debug).
+    #[inline]
     pub fn with_debug<T: fmt::Debug + Send + Sync + 'static>(mut self, data: T) -> Self {
         if let Some(boxed) = try_box(data) {
             self.contexts.push(AtContext::Debug(boxed));
@@ -737,6 +759,7 @@ impl<'a> AtFrame<'a> {
     }
 
     /// Iterate over contexts attached to this frame.
+    #[inline]
     pub fn contexts(&self) -> impl Iterator<Item = AtContextRef<'a>> {
         let idx = self.index;
         context_iter(&self.trace.contexts)
@@ -745,6 +768,7 @@ impl<'a> AtFrame<'a> {
     }
 
     /// Check if this frame has any contexts.
+    #[inline]
     pub fn has_contexts(&self) -> bool {
         let idx = self.index;
         context_iter(&self.trace.contexts).any(|(i, _)| *i as usize == idx)
