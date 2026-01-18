@@ -13,7 +13,10 @@
 //!
 //! ## Quick Start
 //!
-//! ```rust
+//! ```rust,ignore
+//! // In lib.rs or main.rs - enables at!() macro with repository links
+//! whereat::define_at_crate_info!();
+//!
 //! use whereat::{at, At, ResultAtExt};
 //!
 //! #[derive(Debug)]
@@ -21,18 +24,22 @@
 //!
 //! fn find_user(id: u64) -> Result<String, At<MyError>> {
 //!     if id == 0 {
-//!         return Err(at(MyError::InvalidInput("id cannot be zero".into())));
+//!         return Err(at!(MyError::InvalidInput("id cannot be zero".into())));
 //!     }
-//!     Err(at(MyError::NotFound))  // at() wraps and captures location
+//!     Err(at!(MyError::NotFound))
 //! }
 //!
 //! fn process(id: u64) -> Result<String, At<MyError>> {
-//!     find_user(id).at_str("looking up user")?;  // Adds context to the trace
+//!     find_user(id).at_str("looking up user")?;  // Adds context
 //!     Ok("done".into())
 //! }
+//! ```
 //!
-//! let err = process(0).unwrap_err();
-//! assert_eq!(err.frame_count(), 1);  // One frame with context attached
+//! The `at!()` macro desugars to:
+//! ```rust,ignore
+//! At::wrap(err)
+//!     .set_crate_info(crate::at_crate_info())  // Enables GitHub links
+//!     .at()                                     // Captures file:line:col
 //! ```
 //!
 //! ## Which Approach?
@@ -51,9 +58,12 @@
 //!
 //! | Function | Crate info | Use when |
 //! |----------|------------|----------|
-//! | [`at!(err)`](at!) | ✅ GitHub links | Default choice with [`define_at_crate_info!()`](define_at_crate_info) |
-//! | [`at(err)`](at()) | ❌ None | Simple usage, no links needed |
-//! | [`err.start_at()`](ErrorAtExt::start_at) | ❌ None | Chaining on error values |
+//! | [`at!(err)`](at!) | ✅ GitHub links | **Default choice** - requires [`define_at_crate_info!()`](define_at_crate_info) |
+//! | [`at(err)`](at()) | ❌ None | Quick prototyping, no setup needed |
+//! | [`err.start_at()`](ErrorAtExt::start_at) | ❌ None | Chaining on `Error` types |
+//!
+//! **Prefer `at!()`** for production code - it captures crate metadata for clickable repository
+//! links and clear cross-crate boundaries in traces.
 //!
 //! ## Extending a Trace
 //!
@@ -112,7 +122,12 @@
 //! }
 //! ```
 //!
-//! For plain errors without traces, use `map_err(at)` to start tracing:
+//! The `at_crate!()` macro desugars to:
+//! ```rust,ignore
+//! result.at_crate(crate::at_crate_info())  // Adds boundary marker with your crate's info
+//! ```
+//!
+//! For plain errors without traces (e.g., `std::io::Error`), use `map_err(at)` to start tracing:
 //!
 //! ```rust
 //! use whereat::{At, at, ResultAtExt};

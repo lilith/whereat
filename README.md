@@ -94,11 +94,11 @@ For workspace crates: `whereat::define_at_crate_info!(path = "crates/mylib/");`
 
 | Method | Effect |
 |--------|--------|
-| `.at()` | Add new frame at caller's location |
-| `.at_str("msg")` | Add context to last frame |
-| `.map_err_at(\|e\| ...)` | Convert error, preserve trace |
+| `.at()` | **New frame** at caller's location |
+| `.at_str("msg")` | Add context to **last frame** (no new location) |
+| `.map_err_at(\|e\| ...)` | Convert error type, preserve trace |
 
-See [Adding Context](#adding-context) for the full method list.
+**Key**: `.at()` creates a NEW frame. `.at_str()` adds to the LAST frame. See [Adding Context](#adding-context) for full list.
 
 ## Best Practices
 
@@ -125,7 +125,7 @@ See [Adding Context](#adding-context) for the full method list.
 
 **Wrapper approach** (most common): Return `Result<T, At<YourError>>` from functions. The trace lives outside your error type.
 
-**Embedded approach**: Implement `AtTraceable` on your error type and store an `AtTraceBoxed` field inside it. Return `Result<T, YourError>` directly. See [ADVANCED.md](ADVANCED.md) for details.
+**Embedded approach**: Implement `AtTraceable` on your error type and store an `AtTrace` (or `Box<AtTrace>`) field inside it. Return `Result<T, YourError>` directly. See [ADVANCED.md](ADVANCED.md) for details.
 
 This means you can:
 - Use `thiserror` for ergonomic `Display`/`From` impls, or `anyhow`
@@ -182,9 +182,14 @@ When consuming errors from other crates, use `at_crate!()` to mark the boundary:
 whereat::define_at_crate_info!();
 
 fn call_external() -> Result<(), At<ExternalError>> {
-    external_crate::do_thing().map_err(|e| at_crate!(e))?;
+    at_crate!(external_crate::do_thing())?;  // Wraps Result, marks boundary
     Ok(())
 }
+```
+
+The `at_crate!()` macro takes a **Result** and desugars to:
+```rust
+result.at_crate(crate::at_crate_info())  // Adds your crate's info as boundary marker
 ```
 
 This ensures traces show `myapp @ src/lib.rs:42` instead of confusing paths from dependencies.
