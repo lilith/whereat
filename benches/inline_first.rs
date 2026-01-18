@@ -127,8 +127,8 @@ impl SingleLocationTrace {
 
 struct Inline2Trace {
     // Two locations inline - covers 90%+ of real traces
-    inline: [Option<Loc>; 2],  // 16 bytes
-    rest: Option<Box<Vec<Loc>>>,  // 8 bytes, rarely used
+    inline: [Option<Loc>; 2],    // 16 bytes
+    rest: Option<Box<Vec<Loc>>>, // 8 bytes, rarely used
 }
 
 impl Inline2Trace {
@@ -168,8 +168,8 @@ impl Inline2Trace {
 // ============================================================================
 
 struct Inline3Trace {
-    inline: [Option<Loc>; 3],  // 24 bytes
-    rest: Option<Box<Vec<Loc>>>,  // 8 bytes
+    inline: [Option<Loc>; 3],    // 24 bytes
+    rest: Option<Box<Vec<Loc>>>, // 8 bytes
 }
 
 impl Inline3Trace {
@@ -209,9 +209,9 @@ impl Inline3Trace {
 // ============================================================================
 
 struct Inline3CountTrace {
-    inline: [Option<Loc>; 3],  // 24 bytes
-    count: u8,                  // 1 byte (padded to 8)
-    rest: Option<Box<Vec<Loc>>>,  // 8 bytes
+    inline: [Option<Loc>; 3],    // 24 bytes
+    count: u8,                   // 1 byte (padded to 8)
+    rest: Option<Box<Vec<Loc>>>, // 8 bytes
 }
 
 impl Inline3CountTrace {
@@ -473,5 +473,10 @@ fn bench_realistic(c: &mut Criterion) {
     group.finish();
 }
 
-criterion_group!(benches, bench_single_frame, bench_multi_frame, bench_realistic);
+criterion_group!(
+    benches,
+    bench_single_frame,
+    bench_multi_frame,
+    bench_realistic
+);
 criterion_main!(benches);

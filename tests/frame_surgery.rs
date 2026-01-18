@@ -3,7 +3,7 @@
 //! These APIs allow manipulation of trace frames for advanced use cases like
 //! transferring frames between traces or reordering error context.
 
-use whereat::{at, At, AtFrameOwned, AtTraceable};
+use whereat::{At, AtFrameOwned, AtTraceable, at};
 
 #[derive(Debug)]
 struct TestError;
@@ -133,10 +133,7 @@ fn pop_first_empty_returns_none() {
 
 #[test]
 fn pop_preserves_multiple_contexts() {
-    let mut err = at(TestError)
-        .at_str("ctx1")
-        .at_str("ctx2")
-        .at_str("ctx3");
+    let mut err = at(TestError).at_str("ctx1").at_str("ctx2").at_str("ctx3");
 
     let frame = err.at_pop().expect("should pop");
 
@@ -268,12 +265,7 @@ fn pop_all_then_push_new() {
 
 #[test]
 fn mixed_pop_and_pop_first() {
-    let mut err = at(TestError)
-        .at_str("A")
-        .at()
-        .at_str("B")
-        .at()
-        .at_str("C");
+    let mut err = at(TestError).at_str("A").at().at_str("B").at().at_str("C");
 
     // Pop last (C)
     let last = err.at_pop().expect("pop last");
