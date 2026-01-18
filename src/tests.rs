@@ -283,6 +283,67 @@ fn test_at_str() {
 }
 
 #[test]
+fn test_at_fn_captures_function_name() {
+    fn my_function_name() -> At<TestError> {
+        // at() creates first frame, at_fn() creates second with function name
+        at(TestError::NotFound).at_fn(|| {})
+    }
+
+    let err = my_function_name();
+    assert_eq!(err.frame_count(), 2); // at() + at_fn() = 2 frames
+
+    // The function name should appear in the debug output
+    let debug = alloc::format!("{:?}", err);
+    assert!(
+        debug.contains("my_function_name"),
+        "Debug output should contain function name: {}",
+        debug
+    );
+}
+
+#[test]
+fn test_at_fn_adds_frame() {
+    fn inner() -> Result<(), At<TestError>> {
+        Err(at(TestError::NotFound))
+    }
+
+    fn outer() -> Result<(), At<TestError>> {
+        inner().at_fn(|| {})
+    }
+
+    let err = outer().unwrap_err();
+    assert_eq!(err.frame_count(), 2); // at() + at_fn() = 2 frames
+
+    let debug = alloc::format!("{:?}", err);
+    assert!(
+        debug.contains("outer"),
+        "Should capture outer function name"
+    );
+}
+
+#[test]
+fn test_at_named_adds_frame_with_label() {
+    fn inner() -> Result<(), At<TestError>> {
+        Err(at(TestError::NotFound))
+    }
+
+    fn outer() -> Result<(), At<TestError>> {
+        inner().at_named("validation_phase")?;
+        Ok(())
+    }
+
+    let err = outer().unwrap_err();
+    assert_eq!(err.frame_count(), 2); // at() + at_named() = 2 frames
+
+    let debug = alloc::format!("{:?}", err);
+    assert!(
+        debug.contains("validation_phase"),
+        "Should contain custom label: {}",
+        debug
+    );
+}
+
+#[test]
 fn test_str_propagation() {
     fn inner() -> Result<(), At<TestError>> {
         Err(TestError::NotFound.start_at())
