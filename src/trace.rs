@@ -17,6 +17,29 @@ use crate::context::{AtContext, AtContextRef};
 type ContextEntry = (u16, AtContext);
 
 // ============================================================================
+// Depth Limits
+// ============================================================================
+//
+// Arbitrary limits to prevent unbounded growth from consumer bugs (e.g., infinite
+// recursion, accidental loops). These are intentionally generous - most real error
+// traces have <20 frames and <10 contexts. If you hit these limits, you likely
+// have a bug in your error handling code.
+
+/// Maximum number of location frames in a trace.
+///
+/// This is an arbitrary limit (128) to prevent unbounded memory growth from
+/// consumer bugs like infinite recursion. Real-world traces rarely exceed 20 frames.
+/// Attempts to push beyond this limit are silently ignored.
+pub const AT_MAX_FRAMES: usize = 128;
+
+/// Maximum number of context entries in a trace.
+///
+/// This is an arbitrary limit (128) to prevent unbounded memory growth from
+/// consumer bugs. Real-world traces rarely have more than a handful of contexts.
+/// Attempts to add contexts beyond this limit are silently ignored.
+pub const AT_MAX_CONTEXTS: usize = 128;
+
+// ============================================================================
 // LocationVec - configurable storage for trace locations
 // ============================================================================
 //
@@ -112,9 +135,13 @@ pub(crate) fn try_box<T>(value: T) -> Option<Box<T>> {
     Some(Box::new(value))
 }
 
-/// Try to push a location onto a LocationVec, returning false on allocation failure.
+/// Try to push a location onto a LocationVec, returning false on allocation failure
+/// or if [`AT_MAX_FRAMES`] limit is reached.
 #[inline]
 fn try_push_location(vec: &mut LocationVec, elem: LocationElem) -> bool {
+    if vec.len() >= AT_MAX_FRAMES {
+        return false;
+    }
     vec.try_push(elem)
 }
 
@@ -129,9 +156,13 @@ fn context_vec_new() -> ContextVec {
 }
 
 /// Try to push a context entry (lazily allocates on first push).
+/// Returns false on allocation failure or if [`AT_MAX_CONTEXTS`] limit is reached.
 #[inline]
 fn try_push_context(vec: &mut ContextVec, entry: ContextEntry) -> bool {
     let inner = vec.get_or_insert_with(|| Box::new(Vec::new()));
+    if inner.len() >= AT_MAX_CONTEXTS {
+        return false;
+    }
     if inner.try_reserve(1).is_err() {
         return false;
     }

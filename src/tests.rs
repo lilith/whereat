@@ -805,3 +805,62 @@ fn test_html_escapes_special_chars() {
     // Should NOT contain unescaped script tag
     assert!(!output.contains("<script>"), "Output: {}", output);
 }
+
+// ============================================================================
+// Depth Limit Tests
+// ============================================================================
+
+#[test]
+fn test_max_trace_frames_limit() {
+    use crate::trace::AT_MAX_FRAMES;
+
+    // Recursive function that adds many frames
+    fn add_frames(err: At<TestError>, depth: usize) -> At<TestError> {
+        if depth == 0 {
+            err
+        } else {
+            add_frames(err.at(), depth - 1)
+        }
+    }
+
+    let err = at(TestError::NotFound);
+    let err = add_frames(err, AT_MAX_FRAMES + 50);
+
+    // Should be capped at AT_MAX_FRAMES
+    assert_eq!(
+        err.frame_count(),
+        AT_MAX_FRAMES,
+        "Frame count should be capped at AT_MAX_FRAMES ({})",
+        AT_MAX_FRAMES
+    );
+}
+
+#[test]
+fn test_max_trace_contexts_limit() {
+    use crate::trace::AT_MAX_CONTEXTS;
+
+    let mut err = at(TestError::NotFound);
+
+    // Add more contexts than the limit
+    for i in 0..(AT_MAX_CONTEXTS + 50) {
+        err = err.at_string(|| alloc::format!("context {}", i));
+    }
+
+    // Count contexts
+    let context_count = err.contexts().count();
+
+    // Should be capped at AT_MAX_CONTEXTS
+    assert_eq!(
+        context_count, AT_MAX_CONTEXTS,
+        "Context count should be capped at AT_MAX_CONTEXTS ({})",
+        AT_MAX_CONTEXTS
+    );
+}
+
+#[test]
+fn test_limits_constants_are_128() {
+    use crate::trace::{AT_MAX_CONTEXTS, AT_MAX_FRAMES};
+
+    assert_eq!(AT_MAX_FRAMES, 128);
+    assert_eq!(AT_MAX_CONTEXTS, 128);
+}

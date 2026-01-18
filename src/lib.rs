@@ -188,7 +188,9 @@ pub use crate_info::{
     GITLAB_LINK_FORMAT,
 };
 pub use ext::{ErrorAtExt, ResultAtExt, ResultAtTraceableExt};
-pub use trace::{AtFrame, AtFrameOwned, AtTrace, AtTraceBoxed, AtTraceable};
+pub use trace::{
+    AtFrame, AtFrameOwned, AtTrace, AtTraceBoxed, AtTraceable, AT_MAX_CONTEXTS, AT_MAX_FRAMES,
+};
 
 // ============================================================================
 // Crate-level error tracking info (for whereat's own at!() / at_crate!() usage)
