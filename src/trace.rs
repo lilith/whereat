@@ -81,6 +81,7 @@ type LocationVec = Vec<LocationElem>;
     feature = "_smallvec-256-bytes"
 )))]
 const DEFAULT_LOCATION_CAPACITY: usize = 12;
+const DEFAULT_CONTEXT_CAPACITY: usize = 6;
 
 /// Create a new LocationVec with appropriate default capacity.
 #[cfg(not(any(
@@ -186,7 +187,7 @@ fn context_vec_new() -> ContextVec {
 /// Try to push a context entry (lazily allocates on first push).
 #[inline]
 fn try_push_context(vec: &mut ContextVec, entry: ContextEntry) -> bool {
-    let inner = vec.get_or_insert_with(|| Box::new(Vec::new()));
+    let inner = vec.get_or_insert_with(|| Box::new(Vec::with_capacity(DEFAULT_CONTEXT_CAPACITY)));
     if inner.try_reserve(1).is_err() {
         return false;
     }
@@ -533,7 +534,7 @@ impl AtTrace {
 
         // Insert contexts at beginning with index 0
         if !segment.contexts.is_empty() {
-            let ctx_vec = self.contexts.get_or_insert_with(|| Box::new(Vec::new()));
+            let ctx_vec = self.contexts.get_or_insert_with(|| Box::new(Vec::with_capacity(DEFAULT_CONTEXT_CAPACITY)));
             // Reserve space for all contexts
             if ctx_vec.try_reserve(segment.contexts.len()).is_err() {
                 return;
