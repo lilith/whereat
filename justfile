@@ -57,6 +57,10 @@ bench:
 bench-group group:
     cargo bench --bench overhead -- "{{group}}"
 
+# Run focused at_depth benchmark (~10s, tests 1/4/8/16 at() calls)
+bench-depth:
+    cargo bench --bench at_depth
+
 # Windows PowerShell for WSL->Windows execution
 pwsh := "pwsh.exe"
 wsl_path := "\\\\wsl.localhost\\Ubuntu-22.04"
