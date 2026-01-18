@@ -46,5 +46,9 @@ harness = false
 name = "nested_loops"
 harness = false
 
+[[bench]]
+name = "inline_first"
+harness = false
+
 [lints.rust]
 unsafe_code = "deny"

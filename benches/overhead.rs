@@ -125,6 +125,36 @@ fn chain_at_10_levels(n: u64) -> Result<u64, At<BenchError>> {
     level(9, n).at()
 }
 
+fn chain_at_20_levels(n: u64) -> Result<u64, At<BenchError>> {
+    fn level(depth: u32, n: u64) -> Result<u64, At<BenchError>> {
+        if depth == 0 {
+            if n == 0 {
+                Err(at(BenchError::NotFound))
+            } else {
+                Ok(n)
+            }
+        } else {
+            level(depth - 1, n).at()
+        }
+    }
+    level(19, n).at()
+}
+
+fn chain_at_30_levels(n: u64) -> Result<u64, At<BenchError>> {
+    fn level(depth: u32, n: u64) -> Result<u64, At<BenchError>> {
+        if depth == 0 {
+            if n == 0 {
+                Err(at(BenchError::NotFound))
+            } else {
+                Ok(n)
+            }
+        } else {
+            level(depth - 1, n).at()
+        }
+    }
+    level(29, n).at()
+}
+
 // ============================================================================
 // Benchmarks
 // ============================================================================
@@ -202,6 +232,18 @@ fn bench_error_path(c: &mut Criterion) {
         })
     });
 
+    group.bench_function("chain_at_20", |b| {
+        b.iter(|| {
+            let _ = chain_at_20_levels(black_box(n));
+        })
+    });
+
+    group.bench_function("chain_at_30", |b| {
+        b.iter(|| {
+            let _ = chain_at_30_levels(black_box(n));
+        })
+    });
+
     group.finish();
 }
 
@@ -266,7 +308,7 @@ fn bench_hot_loop(c: &mut Criterion) {
 fn bench_trace_depth(c: &mut Criterion) {
     let mut group = c.benchmark_group("trace_depth");
 
-    for depth in [1, 5, 10, 20, 50, 100] {
+    for depth in [1, 5, 10, 20, 30, 50, 100] {
         group.bench_with_input(BenchmarkId::new("at_chain", depth), &depth, |b, &depth| {
             b.iter(|| {
                 fn recurse(d: u32) -> Result<(), At<BenchError>> {
