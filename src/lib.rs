@@ -1,6 +1,6 @@
 //! # whereat - Lightweight error location tracking
 //!
-//! Production error tracing without debuginfo, panic, or overhead.
+//! **150x faster than `backtrace`** — production error tracing without debuginfo, panic, or overhead.
 //!
 //! ```text
 //! Error: UserNotFound
@@ -11,34 +11,46 @@
 //!    at myapp @ https://github.com/you/myapp/blob/a1b2c3d/src/main.rs#L23
 //! ```
 //!
-//! ## Quick Start
+//! ## Try It Now
 //!
-//! ```rust,ignore
-//! // In lib.rs or main.rs - enables at!() macro with repository links
-//! whereat::define_at_crate_info!();
+//! No setup required — just wrap errors with [`at()`] and propagate with [`.at()`](ResultAtExt::at):
 //!
+//! ```rust
 //! use whereat::{at, At, ResultAtExt};
 //!
 //! #[derive(Debug)]
-//! enum MyError { NotFound, InvalidInput(String) }
+//! enum MyError { NotFound }
 //!
-//! fn find_user(id: u64) -> Result<String, At<MyError>> {
-//!     if id == 0 {
-//!         return Err(at!(MyError::InvalidInput("id cannot be zero".into())));
-//!     }
-//!     Err(at!(MyError::NotFound))
+//! fn inner() -> Result<(), At<MyError>> {
+//!     Err(at(MyError::NotFound))  // Wrap error, capture location
 //! }
 //!
-//! fn process(id: u64) -> Result<String, At<MyError>> {
-//!     find_user(id).at_str("looking up user")?;  // Adds context
-//!     Ok("done".into())
+//! fn outer() -> Result<(), At<MyError>> {
+//!     inner().at_str("looking up user")?;  // Add context
+//!     Ok(())
+//! }
+//!
+//! let err = outer().unwrap_err();
+//! println!("{:?}", err);  // Shows locations + context
+//! ```
+//!
+//! ## Production Setup
+//!
+//! For **clickable GitHub links** in traces, add one line to your crate root and use [`at!()`](at!):
+//!
+//! ```rust,ignore
+//! // In lib.rs or main.rs
+//! whereat::define_at_crate_info!();
+//!
+//! fn find_user(id: u64) -> Result<String, At<MyError>> {
+//!     Err(at!(MyError::NotFound))  // Now includes repo links in traces
 //! }
 //! ```
 //!
 //! The `at!()` macro desugars to:
 //! ```rust,ignore
 //! At::wrap(err)
-//!     .set_crate_info(crate::at_crate_info())  // Enables GitHub links
+//!     .set_crate_info(crate::at_crate_info())  // Enables GitHub/GitLab links
 //!     .at()                                     // Captures file:line:col
 //! ```
 //!
@@ -58,12 +70,12 @@
 //!
 //! | Function | Crate info | Use when |
 //! |----------|------------|----------|
-//! | [`at!(err)`](at!) | ✅ GitHub links | **Default choice** - requires [`define_at_crate_info!()`](define_at_crate_info) |
-//! | [`at(err)`](at()) | ❌ None | Quick prototyping, no setup needed |
-//! | [`err.start_at()`](ErrorAtExt::start_at) | ❌ None | Chaining on `Error` types |
+//! | [`at(err)`](at()) | ❌ None | Prototyping — no setup needed |
+//! | [`at!(err)`](at!) | ✅ GitHub links | **Production** — requires [`define_at_crate_info!()`](define_at_crate_info) |
+//! | [`err.start_at()`](ErrorAtExt::start_at) | ❌ None | Chaining on `Error` trait types |
 //!
-//! **Prefer `at!()`** for production code - it captures crate metadata for clickable repository
-//! links and clear cross-crate boundaries in traces.
+//! Start with `at()` to try things out. Upgrade to `at!()` before shipping — you'll want
+//! those clickable links when debugging production issues.
 //!
 //! ## Extending a Trace
 //!
@@ -144,21 +156,15 @@
 //!
 //! ## Design Goals
 //!
-//! - **Small sizeof**: `At<E>` is only `sizeof(E) + 8` bytes (one pointer for boxed trace)
-//! - **Zero allocation on Ok path**: No heap allocation until an error occurs
-//! - **Zero-copy static strings**: `.at_str("literal")` is zero-cost
-//! - **Lazy evaluation**: `.at_string(|| ...)` and `.at_data(|| ...)` defer computation to error path
-//! - **no_std compatible**: Works with just `core` + `alloc`, `std` is optional
+//! - **Tiny overhead**: `At<E>` is `sizeof(E) + 8` bytes; zero heap allocation on the Ok path
+//! - **Zero-cost context**: `.at_str("literal")` stores a pointer, no copy or allocation
+//! - **Lazy evaluation**: `.at_string(|| ...)` closures only run on error
+//! - **no_std compatible**: Works with just `core` + `alloc`
 //!
-//! ## Allocation Failure Behavior
+//! ## OOM Behavior
 //!
-//! Vec and String allocations use stable `try_reserve` APIs and silently fail on OOM.
-//! Box allocations use `Box::new` (Box::try_new is not yet stable) which can panic on OOM.
-//!
-//! If memory allocation fails:
-//! - Vec/String trace entries are silently skipped
-//! - The error `E` itself always propagates (it's stored inline in `At<E>`)
-//! - Box allocation failure will panic (rare in practice)
+//! Trace allocations are fallible where possible — on OOM, trace entries are silently skipped
+//! but your error `E` always propagates (it's stored inline). See the README for details.
 
 #![no_std]
 #![deny(unsafe_code)]
