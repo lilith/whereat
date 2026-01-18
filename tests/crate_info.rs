@@ -530,18 +530,30 @@ fn multiple_boundary_switches() {
     // before C2 boundary so C1's link appears in output.
     let err = whereat::At::wrap(TestError)
         .at_crate(&C1)
-        .at()  // loc0 - uses C1 (inline)
-        .at()  // loc1 - still C1, but C2 boundary attaches here
+        .at() // loc0 - uses C1 (inline)
+        .at() // loc1 - still C1, but C2 boundary attaches here
         .at_crate(&C2)
-        .at()  // loc2 - uses C2
+        .at() // loc2 - uses C2
         .at_crate(&C3)
         .at(); // loc3 - uses C3
 
     let output = format!("{}", err.display_with_meta());
 
-    assert!(output.contains("c1/blob/111"), "Should have c1 link. Got:\n{}", output);
-    assert!(output.contains("c2/blob/222"), "Should have c2 link. Got:\n{}", output);
-    assert!(output.contains("c3/blob/333"), "Should have c3 link. Got:\n{}", output);
+    assert!(
+        output.contains("c1/blob/111"),
+        "Should have c1 link. Got:\n{}",
+        output
+    );
+    assert!(
+        output.contains("c2/blob/222"),
+        "Should have c2 link. Got:\n{}",
+        output
+    );
+    assert!(
+        output.contains("c3/blob/333"),
+        "Should have c3 link. Got:\n{}",
+        output
+    );
 }
 
 // ============================================================================
