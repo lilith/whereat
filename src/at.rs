@@ -97,7 +97,7 @@ impl<E> At<E> {
     /// Use this when you want to defer tracing until later (e.g., exiting a hot loop).
     /// Call `.at()` to add the first location when ready.
     ///
-    /// For normal use, prefer [`at()`](crate::at) or [`at!()`](crate::at!) which
+    /// For normal use, prefer [`at()`](crate::at()) or [`at!()`](crate::at!) which
     /// capture the caller's location immediately.
     #[inline]
     pub const fn wrap(error: E) -> Self {

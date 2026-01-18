@@ -1,0 +1,10 @@
+[package]
+name = "fake-dep"
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.85"
+repository = "https://github.com/example/fake-dep"
+publish = false
+
+[dependencies]
+whereat = { path = "../.." }

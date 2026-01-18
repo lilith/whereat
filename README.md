@@ -116,6 +116,17 @@ See [Adding Context](#adding-context) for the full method list.
 
 **You define your own error types.** whereat doesn't impose any structure on your errors — use enums, structs, or whatever suits your domain. whereat just wraps them in `At<E>` to add location+context+crate tracking.
 
+### Which Approach?
+
+| Situation | Use |
+|-----------|-----|
+| You have an existing struct/enum you don't want to modify | Wrap with `At<YourError>` |
+| You want traces embedded inside your error type | Implement `AtTraceable` trait |
+
+**Wrapper approach** (most common): Return `Result<T, At<YourError>>` from functions. The trace lives outside your error type.
+
+**Embedded approach**: Implement `AtTraceable` on your error type and store an `AtTraceBoxed` field inside it. Return `Result<T, YourError>` directly. See [ADVANCED.md](ADVANCED.md) for details.
+
 This means you can:
 - Use `thiserror` for ergonomic `Display`/`From` impls, or `anyhow`
 - Use any enum or struct that implements `Debug`

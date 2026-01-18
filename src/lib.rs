@@ -1,16 +1,15 @@
 //! # whereat - Lightweight error location tracking
 //!
-//! A minimal error tracing library that adds location tracking to any error type
-//! with small `sizeof` overhead and `no_std` support.
+//! Production error tracing without debuginfo, panic, or overhead.
 //!
-//! ## Design Goals
-//!
-//! - **Small sizeof**: `At<E>` is only `sizeof(E) + 8` bytes (one pointer for boxed trace)
-//! - **Zero allocation on Ok path**: No heap allocation until an error occurs
-//! - **Simple API**: `.start_at()` on errors, `.at()` on Results
-//! - **Zero-copy static strings**: `.at_str("literal")` is zero-cost
-//! - **Lazy evaluation**: `.at_string(|| ...)` and `.at_data(|| ...)` defer computation to error path
-//! - **no_std compatible**: Works with just `core` + `alloc`, `std` is optional
+//! ```text
+//! Error: UserNotFound
+//!    at src/db.rs:142:9
+//!       ╰─ user_id = 42
+//!    at src/api.rs:89:5
+//!       ╰─ in handle_request
+//!    at myapp @ https://github.com/you/myapp/blob/a1b2c3d/src/main.rs#L23
+//! ```
 //!
 //! ## Quick Start
 //!
@@ -18,65 +17,102 @@
 //! use whereat::{at, At, ResultAtExt};
 //!
 //! #[derive(Debug)]
-//! enum MyError {
-//!     NotFound,
-//!     InvalidInput(String),
-//! }
+//! enum MyError { NotFound, InvalidInput(String) }
 //!
-//! fn inner() -> Result<(), At<MyError>> {
+//! fn find_user(id: u64) -> Result<String, At<MyError>> {
+//!     if id == 0 {
+//!         return Err(at(MyError::InvalidInput("id cannot be zero".into())));
+//!     }
 //!     Err(at(MyError::NotFound))  // at() wraps and captures location
 //! }
 //!
-//! fn outer() -> Result<(), At<MyError>> {
-//!     inner().at()?;  // .at() adds another location
-//!     Ok(())
+//! fn process(id: u64) -> Result<String, At<MyError>> {
+//!     find_user(id).at_str("looking up user")?;  // Adds context to the trace
+//!     Ok("done".into())
 //! }
 //!
-//! let err = outer().unwrap_err();
-//! assert_eq!(err.frame_count(), 2);
+//! let err = process(0).unwrap_err();
+//! assert_eq!(err.frame_count(), 1);  // One frame with context attached
 //! ```
 //!
-//! ## Adding AtContext
+//! ## Which Approach?
 //!
-//! Use `.at_str()` for static strings, `.at_string()` for lazy strings, `.at_data()` for Display, `.at_debug()` for Debug:
+//! | Situation | Use |
+//! |-----------|-----|
+//! | Existing struct/enum you don't want to modify | Wrap with [`At<YourError>`](At) |
+//! | Want traces embedded inside your error type | Implement [`AtTraceable`] trait |
+//!
+//! **Wrapper approach** (most common): Return `Result<T, At<YourError>>` from functions.
+//!
+//! **Embedded approach**: Implement [`AtTraceable`] and store an [`AtTrace`] (or `Box<AtTrace>`)
+//! field inside your error type. Return `Result<T, YourError>` directly.
+//!
+//! ## Starting a Trace
+//!
+//! | Function | Crate info | Use when |
+//! |----------|------------|----------|
+//! | [`at!(err)`](at!) | ✅ GitHub links | Default choice with [`define_at_crate_info!()`](define_at_crate_info) |
+//! | [`at(err)`](at()) | ❌ None | Simple usage, no links needed |
+//! | [`err.start_at()`](ErrorAtExt::start_at) | ❌ None | Chaining on error values |
+//!
+//! ## Extending a Trace
+//!
+//! **Create a new location frame** (call site is recorded):
+//!
+//! | Method | Effect |
+//! |--------|--------|
+//! | [`.at()`](ResultAtExt::at) | New frame with just file:line:col |
+//! | [`.at_fn(\|\| {})`](ResultAtExt::at_fn) | New frame + captures function name |
+//! | [`.at_named("step")`](ResultAtExt::at_named) | New frame + custom label |
+//!
+//! **Add context to the last frame** (no new location):
+//!
+//! | Method | Effect |
+//! |--------|--------|
+//! | [`.at_str("msg")`](ResultAtExt::at_str) | Static string (zero-cost) |
+//! | [`.at_string(\|\| format!(...))`](ResultAtExt::at_string) | Dynamic string (lazy) |
+//! | [`.at_data(\|\| value)`](ResultAtExt::at_data) | Typed via Display (lazy) |
+//! | [`.at_debug(\|\| value)`](ResultAtExt::at_debug) | Typed via Debug (lazy) |
+//! | [`.at_error(source_err)`](ResultAtExt::at_error) | Attach a source error |
+//!
+//! **Key distinction**: `.at()` creates a NEW frame. `.at_str()` and friends add to the LAST frame.
 //!
 //! ```rust
 //! use whereat::{at, At, ResultAtExt};
 //!
 //! #[derive(Debug)]
-//! enum MyError { IoError }
+//! struct MyError;
 //!
-//! fn read_config() -> Result<(), At<MyError>> {
-//!     Err(at(MyError::IoError))
+//! fn example() -> Result<(), At<MyError>> {
+//!     // One frame with two contexts attached
+//!     let e = at(MyError).at_str("a").at_str("b");
+//!     assert_eq!(e.frame_count(), 1);
+//!
+//!     // Two frames: at() creates first, .at() creates second
+//!     let e = at(MyError).at().at_str("on second frame");
+//!     assert_eq!(e.frame_count(), 2);
+//!     Ok(())
 //! }
+//! # example().ok();
+//! ```
 //!
-//! fn init() -> Result<(), At<MyError>> {
-//!     read_config().at_str("loading configuration")?;  // static str, zero-cost
+//! ## Foreign Crates and Errors
+//!
+//! When consuming errors from other crates, use [`at_crate!()`](at_crate) to mark the boundary.
+//! This ensures traces show your crate's GitHub links, not confusing paths from dependencies.
+//!
+//! ```rust,ignore
+//! whereat::define_at_crate_info!();  // Once in lib.rs
+//!
+//! use whereat::{at_crate, At, ResultAtExt};
+//!
+//! fn call_dependency() -> Result<(), At<DependencyError>> {
+//!     at_crate!(dependency::do_thing())?;  // Marks crate boundary
 //!     Ok(())
 //! }
 //! ```
 //!
-//! String context with closure for lazy evaluation (only runs on error):
-//!
-//! ```rust
-//! use whereat::{at, At, ResultAtExt};
-//!
-//! #[derive(Debug)]
-//! enum MyError { NotFound }
-//!
-//! fn load(path: &str) -> Result<(), At<MyError>> {
-//!     Err(at(MyError::NotFound))
-//! }
-//!
-//! fn init(path: &str) -> Result<(), At<MyError>> {
-//!     load(path).at_string(|| format!("loading {}", path))?;  // only allocates on error
-//!     Ok(())
-//! }
-//! ```
-//!
-//! ## Converting Non-Traced Errors
-//!
-//! Use `map_err(at)` on Results with non-traced errors:
+//! For plain errors without traces, use `map_err(at)` to start tracing:
 //!
 //! ```rust
 //! use whereat::{At, at, ResultAtExt};
@@ -86,10 +122,18 @@
 //! }
 //!
 //! fn wrapper() -> Result<(), At<&'static str>> {
-//!     external_api().map_err(at)?;  // converts to At
+//!     external_api().map_err(at).at_str("calling external API")?;
 //!     Ok(())
 //! }
 //! ```
+//!
+//! ## Design Goals
+//!
+//! - **Small sizeof**: `At<E>` is only `sizeof(E) + 8` bytes (one pointer for boxed trace)
+//! - **Zero allocation on Ok path**: No heap allocation until an error occurs
+//! - **Zero-copy static strings**: `.at_str("literal")` is zero-cost
+//! - **Lazy evaluation**: `.at_string(|| ...)` and `.at_data(|| ...)` defer computation to error path
+//! - **no_std compatible**: Works with just `core` + `alloc`, `std` is optional
 //!
 //! ## Allocation Failure Behavior
 //!
