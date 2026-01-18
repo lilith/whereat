@@ -2,6 +2,9 @@
 //!
 //! Compares current AtTraceBoxed (always heap) vs InlineFirstTrace (inline first frame).
 
+// Allow Box<Vec<..>> - intentional to test inline storage with minimal struct size
+#![allow(clippy::box_collection)]
+
 use criterion::{Criterion, criterion_group, criterion_main};
 use std::hint::black_box;
 use std::panic::Location;
@@ -95,29 +98,6 @@ impl InlineFirstTrace {
         let first = if self.first.is_some() { 1 } else { 0 };
         let rest = self.rest.as_ref().map_or(0, |r| r.locations.len());
         first + rest
-    }
-}
-
-// ============================================================================
-// Even simpler: Single optional location (for comparison)
-// ============================================================================
-
-struct SingleLocationTrace {
-    first: Option<&'static Location<'static>>,
-}
-
-impl SingleLocationTrace {
-    #[inline]
-    const fn new() -> Self {
-        Self { first: None }
-    }
-
-    #[inline]
-    #[track_caller]
-    fn push(&mut self) {
-        if self.first.is_none() {
-            self.first = Some(Location::caller());
-        }
     }
 }
 
@@ -394,6 +374,57 @@ fn bench_multi_frame(c: &mut Criterion) {
         b.iter(|| {
             let mut trace = Inline3CountTrace::new();
             for _ in 0..10 {
+                trace.push();
+            }
+            black_box(trace.frame_count())
+        })
+    });
+
+    // 15 frames - compare all inline variants
+    group.bench_function("current_15fr", |b| {
+        b.iter(|| {
+            let mut trace = CurrentTrace::new();
+            for _ in 0..15 {
+                trace.push();
+            }
+            black_box(trace.frame_count())
+        })
+    });
+
+    group.bench_function("inline_first_15fr", |b| {
+        b.iter(|| {
+            let mut trace = InlineFirstTrace::new();
+            for _ in 0..15 {
+                trace.push();
+            }
+            black_box(trace.frame_count())
+        })
+    });
+
+    group.bench_function("inline2_15fr", |b| {
+        b.iter(|| {
+            let mut trace = Inline2Trace::new();
+            for _ in 0..15 {
+                trace.push();
+            }
+            black_box(trace.frame_count())
+        })
+    });
+
+    group.bench_function("inline3_15fr", |b| {
+        b.iter(|| {
+            let mut trace = Inline3Trace::new();
+            for _ in 0..15 {
+                trace.push();
+            }
+            black_box(trace.frame_count())
+        })
+    });
+
+    group.bench_function("inline3count_15fr", |b| {
+        b.iter(|| {
+            let mut trace = Inline3CountTrace::new();
+            for _ in 0..15 {
                 trace.push();
             }
             black_box(trace.frame_count())
