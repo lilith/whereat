@@ -684,26 +684,6 @@ impl AtFrameOwned {
         }
         self
     }
-
-    /// Add crate boundary marker.
-    pub fn with_crate(mut self, info: &'static AtCrateInfo) -> Self {
-        self.contexts.push(AtContext::Crate(info));
-        self
-    }
-
-    /// Add an error as context.
-    pub fn with_error<E: core::error::Error + Send + Sync + 'static>(mut self, err: E) -> Self {
-        if let Some(boxed) = try_box(err) {
-            self.contexts.push(AtContext::Error(boxed));
-        }
-        self
-    }
-
-    /// Consume and return the raw contexts (internal use).
-    #[allow(dead_code)]
-    pub(crate) fn into_contexts(self) -> Vec<AtContext> {
-        self.contexts
-    }
 }
 
 // ============================================================================
