@@ -217,11 +217,12 @@ fn crate_boundary_updates_github_links() {
 
 #[test]
 fn sizeof_at_is_error_plus_pointer() {
-    // At<E> = E (inline) + Option<Box<Trace>> (8 bytes on 64-bit)
+    // At<E> = E (inline) + Option<Box<Trace>> (1 pointer, null-optimized)
     let ptr_size = size_of::<Option<Box<()>>>();
     assert_eq!(
-        ptr_size, 8,
-        "Option<Box<T>> should be 8 bytes (null optimization)"
+        ptr_size,
+        size_of::<usize>(),
+        "Option<Box<T>> should be pointer-sized (null optimization)"
     );
 
     // Small error
@@ -229,8 +230,8 @@ fn sizeof_at_is_error_plus_pointer() {
     struct Small(u8);
     let small_at = size_of::<At<Small>>();
     assert!(
-        small_at <= size_of::<Small>() + 8 + 8, // error + pointer + alignment
-        "At<Small> should be ~16 bytes. Got: {}",
+        small_at <= size_of::<Small>() + 2 * ptr_size, // error + pointer + alignment
+        "At<Small> should be ~2*ptr bytes. Got: {}",
         small_at
     );
 
@@ -240,8 +241,8 @@ fn sizeof_at_is_error_plus_pointer() {
     let large_at = size_of::<At<Large>>();
     assert_eq!(
         large_at,
-        size_of::<Large>() + 8,
-        "At<Large> should be error + 8 bytes. Got: {}",
+        size_of::<Large>() + ptr_size,
+        "At<Large> should be error + pointer. Got: {}",
         large_at
     );
 }
@@ -269,7 +270,11 @@ fn sizeof_location_is_one_pointer() {
     use core::panic::Location;
 
     let loc_size = size_of::<&'static Location<'static>>();
-    assert_eq!(loc_size, 8, "Location reference should be 8 bytes");
+    assert_eq!(
+        loc_size,
+        size_of::<usize>(),
+        "Location reference should be pointer-sized"
+    );
 }
 
 #[test]
@@ -284,6 +289,8 @@ fn sizeof_option_box_uses_null_optimization() {
 
 #[test]
 fn sizeof_common_error_types() {
+    let ptr = size_of::<usize>();
+
     // Common patterns users might use
 
     #[derive(Debug)]
@@ -293,8 +300,8 @@ fn sizeof_common_error_types() {
         C,
     }
     assert!(
-        size_of::<At<SmallEnum>>() <= 16,
-        "At<SmallEnum> should be <= 16 bytes. Got: {}",
+        size_of::<At<SmallEnum>>() <= 2 * ptr,
+        "At<SmallEnum> should be <= 2*ptr bytes. Got: {}",
         size_of::<At<SmallEnum>>()
     );
 
@@ -302,16 +309,16 @@ fn sizeof_common_error_types() {
     struct StringError(String);
     assert_eq!(
         size_of::<At<StringError>>(),
-        size_of::<String>() + 8,
-        "At<StringError> = String(24) + ptr(8) = 32"
+        size_of::<String>() + ptr,
+        "At<StringError> = String + ptr"
     );
 
     #[derive(Debug)]
     struct BoxedError(Box<dyn core::error::Error + Send + Sync>);
     assert_eq!(
         size_of::<At<BoxedError>>(),
-        size_of::<BoxedError>() + 8,
-        "At<BoxedError> = fat_ptr(16) + ptr(8) = 24"
+        size_of::<BoxedError>() + ptr,
+        "At<BoxedError> = fat_ptr + ptr"
     );
 }
 

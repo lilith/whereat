@@ -32,20 +32,22 @@ impl core::error::Error for TestError {}
 fn test_sizeof() {
     use core::mem::size_of;
 
-    // At<E> should be sizeof(E) + 8 (pointer to boxed trace)
-    // With alignment, a 1-byte enum becomes 16 bytes total
-    assert_eq!(size_of::<Option<Box<AtTrace>>>(), 8);
+    let ptr = size_of::<usize>();
+
+    // At<E> should be sizeof(E) + pointer (pointer to boxed trace)
+    assert_eq!(size_of::<Option<Box<AtTrace>>>(), ptr);
 
     let traced_size = size_of::<At<TestError>>();
     let error_size = size_of::<TestError>();
     let pointer_size = size_of::<Option<Box<AtTrace>>>();
 
     // Should be error + pointer, with possible padding
-    assert!(traced_size <= error_size + pointer_size + 8); // Allow for alignment
+    assert!(traced_size <= error_size + pointer_size + ptr); // Allow for alignment
     assert!(traced_size >= error_size + pointer_size);
 
-    // For a 1-byte enum, should be 16 bytes (1 + 7 padding + 8 pointer)
-    assert_eq!(traced_size, 16);
+    // For a 1-byte enum: 1 + padding + pointer = 2*pointer
+    // (1 + 7 padding + 8 pointer = 16 on 64-bit, 1 + 3 padding + 4 pointer = 8 on 32-bit)
+    assert_eq!(traced_size, 2 * ptr);
 }
 
 #[test]
@@ -54,84 +56,159 @@ fn test_sizeof_trace() {
 
     let trace_size = size_of::<AtTrace>();
 
-    // AtTrace size depends on feature flags:
-    // - Without tinyvec/smallvec: 40 bytes (locations Vec 24 + crate_info 8 + contexts Option<Box> 8)
+    // AtTrace size depends on feature flags (sizes shown for 64-bit):
+    // - Without tinyvec/smallvec: 112 bytes (InlineVec<4> + crate_info + contexts)
     // - tinyvec-64-bytes: 64 bytes (TinyVec<4 slots> 48 + crate_info 8 + contexts 8)
     // - tinyvec-128-bytes / smallvec-128-bytes: 128 bytes (12 slots)
     // - tinyvec-256-bytes / smallvec-256-bytes: 256 bytes (28 slots)
     // - tinyvec-512-bytes: 512 bytes (60 slots)
+    //
+    // On 32-bit platforms, all sizes are smaller due to 4-byte pointers.
+    // Exact sizes are only asserted on 64-bit; 32-bit asserts the size is
+    // at most the 64-bit budget (feature name).
 
-    #[cfg(not(any(
-        feature = "_tinyvec-64-bytes",
-        feature = "_tinyvec-128-bytes",
-        feature = "_tinyvec-256-bytes",
-        feature = "_tinyvec-512-bytes",
-        feature = "_smallvec-128-bytes",
-        feature = "_smallvec-256-bytes"
-    )))]
-    // InlineVec<LocationElem, 4> with 4 inline slots:
-    // - len: u8 (1 byte, padded to 8)
-    // - inline: [Option<Option<&Location>>; 4] = 64 bytes
-    // - heap: Vec<T> = 24 bytes (ptr + len + capacity)
-    // Plus crate_info (8) + contexts (8) = 112 bytes total
-    assert_eq!(
-        trace_size, 112,
-        "AtTrace should be 112 bytes with 4 inline slots"
-    );
-
-    #[cfg(all(
-        feature = "_tinyvec-64-bytes",
-        not(any(
+    #[cfg(target_pointer_width = "64")]
+    {
+        #[cfg(not(any(
+            feature = "_tinyvec-64-bytes",
             feature = "_tinyvec-128-bytes",
             feature = "_tinyvec-256-bytes",
+            feature = "_tinyvec-512-bytes",
             feature = "_smallvec-128-bytes",
             feature = "_smallvec-256-bytes"
-        ))
-    ))]
-    assert_eq!(
-        trace_size, 64,
-        "AtTrace with tinyvec-64-bytes should be exactly 64 bytes"
-    );
+        )))]
+        // InlineVec<LocationElem, 4> with 4 inline slots:
+        // - len: u8 (1 byte, padded to 8)
+        // - inline: [Option<Option<&Location>>; 4] = 64 bytes
+        // - heap: Vec<T> = 24 bytes (ptr + len + capacity)
+        // Plus crate_info (8) + contexts (8) = 112 bytes total
+        assert_eq!(
+            trace_size, 112,
+            "AtTrace should be 112 bytes with 4 inline slots"
+        );
 
-    #[cfg(all(
-        any(feature = "_tinyvec-128-bytes", feature = "_smallvec-128-bytes"),
-        not(any(feature = "_tinyvec-256-bytes", feature = "_smallvec-256-bytes"))
-    ))]
-    assert_eq!(
-        trace_size, 128,
-        "AtTrace with 128-bytes feature should be exactly 128 bytes"
-    );
+        #[cfg(all(
+            feature = "_tinyvec-64-bytes",
+            not(any(
+                feature = "_tinyvec-128-bytes",
+                feature = "_tinyvec-256-bytes",
+                feature = "_smallvec-128-bytes",
+                feature = "_smallvec-256-bytes"
+            ))
+        ))]
+        assert_eq!(
+            trace_size, 64,
+            "AtTrace with tinyvec-64-bytes should be exactly 64 bytes"
+        );
 
-    // smallvec-256-bytes takes precedence over everything
-    #[cfg(feature = "_smallvec-256-bytes")]
-    assert_eq!(
-        trace_size, 256,
-        "AtTrace with smallvec-256-bytes should be exactly 256 bytes"
-    );
+        #[cfg(all(
+            any(feature = "_tinyvec-128-bytes", feature = "_smallvec-128-bytes"),
+            not(any(feature = "_tinyvec-256-bytes", feature = "_smallvec-256-bytes"))
+        ))]
+        assert_eq!(
+            trace_size, 128,
+            "AtTrace with 128-bytes feature should be exactly 128 bytes"
+        );
 
-    // tinyvec-256-bytes only if no smallvec and no tinyvec-512
-    #[cfg(all(
-        feature = "_tinyvec-256-bytes",
-        not(any(
+        // smallvec-256-bytes takes precedence over everything
+        #[cfg(feature = "_smallvec-256-bytes")]
+        assert_eq!(
+            trace_size, 256,
+            "AtTrace with smallvec-256-bytes should be exactly 256 bytes"
+        );
+
+        // tinyvec-256-bytes only if no smallvec and no tinyvec-512
+        #[cfg(all(
+            feature = "_tinyvec-256-bytes",
+            not(any(
+                feature = "_smallvec-128-bytes",
+                feature = "_smallvec-256-bytes",
+                feature = "_tinyvec-512-bytes"
+            ))
+        ))]
+        assert_eq!(
+            trace_size, 256,
+            "AtTrace with tinyvec-256-bytes should be exactly 256 bytes"
+        );
+
+        // tinyvec-512-bytes only if no smallvec features
+        #[cfg(all(
+            feature = "_tinyvec-512-bytes",
+            not(any(feature = "_smallvec-128-bytes", feature = "_smallvec-256-bytes"))
+        ))]
+        assert_eq!(
+            trace_size, 512,
+            "AtTrace with tinyvec-512-bytes should be exactly 512 bytes"
+        );
+    }
+
+    // On 32-bit, just verify the size is at most the 64-bit budget
+    #[cfg(target_pointer_width = "32")]
+    {
+        #[cfg(not(any(
+            feature = "_tinyvec-64-bytes",
+            feature = "_tinyvec-128-bytes",
+            feature = "_tinyvec-256-bytes",
+            feature = "_tinyvec-512-bytes",
             feature = "_smallvec-128-bytes",
-            feature = "_smallvec-256-bytes",
-            feature = "_tinyvec-512-bytes"
-        ))
-    ))]
-    assert_eq!(
-        trace_size, 256,
-        "AtTrace with tinyvec-256-bytes should be exactly 256 bytes"
-    );
+            feature = "_smallvec-256-bytes"
+        )))]
+        assert!(
+            trace_size <= 112,
+            "AtTrace should be <= 112 bytes on 32-bit. Got: {trace_size}"
+        );
 
-    // tinyvec-512-bytes only if no smallvec features
-    #[cfg(all(
-        feature = "_tinyvec-512-bytes",
-        not(any(feature = "_smallvec-128-bytes", feature = "_smallvec-256-bytes"))
-    ))]
-    assert_eq!(
-        trace_size, 512,
-        "AtTrace with tinyvec-512-bytes should be exactly 512 bytes"
-    );
+        #[cfg(all(
+            feature = "_tinyvec-64-bytes",
+            not(any(
+                feature = "_tinyvec-128-bytes",
+                feature = "_tinyvec-256-bytes",
+                feature = "_smallvec-128-bytes",
+                feature = "_smallvec-256-bytes"
+            ))
+        ))]
+        assert!(
+            trace_size <= 64,
+            "AtTrace with tinyvec-64-bytes should be <= 64 bytes on 32-bit. Got: {trace_size}"
+        );
+
+        #[cfg(all(
+            any(feature = "_tinyvec-128-bytes", feature = "_smallvec-128-bytes"),
+            not(any(feature = "_tinyvec-256-bytes", feature = "_smallvec-256-bytes"))
+        ))]
+        assert!(
+            trace_size <= 128,
+            "AtTrace with 128-bytes feature should be <= 128 bytes on 32-bit. Got: {trace_size}"
+        );
+
+        #[cfg(feature = "_smallvec-256-bytes")]
+        assert!(
+            trace_size <= 256,
+            "AtTrace with smallvec-256-bytes should be <= 256 bytes on 32-bit. Got: {trace_size}"
+        );
+
+        #[cfg(all(
+            feature = "_tinyvec-256-bytes",
+            not(any(
+                feature = "_smallvec-128-bytes",
+                feature = "_smallvec-256-bytes",
+                feature = "_tinyvec-512-bytes"
+            ))
+        ))]
+        assert!(
+            trace_size <= 256,
+            "AtTrace with tinyvec-256-bytes should be <= 256 bytes on 32-bit. Got: {trace_size}"
+        );
+
+        #[cfg(all(
+            feature = "_tinyvec-512-bytes",
+            not(any(feature = "_smallvec-128-bytes", feature = "_smallvec-256-bytes"))
+        ))]
+        assert!(
+            trace_size <= 512,
+            "AtTrace with tinyvec-512-bytes should be <= 512 bytes on 32-bit. Got: {trace_size}"
+        );
+    }
 }
 
 #[test]
