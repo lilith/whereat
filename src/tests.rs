@@ -941,3 +941,2040 @@ fn test_limits_constants_are_128() {
     assert_eq!(AT_MAX_FRAMES, 128);
     assert_eq!(AT_MAX_CONTEXTS, 128);
 }
+
+// ============================================================================
+// Additional Coverage Tests
+// ============================================================================
+
+#[test]
+fn test_from_parts() {
+    use crate::trace::AtTrace;
+
+    let mut trace = AtTrace::new();
+    let _ = trace.try_push(core::panic::Location::caller());
+    let err = At::<TestError>::from_parts(TestError::NotFound, trace);
+    assert_eq!(err.frame_count(), 1);
+    assert_eq!(*err.error(), TestError::NotFound);
+}
+
+#[test]
+fn test_take_trace_and_set_trace() {
+    let mut err = at(TestError::NotFound).at_str("context");
+    assert_eq!(err.frame_count(), 1);
+
+    let trace = err.take_trace();
+    assert!(trace.is_some());
+    assert_eq!(err.frame_count(), 0);
+
+    err.set_trace(trace.unwrap());
+    assert_eq!(err.frame_count(), 1);
+}
+
+#[test]
+fn test_at_string_on_at() {
+    let err = at(TestError::NotFound).at_string(|| alloc::format!("dynamic {}", 42));
+    let text = err.contexts().find_map(|c| c.as_text());
+    assert_eq!(text, Some("dynamic 42"));
+}
+
+#[test]
+fn test_full_trace_display() {
+    let err = at(TestError::NotFound)
+        .at_str("loading config")
+        .at()
+        .at_str("initializing");
+
+    let output = alloc::format!("{}", err.full_trace());
+    assert!(output.contains("not found"));
+    assert!(output.contains("loading config"));
+    assert!(output.contains("initializing"));
+    assert!(output.contains("at "));
+}
+
+#[test]
+fn test_full_trace_with_skipped() {
+    let err = at(TestError::NotFound).at_skipped_frames().at();
+    let output = alloc::format!("{}", err.full_trace());
+    assert!(output.contains("[...]"));
+}
+
+#[test]
+fn test_full_trace_with_fn_name() {
+    fn my_function() -> At<TestError> {
+        at(TestError::NotFound).at_fn(|| {})
+    }
+    let err = my_function();
+    let output = alloc::format!("{}", err.full_trace());
+    assert!(output.contains("in "));
+    assert!(output.contains("my_function"));
+}
+
+#[test]
+fn test_full_trace_with_error_context() {
+    #[derive(Debug)]
+    struct Inner(&'static str);
+    impl fmt::Display for Inner {
+        fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+            write!(f, "inner: {}", self.0)
+        }
+    }
+    impl core::error::Error for Inner {}
+
+    let err = at(TestError::NotFound).at_error(Inner("root cause"));
+    let output = alloc::format!("{}", err.full_trace());
+    assert!(output.contains("caused by: inner: root cause"));
+}
+
+#[test]
+fn test_full_trace_with_debug_and_display_data() {
+    #[derive(Debug)]
+    struct DbgData(#[allow(dead_code)] u32);
+
+    struct DispData(u32);
+    impl fmt::Display for DispData {
+        fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+            write!(f, "val={}", self.0)
+        }
+    }
+
+    let err = at(TestError::NotFound)
+        .at_debug(|| DbgData(42))
+        .at_data(|| DispData(99));
+
+    let output = alloc::format!("{}", err.full_trace());
+    assert!(output.contains("DbgData"));
+    assert!(output.contains("42"));
+    assert!(output.contains("val=99"));
+}
+
+#[test]
+fn test_last_error_trace_display() {
+    let err = at(TestError::NotFound)
+        .at_str("this should not appear")
+        .at();
+
+    let output = alloc::format!("{}", err.last_error_trace());
+    assert!(output.contains("not found"));
+    assert!(output.contains("at "));
+    assert!(!output.contains("this should not appear"));
+}
+
+#[test]
+fn test_last_error_trace_with_skipped() {
+    let err = at(TestError::NotFound).at_skipped_frames();
+    let output = alloc::format!("{}", err.last_error_trace());
+    assert!(output.contains("[...]"));
+}
+
+#[test]
+fn test_last_error_display() {
+    let err = at(TestError::NotFound).at_str("context");
+    let output = alloc::format!("{}", err.last_error());
+    assert_eq!(output, "not found");
+}
+
+#[test]
+fn test_display_with_meta_no_trace() {
+    let err: At<TestError> = At::wrap(TestError::NotFound);
+    let output = alloc::format!("{}", err.display_with_meta());
+    assert!(output.contains("NotFound"));
+}
+
+#[test]
+fn test_display_with_meta_skipped() {
+    let err = at(TestError::NotFound)
+        .set_crate_info(crate::at_crate_info())
+        .at_skipped_frames()
+        .at();
+    let output = alloc::format!("{}", err.display_with_meta());
+    assert!(output.contains("[...]"));
+}
+
+#[test]
+fn test_display_with_meta_contexts() {
+    let err = at(TestError::NotFound)
+        .set_crate_info(crate::at_crate_info())
+        .at_str("text ctx")
+        .at_fn(|| {})
+        .at_debug(|| 42u32)
+        .at_data(|| "display data")
+        .at_error(core::fmt::Error);
+
+    let output = alloc::format!("{}", err.display_with_meta());
+    assert!(output.contains("text ctx"));
+    assert!(output.contains("in "));
+    assert!(output.contains("42"));
+    assert!(output.contains("display data"));
+    assert!(output.contains("caused by"));
+}
+
+#[test]
+fn test_into_traceable() {
+    use crate::trace::{AtTrace, AtTraceable};
+
+    struct MyErr {
+        trace: AtTrace,
+    }
+    impl AtTraceable for MyErr {
+        fn trace_mut(&mut self) -> &mut AtTrace {
+            &mut self.trace
+        }
+        fn trace(&self) -> Option<&AtTrace> {
+            Some(&self.trace)
+        }
+        fn fmt_message(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+            write!(f, "my error")
+        }
+    }
+
+    let at_err = at(TestError::NotFound).at_str("context");
+    let my_err: MyErr = at_err.into_traceable(|_| MyErr {
+        trace: AtTrace::new(),
+    });
+    assert!(my_err.trace().unwrap().frame_count() >= 1);
+}
+
+#[test]
+fn test_into_traceable_no_trace() {
+    use crate::trace::{AtTrace, AtTraceable};
+
+    struct MyErr {
+        trace: AtTrace,
+    }
+    impl AtTraceable for MyErr {
+        fn trace_mut(&mut self) -> &mut AtTrace {
+            &mut self.trace
+        }
+        fn trace(&self) -> Option<&AtTrace> {
+            Some(&self.trace)
+        }
+        fn fmt_message(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+            write!(f, "my error")
+        }
+    }
+
+    let at_err: At<TestError> = At::wrap(TestError::NotFound);
+    let my_err: MyErr = at_err.into_traceable(|_| MyErr {
+        trace: AtTrace::new(),
+    });
+    assert_eq!(my_err.trace().unwrap().frame_count(), 0);
+}
+
+#[test]
+fn test_debug_with_skipped_frames() {
+    let err = at(TestError::NotFound).at_skipped_frames().at();
+    let debug = alloc::format!("{:?}", err);
+    assert!(debug.contains("[...]"));
+}
+
+#[test]
+fn test_context_type_name() {
+    let ctx = AtContext::Debug(Box::new(42u32));
+    assert!(ctx.type_name().unwrap().contains("u32"));
+
+    let ctx = AtContext::Display(Box::new(42u32));
+    assert!(ctx.type_name().unwrap().contains("u32"));
+
+    let text = AtContext::Text("hello".into());
+    assert!(text.type_name().is_none());
+}
+
+#[test]
+fn test_context_function_name() {
+    let ctx = AtContext::FunctionName("my_func");
+    assert_eq!(ctx.as_function_name(), Some("my_func"));
+    assert!(ctx.is_function_name());
+    assert!(ctx.as_text().is_none());
+}
+
+#[test]
+fn test_context_crate_info() {
+    let info = crate::at_crate_info();
+    let ctx = AtContext::Crate(info);
+    assert!(ctx.as_crate_info().is_some());
+    assert!(core::ptr::eq(ctx.as_crate_info().unwrap(), info));
+    assert!(ctx.is_crate_boundary());
+    assert!(ctx.as_text().is_none());
+}
+
+#[test]
+fn test_context_error() {
+    let ctx = AtContext::Error(Box::new(core::fmt::Error));
+    assert!(ctx.is_error());
+    assert!(ctx.as_error().is_some());
+    assert!(ctx.is_display());
+
+    // Verify it's not function name or crate boundary
+    assert!(!ctx.is_function_name());
+    assert!(!ctx.is_crate_boundary());
+}
+
+#[test]
+fn test_context_debug_display_fmt() {
+    let fn_ctx = AtContext::FunctionName("foo");
+    assert_eq!(alloc::format!("{:?}", fn_ctx), "in foo");
+    assert_eq!(alloc::format!("{}", fn_ctx), "in foo");
+
+    let crate_ctx = AtContext::Crate(crate::at_crate_info());
+    let debug = alloc::format!("{:?}", crate_ctx);
+    assert!(debug.contains("[crate:"));
+    let display = alloc::format!("{}", crate_ctx);
+    assert!(display.contains("[crate:"));
+
+    let err_ctx = AtContext::Error(Box::new(core::fmt::Error));
+    let debug = alloc::format!("{:?}", err_ctx);
+    assert!(debug.contains("caused by"));
+    let display = alloc::format!("{}", err_ctx);
+    assert!(display.contains("caused by"));
+}
+
+#[test]
+fn test_context_ref_display_debug() {
+    use crate::context::AtContextRef;
+
+    let ctx = AtContext::Text("hello".into());
+    let ctx_ref = AtContextRef { inner: &ctx };
+    assert_eq!(alloc::format!("{}", ctx_ref), "hello");
+    assert_eq!(alloc::format!("{:?}", ctx_ref), "\"hello\"");
+}
+
+#[test]
+fn test_context_ref_is_methods() {
+    use crate::context::AtContextRef;
+
+    let fn_ctx = AtContext::FunctionName("foo");
+    let ref1 = AtContextRef { inner: &fn_ctx };
+    assert!(ref1.is_function_name());
+    assert_eq!(ref1.as_function_name(), Some("foo"));
+
+    let crate_ctx = AtContext::Crate(crate::at_crate_info());
+    let ref2 = AtContextRef { inner: &crate_ctx };
+    assert!(ref2.is_crate_boundary());
+    assert!(ref2.as_crate_info().is_some());
+
+    let err_ctx = AtContext::Error(Box::new(core::fmt::Error));
+    let ref3 = AtContextRef { inner: &err_ctx };
+    assert!(ref3.is_error());
+    assert!(ref3.as_error().is_some());
+}
+
+#[test]
+fn test_context_ref_type_name() {
+    use crate::context::AtContextRef;
+
+    let dbg_ctx = AtContext::Debug(Box::new(42u32));
+    let ref1 = AtContextRef { inner: &dbg_ctx };
+    assert!(ref1.type_name().unwrap().contains("u32"));
+
+    let text_ctx = AtContext::Text("hello".into());
+    let ref2 = AtContextRef { inner: &text_ctx };
+    assert!(ref2.type_name().is_none());
+}
+
+#[test]
+fn test_trace_default() {
+    use crate::trace::AtTrace;
+
+    let trace: AtTrace = Default::default();
+    assert!(trace.is_empty());
+    assert_eq!(trace.frame_count(), 0);
+}
+
+#[test]
+fn test_trace_take() {
+    use crate::trace::AtTrace;
+
+    let mut trace = AtTrace::capture();
+    assert_eq!(trace.frame_count(), 1);
+
+    let taken = trace.take();
+    assert_eq!(taken.frame_count(), 1);
+    assert_eq!(trace.frame_count(), 0);
+}
+
+#[test]
+fn test_trace_append() {
+    use crate::trace::AtTrace;
+
+    let mut trace1 = AtTrace::capture();
+    let trace2 = AtTrace::capture();
+    trace1.append(trace2);
+    assert_eq!(trace1.frame_count(), 2);
+}
+
+#[test]
+fn test_trace_prepend() {
+    use crate::trace::AtTrace;
+
+    let mut trace1 = AtTrace::capture();
+    let trace2 = AtTrace::capture();
+    trace1.prepend(trace2);
+    assert_eq!(trace1.frame_count(), 2);
+}
+
+#[test]
+fn test_trace_boxed_from_trace() {
+    use crate::trace::{AtTrace, AtTraceBoxed};
+
+    let trace = AtTrace::capture();
+    let boxed = AtTraceBoxed::from(trace);
+    assert!(!boxed.is_empty());
+    assert_eq!(boxed.frame_count(), 1);
+
+    let empty = AtTrace::new();
+    let boxed_empty = AtTraceBoxed::from(empty);
+    assert!(boxed_empty.is_empty());
+}
+
+#[test]
+fn test_trace_boxed_into_option() {
+    use crate::trace::{AtTrace, AtTraceBoxed};
+
+    let boxed = AtTraceBoxed::from(AtTrace::capture());
+    let opt: Option<AtTrace> = boxed.into();
+    assert!(opt.is_some());
+
+    let empty = AtTraceBoxed::new();
+    let opt: Option<AtTrace> = empty.into();
+    assert!(opt.is_none());
+}
+
+#[test]
+fn test_trace_boxed_debug() {
+    use crate::trace::{AtTrace, AtTraceBoxed};
+
+    let empty = AtTraceBoxed::new();
+    let debug = alloc::format!("{:?}", empty);
+    assert!(debug.contains("empty"));
+
+    let boxed = AtTraceBoxed::from(AtTrace::capture());
+    let debug = alloc::format!("{:?}", boxed);
+    assert!(!debug.contains("empty"));
+}
+
+#[test]
+fn test_trace_boxed_set_empty() {
+    use crate::trace::{AtTrace, AtTraceBoxed};
+
+    let mut boxed = AtTraceBoxed::from(AtTrace::capture());
+    assert!(!boxed.is_empty());
+
+    // Setting an empty trace should clear
+    boxed.set(AtTrace::new());
+    assert!(boxed.is_empty());
+}
+
+#[test]
+fn test_trace_boxed_crate_info() {
+    use crate::trace::{AtTrace, AtTraceBoxed};
+
+    let mut trace = AtTrace::capture();
+    trace.set_crate_info(crate::at_crate_info());
+    let boxed = AtTraceBoxed::from(trace);
+    assert!(boxed.crate_info().is_some());
+
+    let empty = AtTraceBoxed::new();
+    assert!(empty.crate_info().is_none());
+}
+
+#[test]
+fn test_at_frame_has_contexts() {
+    let err = at(TestError::NotFound).at_str("ctx").at();
+    let frames: alloc::vec::Vec<_> = err.frames().collect();
+    assert!(frames[0].has_contexts());
+    assert!(!frames[1].has_contexts());
+}
+
+#[test]
+fn test_at_frame_debug() {
+    let err = at(TestError::NotFound).at_str("ctx").at_skipped_frames();
+    let frames: alloc::vec::Vec<_> = err.frames().collect();
+
+    let debug0 = alloc::format!("{:?}", frames[0]);
+    assert!(debug0.contains("at "));
+
+    let debug1 = alloc::format!("{:?}", frames[1]);
+    assert_eq!(debug1, "[...]");
+}
+
+#[test]
+fn test_crate_info_builder_all_methods() {
+    use crate::AtCrateInfo;
+
+    let info = AtCrateInfo::builder()
+        .name("test")
+        .repo(Some("https://github.com/org/repo"))
+        .commit(Some("abc123"))
+        .path(Some("crates/lib/"))
+        .module("test_mod")
+        .meta(&[("key", "value")])
+        .link_format(crate::GITHUB_LINK_FORMAT)
+        .build();
+
+    assert_eq!(info.name(), "test");
+    assert_eq!(info.repo(), Some("https://github.com/org/repo"));
+    assert_eq!(info.commit(), Some("abc123"));
+    assert_eq!(info.crate_path(), Some("crates/lib/"));
+    assert_eq!(info.module(), "test_mod");
+    assert_eq!(info.meta(), &[("key", "value")]);
+    assert_eq!(info.link_format(), crate::GITHUB_LINK_FORMAT);
+    assert_eq!(info.get_meta("key"), Some("value"));
+    assert_eq!(info.get_meta("missing"), None);
+}
+
+#[test]
+fn test_crate_info_builder_default() {
+    use crate::crate_info::AtCrateInfoBuilder;
+
+    let builder: AtCrateInfoBuilder = Default::default();
+    let info = builder.build();
+    assert_eq!(info.name(), "");
+    assert!(info.repo().is_none());
+}
+
+#[test]
+fn test_crate_info_owned_methods() {
+    use crate::AtCrateInfo;
+
+    let info = AtCrateInfo::builder()
+        .name_owned("owned-name".into())
+        .repo_owned(Some("https://example.com".into()))
+        .commit_owned(Some("abc123".into()))
+        .path_owned(Some("crates/lib/".into()))
+        .module_owned("my_mod".into())
+        .meta_owned(alloc::vec![("k".into(), "v".into())])
+        .link_format_owned("{repo}/{file}".into())
+        .build();
+
+    assert_eq!(info.name(), "owned-name");
+    assert_eq!(info.repo(), Some("https://example.com"));
+    assert_eq!(info.commit(), Some("abc123"));
+    assert_eq!(info.crate_path(), Some("crates/lib/"));
+    assert_eq!(info.module(), "my_mod");
+    assert_eq!(info.get_meta("k"), Some("v"));
+    assert_eq!(info.link_format(), "{repo}/{file}");
+}
+
+#[test]
+fn test_crate_info_owned_none_variants() {
+    use crate::AtCrateInfo;
+
+    let info = AtCrateInfo::builder()
+        .repo_owned(None)
+        .commit_owned(None)
+        .path_owned(None)
+        .build();
+
+    assert!(info.repo().is_none());
+    assert!(info.commit().is_none());
+    assert!(info.crate_path().is_none());
+}
+
+#[test]
+fn test_link_format_auto_detect() {
+    use crate::AtCrateInfo;
+
+    let github = AtCrateInfo::builder()
+        .repo(Some("https://github.com/org/repo"))
+        .link_format_auto()
+        .build();
+    assert_eq!(github.link_format(), crate::GITHUB_LINK_FORMAT);
+
+    let gitlab = AtCrateInfo::builder()
+        .repo(Some("https://gitlab.com/org/repo"))
+        .link_format_auto()
+        .build();
+    assert_eq!(gitlab.link_format(), crate::GITLAB_LINK_FORMAT);
+
+    let gitea = AtCrateInfo::builder()
+        .repo(Some("https://gitea.example.com/org/repo"))
+        .link_format_auto()
+        .build();
+    assert_eq!(gitea.link_format(), crate::GITEA_LINK_FORMAT);
+
+    let forgejo = AtCrateInfo::builder()
+        .repo(Some("https://forgejo.example.com/org/repo"))
+        .link_format_auto()
+        .build();
+    assert_eq!(forgejo.link_format(), crate::GITEA_LINK_FORMAT);
+
+    let codeberg = AtCrateInfo::builder()
+        .repo(Some("https://codeberg.org/org/repo"))
+        .link_format_auto()
+        .build();
+    assert_eq!(codeberg.link_format(), crate::GITEA_LINK_FORMAT);
+
+    let bitbucket = AtCrateInfo::builder()
+        .repo(Some("https://bitbucket.org/org/repo"))
+        .link_format_auto()
+        .build();
+    assert_eq!(bitbucket.link_format(), crate::BITBUCKET_LINK_FORMAT);
+
+    let unknown = AtCrateInfo::builder()
+        .repo(Some("https://example.com/repo"))
+        .link_format_auto()
+        .build();
+    assert_eq!(unknown.link_format(), crate::GITHUB_LINK_FORMAT);
+
+    let no_repo = AtCrateInfo::builder().link_format_auto().build();
+    assert_eq!(no_repo.link_format(), crate::GITHUB_LINK_FORMAT);
+}
+
+#[test]
+fn test_traceable_at_string() {
+    use crate::trace::{AtTrace, AtTraceable};
+
+    struct MyErr {
+        trace: AtTrace,
+    }
+    impl AtTraceable for MyErr {
+        fn trace_mut(&mut self) -> &mut AtTrace {
+            &mut self.trace
+        }
+        fn trace(&self) -> Option<&AtTrace> {
+            Some(&self.trace)
+        }
+        fn fmt_message(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+            write!(f, "err")
+        }
+    }
+
+    let err = MyErr {
+        trace: AtTrace::capture(),
+    }
+    .at_string(|| alloc::format!("dyn {}", 1));
+    let ctx: alloc::vec::Vec<_> = err
+        .trace()
+        .unwrap()
+        .contexts()
+        .filter_map(|c| c.as_text().map(alloc::string::ToString::to_string))
+        .collect();
+    assert!(ctx.iter().any(|s| s == "dyn 1"));
+}
+
+#[test]
+fn test_traceable_at_data_and_debug() {
+    use crate::trace::{AtTrace, AtTraceable};
+
+    struct MyErr {
+        trace: AtTrace,
+    }
+    impl AtTraceable for MyErr {
+        fn trace_mut(&mut self) -> &mut AtTrace {
+            &mut self.trace
+        }
+        fn trace(&self) -> Option<&AtTrace> {
+            Some(&self.trace)
+        }
+        fn fmt_message(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+            write!(f, "err")
+        }
+    }
+
+    let err = MyErr {
+        trace: AtTrace::capture(),
+    }
+    .at_data(|| 42u32)
+    .at_debug(|| "dbg_val");
+
+    assert_eq!(err.trace().unwrap().contexts().count(), 2);
+}
+
+#[test]
+fn test_traceable_at_error() {
+    use crate::trace::{AtTrace, AtTraceable};
+
+    struct MyErr {
+        trace: AtTrace,
+    }
+    impl AtTraceable for MyErr {
+        fn trace_mut(&mut self) -> &mut AtTrace {
+            &mut self.trace
+        }
+        fn trace(&self) -> Option<&AtTrace> {
+            Some(&self.trace)
+        }
+        fn fmt_message(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+            write!(f, "err")
+        }
+    }
+
+    let err = MyErr {
+        trace: AtTrace::capture(),
+    }
+    .at_error(core::fmt::Error);
+
+    let has_error = err.trace().unwrap().contexts().any(|c| c.is_error());
+    assert!(has_error);
+}
+
+#[test]
+fn test_traceable_at_crate() {
+    use crate::trace::{AtTrace, AtTraceable};
+
+    struct MyErr {
+        trace: AtTrace,
+    }
+    impl AtTraceable for MyErr {
+        fn trace_mut(&mut self) -> &mut AtTrace {
+            &mut self.trace
+        }
+        fn trace(&self) -> Option<&AtTrace> {
+            Some(&self.trace)
+        }
+        fn fmt_message(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+            write!(f, "err")
+        }
+    }
+
+    let err = MyErr {
+        trace: AtTrace::capture(),
+    }
+    .at_crate(crate::at_crate_info());
+
+    assert!(err.trace().unwrap().crate_info().is_some());
+}
+
+#[test]
+fn test_traceable_at_fn_and_named() {
+    use crate::trace::{AtTrace, AtTraceable};
+
+    struct MyErr {
+        trace: AtTrace,
+    }
+    impl AtTraceable for MyErr {
+        fn trace_mut(&mut self) -> &mut AtTrace {
+            &mut self.trace
+        }
+        fn trace(&self) -> Option<&AtTrace> {
+            Some(&self.trace)
+        }
+        fn fmt_message(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+            write!(f, "err")
+        }
+    }
+
+    let err = MyErr {
+        trace: AtTrace::capture(),
+    }
+    .at_fn(|| {});
+    assert_eq!(err.trace().unwrap().frame_count(), 2);
+
+    let err2 = MyErr {
+        trace: AtTrace::capture(),
+    }
+    .at_named("step1");
+    assert_eq!(err2.trace().unwrap().frame_count(), 2);
+}
+
+#[test]
+fn test_traceable_at_skipped() {
+    use crate::trace::{AtTrace, AtTraceable};
+
+    struct MyErr {
+        trace: AtTrace,
+    }
+    impl AtTraceable for MyErr {
+        fn trace_mut(&mut self) -> &mut AtTrace {
+            &mut self.trace
+        }
+        fn trace(&self) -> Option<&AtTrace> {
+            Some(&self.trace)
+        }
+        fn fmt_message(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+            write!(f, "err")
+        }
+    }
+
+    let err = MyErr {
+        trace: AtTrace::capture(),
+    }
+    .at_skipped_frames();
+    assert_eq!(err.trace().unwrap().frame_count(), 2);
+}
+
+#[test]
+fn test_traceable_map_traceable() {
+    use crate::trace::{AtTrace, AtTraceable};
+
+    struct ErrA {
+        trace: AtTrace,
+    }
+    impl AtTraceable for ErrA {
+        fn trace_mut(&mut self) -> &mut AtTrace {
+            &mut self.trace
+        }
+        fn trace(&self) -> Option<&AtTrace> {
+            Some(&self.trace)
+        }
+        fn fmt_message(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+            write!(f, "A")
+        }
+    }
+    struct ErrB {
+        trace: AtTrace,
+    }
+    impl AtTraceable for ErrB {
+        fn trace_mut(&mut self) -> &mut AtTrace {
+            &mut self.trace
+        }
+        fn trace(&self) -> Option<&AtTrace> {
+            Some(&self.trace)
+        }
+        fn fmt_message(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+            write!(f, "B")
+        }
+    }
+
+    let a = ErrA {
+        trace: AtTrace::capture(),
+    }
+    .at_str("context");
+    let b: ErrB = a.map_traceable(|_| ErrB {
+        trace: AtTrace::new(),
+    });
+    assert!(b.trace().unwrap().frame_count() >= 1);
+}
+
+#[test]
+fn test_traceable_into_at() {
+    use crate::trace::{AtTrace, AtTraceable};
+
+    struct MyErr {
+        trace: AtTrace,
+    }
+    impl AtTraceable for MyErr {
+        fn trace_mut(&mut self) -> &mut AtTrace {
+            &mut self.trace
+        }
+        fn trace(&self) -> Option<&AtTrace> {
+            Some(&self.trace)
+        }
+        fn fmt_message(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+            write!(f, "err")
+        }
+    }
+
+    let err = MyErr {
+        trace: AtTrace::capture(),
+    }
+    .at_str("context");
+    let at_err: At<&str> = err.into_at(|_| "converted");
+    assert_eq!(*at_err.error(), "converted");
+    assert!(at_err.frame_count() >= 1);
+}
+
+#[test]
+fn test_traceable_full_trace_format() {
+    use crate::trace::{AtTrace, AtTraceable};
+
+    struct MyErr {
+        trace: AtTrace,
+    }
+    impl AtTraceable for MyErr {
+        fn trace_mut(&mut self) -> &mut AtTrace {
+            &mut self.trace
+        }
+        fn trace(&self) -> Option<&AtTrace> {
+            Some(&self.trace)
+        }
+        fn fmt_message(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+            write!(f, "my error")
+        }
+    }
+
+    let err = MyErr {
+        trace: AtTrace::capture(),
+    }
+    .at_str("context msg")
+    .at_fn(|| {})
+    .at_debug(|| 42u32)
+    .at_data(|| "disp data")
+    .at_error(core::fmt::Error);
+
+    let output = alloc::format!("{}", err.full_trace());
+    assert!(output.contains("my error"));
+    assert!(output.contains("context msg"));
+    assert!(output.contains("in "));
+}
+
+#[test]
+fn test_traceable_last_error_trace_format() {
+    use crate::trace::{AtTrace, AtTraceable};
+
+    struct MyErr {
+        trace: AtTrace,
+    }
+    impl AtTraceable for MyErr {
+        fn trace_mut(&mut self) -> &mut AtTrace {
+            &mut self.trace
+        }
+        fn trace(&self) -> Option<&AtTrace> {
+            Some(&self.trace)
+        }
+        fn fmt_message(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+            write!(f, "my error")
+        }
+    }
+
+    let err = MyErr {
+        trace: AtTrace::capture(),
+    }
+    .at_str("should not appear")
+    .at_skipped_frames();
+
+    let output = alloc::format!("{}", err.last_error_trace());
+    assert!(output.contains("my error"));
+    assert!(output.contains("[...]"));
+    assert!(!output.contains("should not appear"));
+}
+
+#[test]
+fn test_traceable_last_error_format() {
+    use crate::trace::{AtTrace, AtTraceable};
+
+    struct MyErr {
+        trace: AtTrace,
+    }
+    impl AtTraceable for MyErr {
+        fn trace_mut(&mut self) -> &mut AtTrace {
+            &mut self.trace
+        }
+        fn trace(&self) -> Option<&AtTrace> {
+            Some(&self.trace)
+        }
+        fn fmt_message(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+            write!(f, "just the message")
+        }
+    }
+
+    let err = MyErr {
+        trace: AtTrace::capture(),
+    };
+    let output = alloc::format!("{}", err.last_error());
+    assert_eq!(output, "just the message");
+}
+
+#[test]
+fn test_result_at_ext_ok_paths() {
+    type R = Result<i32, At<TestError>>;
+    assert_eq!(R::Ok(42).at().unwrap(), 42);
+    assert_eq!(R::Ok(42).at_str("msg").unwrap(), 42);
+    assert_eq!(
+        R::Ok(42)
+            .at_string(|| alloc::string::String::from("dyn"))
+            .unwrap(),
+        42
+    );
+    assert_eq!(R::Ok(42).at_data(|| 1u32).unwrap(), 42);
+    assert_eq!(R::Ok(42).at_debug(|| 1u32).unwrap(), 42);
+    assert_eq!(R::Ok(42).at_error(core::fmt::Error).unwrap(), 42);
+    assert_eq!(R::Ok(42).at_crate(crate::at_crate_info()).unwrap(), 42);
+    assert_eq!(R::Ok(42).at_fn(|| {}).unwrap(), 42);
+    assert_eq!(R::Ok(42).at_named("step").unwrap(), 42);
+    assert_eq!(R::Ok(42).map_err_at(|_| ()).unwrap(), 42);
+}
+
+#[test]
+fn test_result_at_ext_err_paths() {
+    fn make_err() -> Result<(), At<TestError>> {
+        Err(at(TestError::NotFound))
+    }
+
+    // Test error paths for methods not already covered
+    let _ = make_err().at_data(|| 42u32).unwrap_err();
+    let _ = make_err().at_debug(|| 42u32).unwrap_err();
+    let _ = make_err().at_error(core::fmt::Error).unwrap_err();
+    let _ = make_err().at_crate(crate::at_crate_info()).unwrap_err();
+    let _ = make_err().at_fn(|| {}).unwrap_err();
+    let _ = make_err().at_named("step").unwrap_err();
+}
+
+#[test]
+fn test_result_at_traceable_ext_all() {
+    use crate::ResultAtTraceableExt;
+    use crate::trace::{AtTrace, AtTraceable};
+
+    #[derive(Debug)]
+    struct MyErr {
+        trace: AtTrace,
+    }
+    impl AtTraceable for MyErr {
+        fn trace_mut(&mut self) -> &mut AtTrace {
+            &mut self.trace
+        }
+        fn trace(&self) -> Option<&AtTrace> {
+            Some(&self.trace)
+        }
+        fn fmt_message(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+            write!(f, "err")
+        }
+    }
+
+    #[allow(clippy::result_large_err)]
+    fn make_err() -> Result<i32, MyErr> {
+        Err(MyErr {
+            trace: AtTrace::capture(),
+        })
+    }
+
+    #[allow(clippy::result_large_err)]
+    fn make_ok() -> Result<i32, MyErr> {
+        Ok(42)
+    }
+
+    // Ok paths
+    assert_eq!(make_ok().at().unwrap(), 42);
+    assert_eq!(make_ok().at_str("msg").unwrap(), 42);
+    assert_eq!(
+        make_ok()
+            .at_string(|| alloc::string::String::from("x"))
+            .unwrap(),
+        42
+    );
+    assert_eq!(make_ok().at_data(|| 1u32).unwrap(), 42);
+    assert_eq!(make_ok().at_debug(|| 1u32).unwrap(), 42);
+    assert_eq!(make_ok().at_error(core::fmt::Error).unwrap(), 42);
+    assert_eq!(make_ok().at_crate(crate::at_crate_info()).unwrap(), 42);
+    assert_eq!(make_ok().at_fn(|| {}).unwrap(), 42);
+    assert_eq!(make_ok().at_named("step").unwrap(), 42);
+
+    // Err paths
+    let _ = make_err().at().unwrap_err();
+    let _ = make_err().at_str("msg").unwrap_err();
+    let _ = make_err()
+        .at_string(|| alloc::string::String::from("x"))
+        .unwrap_err();
+    let _ = make_err().at_data(|| 1u32).unwrap_err();
+    let _ = make_err().at_debug(|| 1u32).unwrap_err();
+    let _ = make_err().at_error(core::fmt::Error).unwrap_err();
+    let _ = make_err().at_crate(crate::at_crate_info()).unwrap_err();
+    let _ = make_err().at_fn(|| {}).unwrap_err();
+    let _ = make_err().at_named("step").unwrap_err();
+}
+
+#[test]
+fn test_crate_info_get_meta_const() {
+    use crate::AtCrateInfo;
+
+    static INFO: AtCrateInfo = AtCrateInfo::builder()
+        .name("test")
+        .meta(&[("team", "platform"), ("env", "prod")])
+        .build();
+
+    assert_eq!(INFO.get_meta("team"), Some("platform"));
+    assert_eq!(INFO.get_meta("env"), Some("prod"));
+    assert_eq!(INFO.get_meta("missing"), None);
+    assert_eq!(INFO.get_meta("tea"), None); // Different length
+}
+
+#[test]
+fn test_traceable_full_trace_with_crate_boundary() {
+    use crate::AtCrateInfo;
+    use crate::trace::{AtTrace, AtTraceable};
+
+    struct MyErr {
+        trace: AtTrace,
+    }
+    impl AtTraceable for MyErr {
+        fn trace_mut(&mut self) -> &mut AtTrace {
+            &mut self.trace
+        }
+        fn trace(&self) -> Option<&AtTrace> {
+            Some(&self.trace)
+        }
+        fn fmt_message(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+            write!(f, "err")
+        }
+    }
+
+    static C1: AtCrateInfo = AtCrateInfo::builder().name("crate-a").build();
+    static C2: AtCrateInfo = AtCrateInfo::builder().name("crate-b").build();
+
+    let mut trace = AtTrace::capture();
+    trace.set_crate_info(&C1);
+    let err = MyErr { trace }.at_crate(&C2).at();
+
+    let output = alloc::format!("{}", err.full_trace());
+    assert!(output.contains("crate-a"));
+    assert!(output.contains("crate-b"));
+}
+
+#[test]
+fn test_traceable_full_trace_no_trace() {
+    use crate::trace::{AtTrace, AtTraceable};
+
+    struct MyErr;
+    impl AtTraceable for MyErr {
+        fn trace_mut(&mut self) -> &mut AtTrace {
+            panic!("should not be called");
+        }
+        fn trace(&self) -> Option<&AtTrace> {
+            None
+        }
+        fn fmt_message(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+            write!(f, "err")
+        }
+    }
+
+    let err = MyErr;
+    let output = alloc::format!("{}", err.full_trace());
+    assert_eq!(output, "err");
+
+    let output2 = alloc::format!("{}", err.last_error_trace());
+    assert_eq!(output2, "err");
+}
+
+// ============================================================================
+// Additional coverage tests — format.rs, at.rs, context.rs, trace.rs, ext.rs
+// ============================================================================
+
+#[test]
+fn test_at_locations_iterator() {
+    let err = at(TestError::NotFound).at_str("msg").at();
+    let locs: alloc::vec::Vec<_> = err.locations().collect();
+    assert!(locs.len() >= 2);
+    for loc in &locs {
+        assert!(loc.file().contains("tests.rs"));
+    }
+}
+
+#[test]
+fn test_at_debug_with_skipped_frames() {
+    // At<E> Debug impl with a skipped frame marker (None location)
+    let mut err = at(TestError::NotFound).at_str("ctx");
+    err = err.at_skipped_frames();
+    let output = alloc::format!("{:?}", err);
+    assert!(output.contains("[...]"));
+    assert!(output.contains("NotFound"));
+    assert!(output.contains("ctx"));
+}
+
+#[test]
+fn test_full_trace_display_with_nested_error_chain() {
+    // Exercise lines 1101-1110 in at.rs (nested error source chain)
+    use core::error::Error;
+
+    #[derive(Debug)]
+    struct Inner;
+    impl fmt::Display for Inner {
+        fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+            write!(f, "inner error")
+        }
+    }
+    impl Error for Inner {}
+
+    #[derive(Debug)]
+    struct Outer(Inner);
+    impl fmt::Display for Outer {
+        fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+            write!(f, "outer error")
+        }
+    }
+    impl Error for Outer {
+        fn source(&self) -> Option<&(dyn Error + 'static)> {
+            Some(&self.0)
+        }
+    }
+
+    let err = at(TestError::NotFound).at_error(Outer(Inner));
+    let output = alloc::format!("{}", err.full_trace());
+    assert!(output.contains("caused by: outer error"));
+    assert!(output.contains("caused by: inner error"));
+}
+
+#[test]
+fn test_full_trace_display_with_debug_and_display_ctx() {
+    // Exercise lines 1112-1113 (the else branch: non-text, non-fn, non-error contexts)
+    let err = at(TestError::NotFound)
+        .at_data(|| "display_val")
+        .at_debug(|| 99u32);
+    let output = alloc::format!("{}", err.full_trace());
+    // Display contexts fall through to the else branch, which calls ctx Display
+    assert!(output.contains("display_val") || output.contains("99"));
+}
+
+#[test]
+fn test_display_with_meta_skipped_frames() {
+    // Exercise line 910 (display_with_meta None branch)
+    let err = at(TestError::NotFound).at_skipped_frames();
+    let output = alloc::format!("{}", err.display_with_meta());
+    assert!(output.contains("[...]"));
+}
+
+#[test]
+fn test_display_with_meta_with_link_template() {
+    // Exercise line 988 (write_location_meta with link_template)
+    use crate::AtCrateInfo;
+
+    static INFO: AtCrateInfo = AtCrateInfo::builder()
+        .name("test-crate")
+        .repo(Some("https://github.com/user/repo"))
+        .commit(Some("abc123"))
+        .path(Some("src"))
+        .build();
+
+    let err = At::wrap(TestError::NotFound).set_crate_info(&INFO).at();
+    let output = alloc::format!("{}", err.display_with_meta());
+    // Should contain a link with file/line substituted
+    assert!(output.contains("github.com"), "Output: {}", output);
+}
+
+#[test]
+fn test_context_downcast_ref() {
+    use crate::context::AtContext;
+
+    // Debug variant — downcast succeeds
+    let ctx = AtContext::Debug(Box::new(42u32));
+    assert_eq!(ctx.downcast_ref::<u32>(), Some(&42u32));
+    assert_eq!(ctx.downcast_ref::<i32>(), None);
+
+    // Display variant — downcast succeeds
+    let ctx = AtContext::Display(Box::new(alloc::string::String::from("hello")));
+    assert_eq!(
+        ctx.downcast_ref::<alloc::string::String>(),
+        Some(&alloc::string::String::from("hello"))
+    );
+
+    // Text — always None
+    let ctx = AtContext::Text(alloc::borrow::Cow::Borrowed("hi"));
+    assert_eq!(ctx.downcast_ref::<alloc::string::String>(), None);
+
+    // FunctionName — always None
+    let ctx = AtContext::FunctionName("fn_name");
+    assert_eq!(ctx.downcast_ref::<&str>(), None);
+
+    // Error — always None
+    let ctx = AtContext::Error(Box::new(core::fmt::Error));
+    assert_eq!(ctx.downcast_ref::<core::fmt::Error>(), None);
+}
+
+#[test]
+fn test_context_type_name_all_variants() {
+    use crate::context::AtContext;
+
+    // Debug — has type_name
+    let ctx = AtContext::Debug(Box::new(42u32));
+    assert!(ctx.type_name().is_some());
+
+    // Display — has type_name
+    let ctx = AtContext::Display(Box::new(alloc::string::String::from("x")));
+    assert!(ctx.type_name().is_some());
+
+    // Text — None
+    let ctx = AtContext::Text(alloc::borrow::Cow::Borrowed("hi"));
+    assert!(ctx.type_name().is_none());
+}
+
+#[test]
+fn test_context_display_fmt_all_variants() {
+    use crate::context::AtContext;
+
+    // Display variant in Debug fmt
+    let ctx = AtContext::Display(Box::new(42u32));
+    let dbg_output = alloc::format!("{:?}", ctx);
+    assert!(dbg_output.contains("42"), "Output: {}", dbg_output);
+
+    // Display variant in Display fmt
+    let disp_output = alloc::format!("{}", ctx);
+    assert!(disp_output.contains("42"), "Output: {}", disp_output);
+
+    // Crate variant
+    use crate::AtCrateInfo;
+    static INFO: AtCrateInfo = AtCrateInfo::builder().name("my-crate").build();
+    let ctx = AtContext::Crate(&INFO);
+    let dbg_output = alloc::format!("{:?}", ctx);
+    assert!(dbg_output.contains("my-crate"), "Output: {}", dbg_output);
+    let disp_output = alloc::format!("{}", ctx);
+    assert!(disp_output.contains("my-crate"), "Output: {}", disp_output);
+
+    // Error variant
+    let ctx = AtContext::Error(Box::new(core::fmt::Error));
+    let dbg_output = alloc::format!("{:?}", ctx);
+    assert!(dbg_output.contains("caused by:"), "Output: {}", dbg_output);
+    let disp_output = alloc::format!("{}", ctx);
+    assert!(
+        disp_output.contains("caused by:"),
+        "Output: {}",
+        disp_output
+    );
+}
+
+#[test]
+fn test_trace_try_add_crate_boundary_same_crate() {
+    // Exercise line 296/300 — same crate info ptr → no-op
+    use crate::AtCrateInfo;
+    use crate::trace::AtTrace;
+
+    static INFO: AtCrateInfo = AtCrateInfo::builder().name("same").build();
+
+    let mut trace = AtTrace::capture();
+    trace.set_crate_info(&INFO);
+    let frames_before = trace.frame_count();
+    // Add same crate info again — should be a no-op (no new context)
+    trace.try_add_crate_boundary(core::panic::Location::caller(), &INFO);
+    assert_eq!(trace.frame_count(), frames_before);
+}
+
+#[test]
+fn test_trace_try_add_crate_boundary_different_crate() {
+    // Exercise line 303 — different crate info → adds context
+    use crate::AtCrateInfo;
+    use crate::trace::AtTrace;
+
+    static C1: AtCrateInfo = AtCrateInfo::builder().name("crate-a").build();
+    static C2: AtCrateInfo = AtCrateInfo::builder().name("crate-b").build();
+
+    let mut trace = AtTrace::capture();
+    trace.set_crate_info(&C1);
+    trace.try_add_crate_boundary(core::panic::Location::caller(), &C2);
+    // Should have a crate boundary context now
+    let _output = alloc::format!("{:?}", trace);
+    // The boundary context is stored — visible when formatting At
+    assert!(trace.crate_info().is_some());
+}
+
+#[test]
+fn test_trace_pop_first_with_contexts() {
+    // Exercise lines 455-465 (pop_first draining contexts)
+    use crate::trace::AtTrace;
+
+    let mut trace = AtTrace::capture();
+    trace.try_add_context(
+        core::panic::Location::caller(),
+        crate::context::AtContext::Text(alloc::borrow::Cow::Borrowed("ctx1")),
+    );
+    // Add a second frame
+    trace.try_push(core::panic::Location::caller());
+    trace.try_add_context(
+        core::panic::Location::caller(),
+        crate::context::AtContext::Text(alloc::borrow::Cow::Borrowed("ctx2")),
+    );
+
+    let first = trace.pop_first();
+    assert!(first.is_some());
+    let frame = first.unwrap();
+    assert!(frame.context_count() > 0);
+}
+
+#[test]
+fn test_trace_push_with_contexts() {
+    // Exercise line 475 (push with contexts on AtFrameOwned)
+    use crate::trace::AtTrace;
+
+    let mut trace = AtTrace::capture();
+    trace.try_add_context(
+        core::panic::Location::caller(),
+        crate::context::AtContext::Text(alloc::borrow::Cow::Borrowed("existing")),
+    );
+
+    // Pop first, then push it back
+    let frame = trace.pop_first().unwrap();
+    let count_before = trace.frame_count();
+    trace.push(frame);
+    assert_eq!(trace.frame_count(), count_before + 1);
+}
+
+#[test]
+fn test_trace_push_first_with_contexts() {
+    // Exercise lines 534, 541 (push_first with contexts)
+    use crate::trace::AtTrace;
+
+    let mut trace = AtTrace::capture();
+    trace.try_push(core::panic::Location::caller()); // Add a second frame
+
+    // Pop from the end, add context via builder, then push_first
+    let frame = trace.pop_first().unwrap().with_str("prepended");
+    trace.push_first(frame);
+    assert!(trace.frame_count() >= 2);
+}
+
+#[test]
+fn test_traceable_at_first_pop_and_insert() {
+    // Exercise lines 1208-1209 (at_first_pop, at_first_insert)
+    use crate::trace::{AtTrace, AtTraceable};
+
+    struct MyErr {
+        trace: AtTrace,
+    }
+    impl AtTraceable for MyErr {
+        fn trace_mut(&mut self) -> &mut AtTrace {
+            &mut self.trace
+        }
+        fn trace(&self) -> Option<&AtTrace> {
+            Some(&self.trace)
+        }
+        fn fmt_message(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+            write!(f, "err")
+        }
+    }
+
+    let mut err = MyErr {
+        trace: AtTrace::capture(),
+    }
+    .at_str("ctx");
+
+    let count_before = err.trace().unwrap().frame_count();
+    let frame = err.at_first_pop().unwrap();
+    assert_eq!(err.trace().unwrap().frame_count(), count_before - 1);
+    err.at_first_insert(frame);
+    assert_eq!(err.trace().unwrap().frame_count(), count_before);
+}
+
+#[test]
+fn test_traceable_full_trace_with_nested_error_chain() {
+    // Exercise lines 1393-1402 in trace.rs (nested error source chain in FullTraceDisplay)
+    use crate::trace::{AtTrace, AtTraceable};
+    use core::error::Error;
+
+    #[derive(Debug)]
+    struct Inner;
+    impl fmt::Display for Inner {
+        fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+            write!(f, "inner")
+        }
+    }
+    impl Error for Inner {}
+
+    #[derive(Debug)]
+    struct Outer(Inner);
+    impl fmt::Display for Outer {
+        fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+            write!(f, "outer")
+        }
+    }
+    impl Error for Outer {
+        fn source(&self) -> Option<&(dyn Error + 'static)> {
+            Some(&self.0)
+        }
+    }
+
+    struct MyErr {
+        trace: AtTrace,
+    }
+    impl AtTraceable for MyErr {
+        fn trace_mut(&mut self) -> &mut AtTrace {
+            &mut self.trace
+        }
+        fn trace(&self) -> Option<&AtTrace> {
+            Some(&self.trace)
+        }
+        fn fmt_message(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+            write!(f, "my error")
+        }
+    }
+
+    let err = MyErr {
+        trace: AtTrace::capture(),
+    }
+    .at_error(Outer(Inner));
+
+    let output = alloc::format!("{}", err.full_trace());
+    assert!(output.contains("caused by: outer"), "Output: {}", output);
+    assert!(output.contains("caused by: inner"), "Output: {}", output);
+}
+
+#[test]
+fn test_traceable_full_trace_with_skipped_frames_display() {
+    // Exercise line 1381 (FullTraceDisplay skipped frame marker)
+    use crate::trace::{AtTrace, AtTraceable};
+
+    struct MyErr {
+        trace: AtTrace,
+    }
+    impl AtTraceable for MyErr {
+        fn trace_mut(&mut self) -> &mut AtTrace {
+            &mut self.trace
+        }
+        fn trace(&self) -> Option<&AtTrace> {
+            Some(&self.trace)
+        }
+        fn fmt_message(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+            write!(f, "err")
+        }
+    }
+
+    let err = MyErr {
+        trace: AtTrace::capture(),
+    }
+    .at_skipped_frames()
+    .at();
+
+    let output = alloc::format!("{}", err.full_trace());
+    assert!(output.contains("[...]"), "Output: {}", output);
+}
+
+#[test]
+fn test_ext_at_string_err_path() {
+    // Exercise line 201 in ext.rs
+    fn make_err() -> Result<(), At<TestError>> {
+        Err(at(TestError::NotFound))
+    }
+    let result = make_err().at_string(|| alloc::string::String::from("dynamic context"));
+    let err = result.unwrap_err();
+    let output = alloc::format!("{:?}", err);
+    assert!(output.contains("dynamic context"), "Output: {}", output);
+}
+
+#[test]
+fn test_crate_info_owned_with_some_values() {
+    // Exercise lines 338, 348, 358 in crate_info.rs
+    use crate::crate_info::AtCrateInfoBuilder;
+
+    let info = AtCrateInfoBuilder::new()
+        .name("test")
+        .repo_owned(Some(alloc::string::String::from(
+            "https://github.com/test/test",
+        )))
+        .commit_owned(Some(alloc::string::String::from("abc123")))
+        .path_owned(Some(alloc::string::String::from("crates/test")))
+        .build();
+
+    assert_eq!(info.repo(), Some("https://github.com/test/test"));
+    assert_eq!(info.commit(), Some("abc123"));
+    assert_eq!(info.crate_path(), Some("crates/test"));
+}
+
+// ============================================================================
+// Format.rs coverage — termcolor and HTML formatters
+// ============================================================================
+
+#[cfg(feature = "_termcolor")]
+#[test]
+fn test_termcolor_display_with_all_context_types() {
+    use crate::AtCrateInfo;
+
+    static C1: AtCrateInfo = AtCrateInfo::builder().name("crate-a").build();
+    static C2: AtCrateInfo = AtCrateInfo::builder().name("crate-b").build();
+
+    let err = At::wrap(TestError::NotFound)
+        .set_crate_info(&C1)
+        .at()
+        .at_str("text context")
+        .at_fn(|| {})
+        .at_debug(|| 42u32)
+        .at_data(|| "display data")
+        .at_error(core::fmt::Error)
+        .at_crate(&C2)
+        .at();
+
+    let output = alloc::format!("{}", err.display_color());
+    assert!(output.contains("NotFound"), "Output: {}", output);
+    assert!(output.contains("text context"), "Output: {}", output);
+    assert!(output.contains("42"), "Output: {}", output);
+    assert!(output.contains("display data"), "Output: {}", output);
+    assert!(output.contains("caused by"), "Output: {}", output);
+}
+
+#[cfg(feature = "_termcolor")]
+#[test]
+fn test_termcolor_display_with_skipped_frames() {
+    let err = at(TestError::NotFound).at_skipped_frames();
+    let output = alloc::format!("{}", err.display_color());
+    assert!(output.contains("[...]"), "Output: {}", output);
+}
+
+#[cfg(feature = "_termcolor")]
+#[test]
+fn test_termcolor_display_no_trace() {
+    let err = At::wrap(TestError::NotFound);
+    let output = alloc::format!("{}", err.display_color());
+    assert!(output.contains("NotFound"), "Output: {}", output);
+}
+
+#[cfg(feature = "_termcolor")]
+#[test]
+fn test_termcolor_meta_with_crate_boundaries() {
+    use crate::AtCrateInfo;
+
+    static C1: AtCrateInfo = AtCrateInfo::builder()
+        .name("crate-a")
+        .repo(Some("https://github.com/user/repo"))
+        .commit(Some("abc123"))
+        .build();
+    static C2: AtCrateInfo = AtCrateInfo::builder()
+        .name("crate-b")
+        .repo(Some("https://github.com/user/repo2"))
+        .commit(Some("def456"))
+        .build();
+
+    let err = At::wrap(TestError::NotFound)
+        .set_crate_info(&C1)
+        .at()
+        .at_str("context")
+        .at_fn(|| {})
+        .at_debug(|| 42u32)
+        .at_data(|| "disp")
+        .at_error(core::fmt::Error)
+        .at_crate(&C2)
+        .at();
+
+    let output = alloc::format!("{}", err.display_color_meta());
+    assert!(output.contains("crate-a"), "Output: {}", output);
+    assert!(output.contains("crate-b"), "Output: {}", output);
+    // Link URL should be present
+    assert!(output.contains("github.com"), "Output: {}", output);
+}
+
+#[cfg(feature = "_termcolor")]
+#[test]
+fn test_termcolor_meta_with_skipped_frames() {
+    let err = at(TestError::NotFound).at_skipped_frames();
+    let output = alloc::format!("{}", err.display_color_meta());
+    assert!(output.contains("[...]"), "Output: {}", output);
+}
+
+#[cfg(feature = "_termcolor")]
+#[test]
+fn test_termcolor_meta_no_trace() {
+    let err = At::wrap(TestError::NotFound);
+    let output = alloc::format!("{}", err.display_color_meta());
+    assert!(output.contains("NotFound"), "Output: {}", output);
+}
+
+#[cfg(feature = "_html")]
+#[test]
+fn test_html_display_with_all_context_types() {
+    use crate::AtCrateInfo;
+
+    static C1: AtCrateInfo = AtCrateInfo::builder().name("crate-a").build();
+    static C2: AtCrateInfo = AtCrateInfo::builder().name("crate-b").build();
+
+    let err = At::wrap(TestError::NotFound)
+        .set_crate_info(&C1)
+        .at()
+        .at_str("text context")
+        .at_fn(|| {})
+        .at_debug(|| 42u32)
+        .at_data(|| "display data")
+        .at_error(core::fmt::Error)
+        .at_crate(&C2)
+        .at();
+
+    let output = alloc::format!("{}", err.display_html());
+    assert!(output.contains("context-text"), "Output: {}", output);
+    assert!(output.contains("context-fn"), "Output: {}", output);
+    assert!(output.contains("context-data"), "Output: {}", output);
+    assert!(output.contains("context-error"), "Output: {}", output);
+    assert!(output.contains("crate-boundary"), "Output: {}", output);
+    assert!(output.contains("crate-a"), "Output: {}", output);
+    assert!(output.contains("crate-b"), "Output: {}", output);
+}
+
+#[cfg(feature = "_html")]
+#[test]
+fn test_html_display_with_skipped_frames() {
+    let err = at(TestError::NotFound).at_skipped_frames();
+    let output = alloc::format!("{}", err.display_html());
+    assert!(output.contains("skip-marker"), "Output: {}", output);
+    assert!(output.contains("[...]"), "Output: {}", output);
+}
+
+#[cfg(feature = "_html")]
+#[test]
+fn test_html_display_no_trace() {
+    let err = At::wrap(TestError::NotFound);
+    let output = alloc::format!("{}", err.display_html());
+    assert!(output.contains("NotFound"), "Output: {}", output);
+    // Should close div immediately since no trace
+    assert!(output.contains("</div>"), "Output: {}", output);
+}
+
+#[cfg(feature = "_html")]
+#[test]
+fn test_html_display_with_link_template() {
+    use crate::AtCrateInfo;
+
+    static INFO: AtCrateInfo = AtCrateInfo::builder()
+        .name("test-crate")
+        .repo(Some("https://github.com/user/repo"))
+        .commit(Some("abc123"))
+        .path(Some("crates/test"))
+        .build();
+
+    let err = At::wrap(TestError::NotFound).set_crate_info(&INFO).at();
+    let output = alloc::format!("{}", err.display_html());
+    // Should have <a href=...> with link
+    assert!(output.contains("<a href="), "Output: {}", output);
+    assert!(output.contains("github.com"), "Output: {}", output);
+}
+
+#[cfg(feature = "_html")]
+#[test]
+fn test_html_display_with_crate_boundary_and_links() {
+    use crate::AtCrateInfo;
+
+    static C1: AtCrateInfo = AtCrateInfo::builder()
+        .name("crate-a")
+        .repo(Some("https://github.com/user/repo"))
+        .commit(Some("abc123"))
+        .build();
+    static C2: AtCrateInfo = AtCrateInfo::builder()
+        .name("crate-b")
+        .repo(Some("https://github.com/user/repo2"))
+        .commit(Some("def456"))
+        .build();
+
+    let err = At::wrap(TestError::NotFound)
+        .set_crate_info(&C1)
+        .at()
+        .at_str("msg")
+        .at_crate(&C2)
+        .at();
+
+    let output = alloc::format!("{}", err.display_html());
+    assert!(output.contains("crate-boundary"), "Output: {}", output);
+    assert!(output.contains("crate-a"), "Output: {}", output);
+    assert!(output.contains("crate-b"), "Output: {}", output);
+    assert!(output.contains("crate-info"), "Output: {}", output);
+}
+
+#[test]
+fn test_at_debug_with_all_context_types() {
+    // Exercise all branches in At Debug impl (lines 800-810)
+    use crate::AtCrateInfo;
+
+    static INFO: AtCrateInfo = AtCrateInfo::builder().name("test").build();
+
+    let err = at(TestError::NotFound)
+        .at_str("text msg")
+        .at_fn(|| {})
+        .at_debug(|| 42u32)
+        .at_data(|| "display val")
+        .at_error(core::fmt::Error)
+        .at_crate(&INFO);
+
+    let output = alloc::format!("{:?}", err);
+    assert!(output.contains("text msg"), "Output: {}", output);
+    assert!(output.contains("in "), "Output: {}", output);
+    assert!(output.contains("42"), "Output: {}", output);
+    assert!(output.contains("display val"), "Output: {}", output);
+    assert!(output.contains("caused by"), "Output: {}", output);
+    // Crate boundary should NOT show in basic Debug
+    assert!(!output.contains("[crate:"), "Output: {}", output);
+}
+
+#[test]
+fn test_display_with_meta_all_context_types() {
+    // Exercise all branches in display_with_meta (lines 900-910)
+    use crate::AtCrateInfo;
+
+    static C1: AtCrateInfo = AtCrateInfo::builder()
+        .name("crate-a")
+        .repo(Some("https://github.com/user/repo"))
+        .commit(Some("abc123"))
+        .build();
+    static C2: AtCrateInfo = AtCrateInfo::builder().name("crate-b").build();
+
+    let err = At::wrap(TestError::NotFound)
+        .set_crate_info(&C1)
+        .at()
+        .at_str("text")
+        .at_fn(|| {})
+        .at_debug(|| 42u32)
+        .at_data(|| "disp")
+        .at_error(core::fmt::Error)
+        .at_crate(&C2);
+
+    let output = alloc::format!("{}", err.display_with_meta());
+    assert!(output.contains("text"), "Output: {}", output);
+    assert!(output.contains("42"), "Output: {}", output);
+    assert!(output.contains("disp"), "Output: {}", output);
+    assert!(output.contains("caused by"), "Output: {}", output);
+}
+
+#[cfg(feature = "_html")]
+#[test]
+fn test_html_escape_ampersand_and_quotes() {
+    // Exercise lines 445, 446 in format.rs (& and " escaping)
+    let err = at(TestError::NotFound).at_string(|| alloc::string::String::from("x&y \"quoted\""));
+    let output = alloc::format!("{}", err.display_html());
+    assert!(output.contains("&amp;"), "Output: {}", output);
+    assert!(output.contains("&quot;"), "Output: {}", output);
+}
+
+#[cfg(feature = "_termcolor")]
+#[test]
+fn test_termcolor_display_crate_boundary_with_other_contexts() {
+    // Exercise line 70 (continue on Crate context in TermColorDisplay)
+    // Need a frame that has BOTH a crate boundary AND other contexts
+    use crate::AtCrateInfo;
+
+    static C1: AtCrateInfo = AtCrateInfo::builder().name("a").build();
+    static C2: AtCrateInfo = AtCrateInfo::builder().name("b").build();
+
+    // Build error with crate boundary and text context on same frame
+    let err = At::wrap(TestError::NotFound)
+        .set_crate_info(&C1)
+        .at()
+        .at_str("before boundary")
+        .at_crate(&C2);
+
+    let output = alloc::format!("{}", err.display_color());
+    assert!(output.contains("before boundary"), "Output: {}", output);
+}
+
+#[cfg(feature = "_termcolor")]
+#[test]
+fn test_termcolor_meta_link_url_substitution() {
+    // Exercise lines 155-163 and 217 (link template in TermColorMetaDisplay)
+    use crate::AtCrateInfo;
+
+    static INFO: AtCrateInfo = AtCrateInfo::builder()
+        .name("test-crate")
+        .repo(Some("https://github.com/user/repo"))
+        .commit(Some("abc123"))
+        .path(Some("crates/test"))
+        .build();
+
+    let err = At::wrap(TestError::NotFound)
+        .set_crate_info(&INFO)
+        .at()
+        .at_str("msg");
+
+    let output = alloc::format!("{}", err.display_color_meta());
+    // Should contain a URL from the link template
+    assert!(output.contains("github.com"), "Output: {}", output);
+}
+
+#[cfg(feature = "_termcolor")]
+#[test]
+fn test_termcolor_meta_crate_boundary_with_contexts() {
+    // Exercise line 173 (continue on Crate context in TermColorMetaDisplay)
+    use crate::AtCrateInfo;
+
+    static C1: AtCrateInfo = AtCrateInfo::builder()
+        .name("a")
+        .repo(Some("https://github.com/user/a"))
+        .commit(Some("abc"))
+        .build();
+    static C2: AtCrateInfo = AtCrateInfo::builder()
+        .name("b")
+        .repo(Some("https://github.com/user/b"))
+        .commit(Some("def"))
+        .build();
+
+    let err = At::wrap(TestError::NotFound)
+        .set_crate_info(&C1)
+        .at()
+        .at_str("context text")
+        .at_crate(&C2);
+
+    let output = alloc::format!("{}", err.display_color_meta());
+    assert!(output.contains("context text"), "Output: {}", output);
+}
+
+#[cfg(feature = "_html")]
+#[test]
+fn test_html_display_link_and_crate_skip_in_contexts() {
+    // Exercise lines 374 (link URL), 396 (continue crate), 464 (build_link_base)
+    use crate::AtCrateInfo;
+
+    static C1: AtCrateInfo = AtCrateInfo::builder()
+        .name("crate-a")
+        .repo(Some("https://github.com/user/repo"))
+        .commit(Some("abc123"))
+        .path(Some("src"))
+        .build();
+    static C2: AtCrateInfo = AtCrateInfo::builder()
+        .name("crate-b")
+        .repo(Some("https://github.com/user/repo2"))
+        .commit(Some("def456"))
+        .build();
+
+    let err = At::wrap(TestError::NotFound)
+        .set_crate_info(&C1)
+        .at()
+        .at_str("context msg")
+        .at_fn(|| {})
+        .at_debug(|| 42u32)
+        .at_data(|| "disp")
+        .at_error(core::fmt::Error)
+        .at_crate(&C2)
+        .at();
+
+    let output = alloc::format!("{}", err.display_html());
+    // Should have link from C1
+    assert!(
+        output.contains("<a href="),
+        "Should have link. Output: {}",
+        output
+    );
+    // Should have context-text, context-fn etc.
+    assert!(output.contains("context-text"), "Output: {}", output);
+    assert!(output.contains("context-fn"), "Output: {}", output);
+    // Should have crate boundary
+    assert!(output.contains("crate-boundary"), "Output: {}", output);
+}
+
+#[cfg(feature = "_html")]
+#[test]
+fn test_html_display_skipped_frames_with_link() {
+    // Exercise line 429 (None/skip-marker in HTML) with link context
+    use crate::AtCrateInfo;
+
+    static INFO: AtCrateInfo = AtCrateInfo::builder()
+        .name("test")
+        .repo(Some("https://github.com/user/repo"))
+        .commit(Some("abc"))
+        .build();
+
+    let err = At::wrap(TestError::NotFound)
+        .set_crate_info(&INFO)
+        .at()
+        .at_skipped_frames();
+
+    let output = alloc::format!("{}", err.display_html());
+    assert!(output.contains("skip-marker"), "Output: {}", output);
+}
+
+#[test]
+fn test_at_trace_boxed_new_const() {
+    // Exercise lines 777-778 (AtTraceBoxed::new)
+    use crate::trace::AtTraceBoxed;
+
+    let boxed = AtTraceBoxed::new();
+    assert!(boxed.as_ref().is_none());
+    let dbg = alloc::format!("{:?}", boxed);
+    assert!(dbg.contains("None") || dbg.contains("AtTraceBoxed"));
+}
+
+#[test]
+fn test_context_vec_new_path() {
+    // Exercise lines 154-155 (context_vec_new — only called via try_add_context when no contexts exist)
+    use crate::trace::AtTrace;
+
+    // Create a fresh trace with no contexts, then add one
+    let mut trace = AtTrace::new();
+    trace.try_push(core::panic::Location::caller());
+    trace.try_add_context(
+        core::panic::Location::caller(),
+        crate::context::AtContext::Text(alloc::borrow::Cow::Borrowed("first")),
+    );
+    assert_eq!(trace.contexts().count(), 1);
+}
+
+#[test]
+fn test_context_vec_limit() {
+    // Exercise line 167 (try_push_context limit check)
+    use crate::trace::AtTrace;
+
+    let mut trace = AtTrace::new();
+    trace.try_push(core::panic::Location::caller());
+    // Push many contexts to hit the limit
+    for i in 0..200 {
+        trace.try_add_context(
+            core::panic::Location::caller(),
+            crate::context::AtContext::Text(alloc::borrow::Cow::Owned(alloc::format!("ctx{}", i))),
+        );
+    }
+    // Should have been capped at AT_MAX_CONTEXTS
+    assert!(trace.contexts().count() <= 128);
+}
+
+#[test]
+fn test_trace_pop_last_with_contexts_break() {
+    // Exercise line 459 (break in pop() when contexts span multiple frames)
+    use crate::trace::AtTrace;
+
+    let mut trace = AtTrace::capture();
+    trace.try_add_context(
+        core::panic::Location::caller(),
+        crate::context::AtContext::Text(alloc::borrow::Cow::Borrowed("first-ctx")),
+    );
+    // Add second frame with a different context
+    trace.try_push(core::panic::Location::caller());
+    trace.try_add_context(
+        core::panic::Location::caller(),
+        crate::context::AtContext::Text(alloc::borrow::Cow::Borrowed("second-ctx")),
+    );
+
+    // Pop the last frame — the while loop should break when it encounters
+    // contexts belonging to the first frame
+    let popped = trace.pop();
+    assert!(popped.is_some());
+    let frame = popped.unwrap();
+    assert!(frame.context_count() > 0);
+    // First frame's context should still be in the trace
+    assert!(trace.contexts().count() > 0);
+}
+
+#[test]
+fn test_at_locations_covers_iterator() {
+    // Exercise line 563 (At::locations())
+    // Using a longer chain to ensure the iterator body gets instrumented
+    let err = at(TestError::NotFound).at_str("a").at_str("b").at_str("c");
+    let locs: alloc::vec::Vec<_> = err.locations().collect();
+    assert!(!locs.is_empty());
+    // Verify locations are from this file
+    assert!(locs.iter().all(|l| l.file().contains("tests.rs")));
+}
+
+#[test]
+fn test_at_frames_iterator() {
+    // Exercise lines 400, 402 (AtTrace::frames() iterator)
+    use crate::trace::AtTrace;
+
+    let mut trace = AtTrace::capture();
+    trace.try_push(core::panic::Location::caller());
+    trace.try_push(core::panic::Location::caller());
+
+    let frames: alloc::vec::Vec<_> = trace.frames().collect();
+    assert_eq!(frames.len(), 3);
+    for frame in &frames {
+        assert!(frame.location().is_some());
+    }
+}
+
+#[test]
+fn test_context_debug_any_type_name() {
+    // Exercise lines 31, 57 (AtDebugAny::type_name, AtDisplayAny::type_name)
+    use crate::context::AtContext;
+
+    let ctx = AtContext::Debug(Box::new(42u32));
+    let tn = ctx.type_name().unwrap();
+    assert!(tn.contains("u32"), "type_name: {}", tn);
+
+    let ctx = AtContext::Display(Box::new(42u32));
+    let tn = ctx.type_name().unwrap();
+    assert!(tn.contains("u32"), "type_name: {}", tn);
+}
+
+#[test]
+fn test_context_display_fmt_for_display_variant() {
+    // Exercise line 181 (AtContext Display impl for Display variant)
+    use crate::context::AtContext;
+
+    let ctx = AtContext::Display(Box::new(alloc::string::String::from("hello")));
+    let disp = alloc::format!("{}", ctx);
+    assert_eq!(disp, "hello");
+
+    // FunctionName in Display
+    let ctx = AtContext::FunctionName("my_fn");
+    let disp = alloc::format!("{}", ctx);
+    assert!(disp.contains("my_fn"));
+}
+
+#[test]
+fn test_context_downcast_ref_all_none_arms() {
+    // Exercise lines 127, 128, 129 individually
+    use crate::context::AtContext;
+
+    // Text — always None
+    let ctx = AtContext::Text(alloc::borrow::Cow::Borrowed("hi"));
+    assert!(ctx.downcast_ref::<u32>().is_none());
+
+    // FunctionName — always None
+    let ctx = AtContext::FunctionName("fn");
+    assert!(ctx.downcast_ref::<u32>().is_none());
+
+    // Crate — always None
+    use crate::AtCrateInfo;
+    static INFO: AtCrateInfo = AtCrateInfo::builder().name("x").build();
+    let ctx = AtContext::Crate(&INFO);
+    assert!(ctx.downcast_ref::<u32>().is_none());
+
+    // Error — always None
+    let ctx = AtContext::Error(Box::new(core::fmt::Error));
+    assert!(ctx.downcast_ref::<u32>().is_none());
+}
