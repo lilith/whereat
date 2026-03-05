@@ -12,7 +12,7 @@ description = "Know where the bug is at() — without panic!, debuginfo, or over
 badge = "Rust 1.85+ · no_std"
 gradient_opacity = 15
 cta_buttons = [
-    { text = "Get Started", url = "/whereat/getting-started/installation/", style = "primary" },
+    { text = "Get Started", url = "/whereat/", style = "primary" },
     { text = "View on GitHub", url = "https://github.com/lilith/whereat", style = "secondary" },
 ]
 
@@ -58,5 +58,5 @@ tabs = [
 [extra.final_cta_section]
 title = "Start Tracing Errors"
 description = "whereat is lightweight, production-ready, and works with any error type you already have."
-button = { text = "Read the Docs", url = "/whereat/" }
+button = { text = "Read the Docs", url = "/whereat/#installation" }
 +++
