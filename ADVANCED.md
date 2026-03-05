@@ -177,7 +177,7 @@ static INFO: AtCrateInfo = AtCrateInfo::builder()
 
 ### Default (Heap)
 
-By default, traces use `Vec` for location storage with capacity 12. Each `.at()` call may allocate if capacity is exceeded.
+By default, traces use 4 inline location slots plus heap overflow. Each `.at()` call may allocate if the inline capacity is exceeded.
 
 ### Inline Storage Features
 
@@ -259,13 +259,9 @@ Example styled HTML output:
 
 ```html
 <div class="whereat-error">
-  <div class="error-header">Error: <span class="error-type">MyError</span></div>
-  <div class="trace">
-    <div class="frame">
-      <span class="location">at src/main.rs:42</span>
-      <div class="context">loading config</div>
-    </div>
-  </div>
+<div class="error-header">Error: MyError</div>
+<div class="location"><span class="at-prefix">at </span><span class="file">src/main.rs</span><span class="at-prefix">:</span><span class="line">42</span></div>
+<div class="context">╰─ <span class="context-text">loading config</span></div>
 </div>
 ```
 
