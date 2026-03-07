@@ -95,7 +95,7 @@
 //! | [`.at_string(\|\| format!(...))`](ResultAtExt::at_string) | Dynamic string (lazy) |
 //! | [`.at_data(\|\| value)`](ResultAtExt::at_data) | Typed via Display (lazy) |
 //! | [`.at_debug(\|\| value)`](ResultAtExt::at_debug) | Typed via Debug (lazy) |
-//! | [`.at_error(source_err)`](ResultAtExt::at_error) | Attach a source error |
+//! | [`.at_error(source_err)`](ResultAtExt::at_error) | Attach a related error (diagnostic, not in `.source()` chain) |
 //!
 //! **Key distinction**: `.at()` creates a NEW frame. `.at_str()` and friends add to the LAST frame.
 //!

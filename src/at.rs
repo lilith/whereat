@@ -416,14 +416,25 @@ impl<E> At<E> {
         self
     }
 
-    /// Add an error as context to the last location frame.
+    /// Attach an error as diagnostic context to the last location frame.
     ///
     /// **Does not add a new location frame** - attaches context to the most recent
     /// frame in the trace. If the trace is empty, creates a frame at the caller's
     /// location first.
     ///
-    /// Use this to attach a source error that implements `core::error::Error`.
-    /// The error's `.source()` chain is preserved and can be traversed.
+    /// The attached error is **diagnostic context only** — it is visible via
+    /// [`contexts()`](Self::contexts) iteration and [`full_trace()`](Self::full_trace)
+    /// display, but is **not** part of the [`Error::source()`] chain.
+    /// `At<E>::source()` always delegates to `E::source()`.
+    ///
+    /// This is intentional: `.source()` models a linear causal chain ("A was caused
+    /// by B"), while `.at_error()` models an observation ("while handling A, we also
+    /// saw X"). These are different relationships, and forcing the latter into a
+    /// linear chain would be lossy — a trace can have multiple `.at_error()` calls
+    /// at different frames.
+    ///
+    /// If you need an error to appear in the `.source()` chain, store it inside
+    /// your error type `E` directly.
     ///
     /// ## Example
     ///
@@ -1168,6 +1179,13 @@ impl<E: fmt::Display> fmt::Display for At<E> {
 // Error impl for At<E>
 // ============================================================================
 
+/// `At<E>` delegates [`source()`](core::error::Error::source) to `E::source()`.
+///
+/// Errors attached via [`.at_error()`](At::at_error) are **not** part of this
+/// chain — they are diagnostic context stored in the trace, accessible via
+/// [`.contexts()`](At::contexts) and [`.full_trace()`](At::full_trace).
+///
+/// See [`.at_error()`](At::at_error) for the rationale.
 impl<E: core::error::Error> core::error::Error for At<E> {
     fn source(&self) -> Option<&(dyn core::error::Error + 'static)> {
         self.error.source()

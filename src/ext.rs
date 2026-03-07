@@ -121,7 +121,7 @@ pub trait ResultAtExt<T, E> {
         f: impl FnOnce() -> C,
     ) -> Result<T, At<E>>;
 
-    /// Add an error as context to the last location (or create one if empty).
+    /// Attach an error as diagnostic context (not wired into `.source()` chain).
     #[track_caller]
     fn at_error<Err: core::error::Error + Send + Sync + 'static>(
         self,
@@ -345,7 +345,7 @@ pub trait ResultAtTraceableExt<T, E: AtTraceable> {
     fn at_debug<C: fmt::Debug + Send + Sync + 'static>(self, f: impl FnOnce() -> C)
     -> Result<T, E>;
 
-    /// Add an error as context to the last location (or create one if empty).
+    /// Attach an error as diagnostic context (not wired into `.source()` chain).
     #[track_caller]
     fn at_error<Err: core::error::Error + Send + Sync + 'static>(self, err: Err) -> Result<T, E>;
 
