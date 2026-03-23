@@ -29,7 +29,7 @@ Compatible with plain enums, errors, structs, thiserror, anyhow, or any type wit
 // For workspace crates: whereat::define_at_crate_info!(path = "crates/mylib/");
 whereat::define_at_crate_info!();
 
-use whereat::prelude::*; // At, at, ResultAtExt, ErrorAtExt
+use whereat::prelude::*;
 
 #[derive(Debug)]
 enum DbError { NotFound, ConnectionFailed }
