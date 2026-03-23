@@ -13,7 +13,7 @@ jobs:
   test:
     strategy:
       matrix:
-        os: [ubuntu-latest, windows-latest, macos-latest, windows-11-arm, ubuntu-24.04-arm]
+        os: [ubuntu-latest, windows-latest, macos-latest, macos-26-intel, windows-11-arm, ubuntu-24.04-arm]
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v6
