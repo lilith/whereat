@@ -89,13 +89,15 @@ enum ApiError { Db(DbError), BadRequest(String) }
 
 type ApiResult<T> = Result<T, At<ApiError>>;  // Result alias — recommended for every crate
 
-fn handle_request(id: u64) -> ApiResult<()> {
+fn handle_request(id: u64) -> ApiResult<String> {
     let email = get_email(id)
-        .map_err_at(ApiError::Db)?;          // DbError → ApiError, trace preserved
-    send_welcome(&email)
-        .at()                                 // new frame at this call site
-        .at_str("sending welcome email")?;    // context on that frame
-    Ok(())
+        .at_str("looking up recipient")       // context on the current frame
+        .map_err_at(ApiError::Db)?;           // DbError → ApiError, trace preserved
+    Ok(email)
+}
+
+fn api_endpoint(id: u64) -> ApiResult<String> {
+    handle_request(id).at()?                  // propagate with location tracking
 }
 ```
 
@@ -107,8 +109,8 @@ fn handle_request(id: u64) -> ApiResult<()> {
 
 | Function | Works on | Crate info | Use when |
 |----------|----------|------------|----------|
-| `at(err)` | Any type | ❌ None | General use, no setup |
-| `at!(err)` | Any type | ✅ GitHub links | Production — requires `define_at_crate_info!()` |
+| `at!(err)` | Any type | ✅ GitHub links | Default — requires `define_at_crate_info!()` |
+| `at(err)` | Any type | ❌ None | Quick prototyping, no setup |
 | `err.start_at()` | `Error` types | ❌ None | Chaining on error values |
 
 **Extending a trace** (on `Result<T, At<E>>`):
