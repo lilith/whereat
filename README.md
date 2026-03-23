@@ -196,9 +196,20 @@ Formatting the error into a string and wrapping it in a new `At<>` destroys the 
 .map_err_at(|e| Error::Other(e.to_string()))?;
 ```
 
-### Avoid thiserror `#[from]` on variants that receive traced errors
+### `#[from]` doesn't work with `At<>` — don't reach for `.into_inner()`
 
-thiserror's `#[from]` generates `From<X> for MyError`, but when the caller has `At<X>`, the `?` operator strips the `At<>` wrapper before the `From` conversion runs. Use explicit `map_err_at` instead.
+thiserror's `#[from]` generates `From<SubError> for MyError`, but `?` on `Result<T, At<SubError>>` needs `From<At<SubError>> for At<MyError>`, which doesn't exist. The compiler will reject it. The temptation is to "fix" this with `.into_inner()` — **don't**. Use `map_err_at` instead:
+
+```rust
+// WON'T COMPILE — no From<At<SubError>> for At<MyError>
+sub_call()?;
+
+// WRONG — compiles but trace dies
+sub_call().map_err(|e| MyError::Sub(e.into_inner()))?;
+
+// RIGHT — trace preserved
+sub_call().map_err_at(|e| MyError::Sub(e))?;
+```
 
 ### Always trace at error origination
 
@@ -206,17 +217,12 @@ Every `Err(MyError::Variant)` should be `Err(at(MyError::Variant))` or `Err(at!(
 
 ## `no_std` Support
 
-whereat works with `core` + `alloc` (no `std`). Many crates use it this way:
+whereat is `#![no_std]` with `alloc`. All functionality works without `std` — `core::error::Error` is stable since Rust 1.81 and whereat requires 1.85+. The `std` feature exists for compatibility but is currently a no-op.
 
 ```toml
 [dependencies]
 whereat = { version = "0.1", default-features = false }
-
-[features]
-std = ["whereat/std"]
 ```
-
-The `std` feature currently only affects `Error` trait impls. All core functionality works without it.
 
 ## Best Practices
 
