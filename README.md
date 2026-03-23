@@ -47,13 +47,11 @@ fn get_email(id: u64) -> Result<String, At<DbError>> {
 }
 ```
 
-That's it. If `get_user` fails, the trace shows every `.at()` call site it passed through — with clickable GitHub links.
+That's it. If `get_user` fails, the trace shows every `.at()` call site it passed through — with clickable GitHub links. (Workspace crates: `whereat::define_at_crate_info!(path = "crates/mylib/");`)
 
-For workspace crates, specify the path from the repo root: `whereat::define_at_crate_info!(path = "crates/mylib/");`
+### Multiple error types
 
-### Context and error type conversion
-
-Real code has multiple error types. Use `.at_str()` to add context and `.map_err_at()` to convert between error types without losing the trace:
+When crate B wraps crate A's error, use `.map_err_at()` to convert the type without losing the trace:
 
 ```rust
 #[derive(Debug)]
