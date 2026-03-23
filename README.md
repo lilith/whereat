@@ -51,9 +51,7 @@ fn get_email(id: u64) -> Result<String, At<DbError>> {
 #[derive(Debug)]
 enum ApiError { Db(DbError), BadRequest(String) }
 
-type ApiResult<T> = Result<T, At<ApiError>>; // Result alias — one per crate
-
-fn handle_request(id: u64) -> ApiResult<String> {
+fn handle_request(id: u64) -> Result<String, At<ApiError>> {
     let email = get_email(id)
         .at()                           // new frame at this call site
         .at_str("looking up recipient") // context on that frame
@@ -61,7 +59,7 @@ fn handle_request(id: u64) -> ApiResult<String> {
     Ok(email)
 }
 
-fn api_endpoint(id: u64) -> ApiResult<String> {
+fn api_endpoint(id: u64) -> Result<String, At<ApiError>> {
     let result = handle_request(id).at()?; // propagate with location tracking
     Ok(result)
 }
