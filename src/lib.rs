@@ -1,170 +1,115 @@
-//! # whereat - Lightweight error location tracking
+//! # whereat — error location tracking
 //!
-//! **150x faster than `backtrace`** — production error tracing without debuginfo, panic, or overhead.
-//!
-//! ```text
-//! Error: UserNotFound
-//!    at src/db.rs:142:9
-//!       ╰─ user_id = 42
-//!    at src/api.rs:89:5
-//!       ╰─ in handle_request
-//!    at myapp @ https://github.com/you/myapp/blob/a1b2c3d/src/main.rs#L23
-//! ```
-//!
-//! ## Try It Now
-//!
-//! No setup required — just wrap errors with [`at()`] and propagate with [`.at()`](ResultAtExt::at):
+//! [`at!()`](at!) creates a traced error. [`.at()?`](ResultAtExt::at) propagates it.
+//! [`map_err_at`](ResultAtExt::map_err_at) converts between error types without losing the trace.
 //!
 //! ```rust
 //! use whereat::{at, At, ResultAtExt};
 //!
 //! #[derive(Debug)]
-//! enum MyError { NotFound }
+//! enum AppError { NotFound, Db(DbError) }
+//! #[derive(Debug)]
+//! struct DbError;
 //!
-//! fn inner() -> Result<(), At<MyError>> {
-//!     Err(at(MyError::NotFound))  // Wrap error, capture location
+//! fn db_query(id: u64) -> Result<String, At<DbError>> {
+//!     if id == 0 { return Err(at(DbError)); }
+//!     Ok("alice".into())
 //! }
 //!
-//! fn outer() -> Result<(), At<MyError>> {
-//!     inner().at_str("looking up user")?;  // Add context
-//!     Ok(())
+//! fn handler(id: u64) -> Result<String, At<AppError>> {
+//!     let user = db_query(id)
+//!         .at()                           // new frame at this call site
+//!         .at_str("looking up user")      // context on that frame
+//!         .map_err_at(AppError::Db)?;     // DbError → AppError, trace preserved
+//!     Ok(user)
 //! }
 //!
-//! let err = outer().unwrap_err();
-//! println!("{:?}", err);  // Shows locations + context
+//! let err = handler(0).unwrap_err();
+//! assert_eq!(err.frame_count(), 2); // at() in db_query + .at() in handler
 //! ```
 //!
-//! ## Production Setup
+//! ## Quick reference
 //!
-//! For **clickable GitHub links** in traces, add one line to your crate root and use [`at!()`](at!):
+//! **Create a trace:**
 //!
-//! ```rust,ignore
-//! // In lib.rs or main.rs
-//! whereat::define_at_crate_info!();
+//! | Function | Use when |
+//! |----------|----------|
+//! | [`at!(err)`](at!) | Default — includes repo links (needs [`define_at_crate_info!`]) |
+//! | [`at(err)`](at()) | No setup needed, no links |
+//! | [`err.start_at()`](ErrorAtExt::start_at) | Chaining on [`Error`](core::error::Error) types |
 //!
-//! fn find_user(id: u64) -> Result<String, At<MyError>> {
-//!     Err(at!(MyError::NotFound))  // Now includes repo links in traces
-//! }
-//! ```
-//!
-//! The `at!()` macro desugars to:
-//! ```rust,ignore
-//! At::wrap(err)
-//!     .set_crate_info(crate::at_crate_info())  // Enables GitHub/GitLab links
-//!     .at()                                     // Captures file:line:col
-//! ```
-//!
-//! ## Which Approach?
-//!
-//! | Situation | Use |
-//! |-----------|-----|
-//! | Existing struct/enum you don't want to modify | Wrap with [`At<YourError>`](At) |
-//! | Want traces embedded inside your error type | Implement [`AtTraceable`] trait |
-//!
-//! **Wrapper approach** (most common): Return `Result<T, At<YourError>>` from functions.
-//!
-//! **Embedded approach**: Implement [`AtTraceable`] and store an [`AtTrace`] (or `Box<AtTrace>`)
-//! field inside your error type. Return `Result<T, YourError>` directly.
-//!
-//! ## Starting a Trace
-//!
-//! | Function | Crate info | Use when |
-//! |----------|------------|----------|
-//! | [`at(err)`](at()) | ❌ None | Prototyping — no setup needed |
-//! | [`at!(err)`](at!) | ✅ GitHub links | **Production** — requires [`define_at_crate_info!()`](define_at_crate_info) |
-//! | [`err.start_at()`](ErrorAtExt::start_at) | ❌ None | Chaining on `Error` trait types |
-//!
-//! Start with `at()` to try things out. Upgrade to `at!()` before shipping — you'll want
-//! those clickable links when debugging production issues.
-//!
-//! ## Extending a Trace
-//!
-//! **Create a new location frame** (call site is recorded):
+//! **Extend a trace** (on `Result<T, At<E>>` via [`ResultAtExt`]):
 //!
 //! | Method | Effect |
 //! |--------|--------|
-//! | [`.at()`](ResultAtExt::at) | New frame with just file:line:col |
-//! | [`.at_fn(\|\| {})`](ResultAtExt::at_fn) | New frame + captures function name |
-//! | [`.at_named("step")`](ResultAtExt::at_named) | New frame + custom label |
+//! | [`.at()`](ResultAtExt::at) | **New frame** at caller's location |
+//! | [`.at_str("msg")`](ResultAtExt::at_str) | Context on **last frame** (zero-cost) |
+//! | [`.at_string(\|\| format!(...))`](ResultAtExt::at_string) | Dynamic context (lazy) |
+//! | [`.at_fn(\|\| {})`](ResultAtExt::at_fn) | New frame + function name |
+//! | [`.at_named("label")`](ResultAtExt::at_named) | New frame + custom label |
+//! | [`.at_data(\|\| val)`](ResultAtExt::at_data) | Typed context via Display (lazy) |
+//! | [`.at_debug(\|\| val)`](ResultAtExt::at_debug) | Typed context via Debug (lazy) |
+//! | [`.at_aside_error(err)`](ResultAtExt::at_aside_error) | Related error (diagnostic, **not** in [`.source()`](core::error::Error::source) chain) |
+//! | [`.map_err_at(\|e\| ...)`](ResultAtExt::map_err_at) | Convert error type, **preserve trace** |
 //!
-//! **Add context to the last frame** (no new location):
+//! **Inspect:**
 //!
-//! | Method | Effect |
-//! |--------|--------|
-//! | [`.at_str("msg")`](ResultAtExt::at_str) | Static string (zero-cost) |
-//! | [`.at_string(\|\| format!(...))`](ResultAtExt::at_string) | Dynamic string (lazy) |
-//! | [`.at_data(\|\| value)`](ResultAtExt::at_data) | Typed via Display (lazy) |
-//! | [`.at_debug(\|\| value)`](ResultAtExt::at_debug) | Typed via Debug (lazy) |
-//! | [`.at_aside_error(err)`](ResultAtExt::at_aside_error) | Attach a related error (diagnostic only, **not** in `.source()` chain) |
+//! | Method | Returns |
+//! |--------|---------|
+//! | [`.error()`](At::error) | `&E` |
+//! | [`.decompose()`](At::decompose) | `(E, Option<AtTrace>)` — both pieces |
+//! | [`.map_error(\|e\| ...)`](At::map_error) | `At<E2>` — convert type, keep trace |
+//! | [`.frame_count()`](At::frame_count) | `usize` |
+//! | [`.full_trace()`](At::full_trace) | Display formatter with all frames + contexts |
 //!
-//! **Key distinction**: `.at()` creates a NEW frame. `.at_str()` and friends add to the LAST frame.
+//! ## Converting between error types
+//!
+//! Use [`map_err_at`](ResultAtExt::map_err_at) — **not** `map_err` — to convert error types
+//! across crate boundaries. `map_err` on `Result<T, At<E>>` discards the `At<>` wrapper.
 //!
 //! ```rust
 //! use whereat::{at, At, ResultAtExt};
 //!
 //! #[derive(Debug)]
-//! struct MyError;
+//! struct Inner;
+//! #[derive(Debug)]
+//! enum Outer { Wrapped(Inner) }
 //!
-//! fn example() -> Result<(), At<MyError>> {
-//!     // One frame with two contexts attached
-//!     let e = at(MyError).at_str("a").at_str("b");
-//!     assert_eq!(e.frame_count(), 1);
+//! fn inner() -> Result<(), At<Inner>> { Err(at(Inner)) }
 //!
-//!     // Two frames: at() creates first, .at() creates second
-//!     let e = at(MyError).at().at_str("on second frame");
-//!     assert_eq!(e.frame_count(), 2);
+//! fn outer() -> Result<(), At<Outer>> {
+//!     inner().map_err_at(Outer::Wrapped)?;  // trace preserved
 //!     Ok(())
 //! }
-//! # example().ok();
+//! # outer().unwrap_err();
 //! ```
 //!
-//! ## Foreign Crates and Errors
+//! ## Wrapping external errors
 //!
-//! When consuming errors from other crates, use [`at_crate!()`](at_crate) to mark the boundary.
-//! This ensures traces show your crate's GitHub links, not confusing paths from dependencies.
-//!
-//! ```rust,ignore
-//! whereat::define_at_crate_info!();  // Once in lib.rs
-//!
-//! use whereat::{at_crate, At, ResultAtExt};
-//!
-//! fn call_dependency() -> Result<(), At<DependencyError>> {
-//!     at_crate!(dependency::do_thing())?;  // Marks crate boundary
-//!     Ok(())
-//! }
-//! ```
-//!
-//! The `at_crate!()` macro desugars to:
-//! ```rust,ignore
-//! result.at_crate(crate::at_crate_info())  // Adds boundary marker with your crate's info
-//! ```
-//!
-//! For plain errors without traces (e.g., `std::io::Error`), use `map_err(at)` to start tracing:
+//! For errors from crates that don't use whereat, use [`map_err(at)`](at()) to start tracing:
 //!
 //! ```rust
 //! use whereat::{At, at, ResultAtExt};
 //!
-//! fn external_api() -> Result<(), &'static str> {
-//!     Err("external error")
-//! }
+//! fn external_api() -> Result<(), &'static str> { Err("oops") }
 //!
 //! fn wrapper() -> Result<(), At<&'static str>> {
 //!     external_api().map_err(at).at_str("calling external API")?;
 //!     Ok(())
 //! }
+//! # wrapper().unwrap_err();
 //! ```
 //!
-//! ## Design Goals
+//! ## Key rules
 //!
-//! - **Tiny overhead**: `At<E>` is `sizeof(E) + 8` bytes; zero heap allocation on the Ok path
-//! - **Zero-cost context**: `.at_str("literal")` stores a pointer, no copy or allocation
-//! - **Lazy evaluation**: `.at_string(|| ...)` closures only run on error
-//! - **no_std compatible**: Works with just `core` + `alloc`
+//! - [`.at()`](ResultAtExt::at) creates a **new frame**. [`.at_str()`](ResultAtExt::at_str) adds **context** to the last frame.
+//! - [`into_inner()`](At::into_inner) is **deprecated** — use [`decompose()`](At::decompose) or [`map_error()`](At::map_error).
+//! - [`at_error()`](At::at_error) is **deprecated** — use [`at_aside_error()`](At::at_aside_error).
+//! - [`At::source()`](core::error::Error::source) delegates to `E::source()`. Errors from [`at_aside_error()`](At::at_aside_error) are **not** in the source chain.
 //!
-//! ## OOM Behavior
-//!
-//! Trace allocations are fallible where possible — on OOM, trace entries are silently skipped
-//! but your error `E` always propagates (it's stored inline). See the README for details.
+//! See the [README](https://github.com/lilith/whereat#avoiding-trace-loss) for detailed
+//! anti-patterns, and [ADVANCED.md](https://github.com/lilith/whereat/blob/main/ADVANCED.md)
+//! for embedded traces, storage options, and output formatters.
 
 #![no_std]
 #![deny(unsafe_code)]
