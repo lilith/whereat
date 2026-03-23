@@ -53,13 +53,13 @@ Initial release.
 - `PartialEq`, `Eq`, `Hash` for `At<E>` (compares only inner error, not trace)
 - `AsRef<E>` for `At<E>`
 - Tinyvec feature flags for inline trace storage:
-  - `tinyvec-64-bytes` (4 inline slots)
-  - `tinyvec-128-bytes` (12 inline slots)
-  - `tinyvec-256-bytes` (28 inline slots)
-  - `tinyvec-512-bytes` (60 inline slots)
+  - `_tinyvec-64-bytes` (4 inline slots)
+  - `_tinyvec-128-bytes` (12 inline slots)
+  - `_tinyvec-256-bytes` (28 inline slots)
+  - `_tinyvec-512-bytes` (60 inline slots)
 - Smallvec feature flags for comparison:
-  - `smallvec-128-bytes`
-  - `smallvec-256-bytes`
+  - `_smallvec-128-bytes`
+  - `_smallvec-256-bytes`
 - `no_std` + `alloc` support
 - Fallible allocations where stable APIs allow
 
