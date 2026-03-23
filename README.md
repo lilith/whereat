@@ -215,14 +215,9 @@ sub_call().map_err_at(|e| MyError::Sub(e))?;
 
 Every `Err(MyError::Variant)` should be `Err(at(MyError::Variant))` or `Err(at!(MyError::Variant))`. If you skip this, there's no trace to propagate.
 
-## `no_std` Support
+## `no_std` by Default
 
-whereat is `#![no_std]` with `alloc`. All functionality works without `std` — `core::error::Error` is stable since Rust 1.81 and whereat requires 1.85+. The `std` feature exists for compatibility but is currently a no-op.
-
-```toml
-[dependencies]
-whereat = { version = "0.1", default-features = false }
-```
+whereat is `#![no_std]` with `alloc` — no feature flags needed. `core::error::Error` is stable since Rust 1.81 and whereat requires 1.85+. A `std` feature exists for historical compatibility but is a no-op.
 
 ## Best Practices
 
