@@ -26,53 +26,52 @@ Compatible with plain enums, errors, structs, thiserror, anyhow, or any type wit
 
 ## Quick Start
 
-Two things to remember: `at!()` creates a traced error, `.at()?` propagates it.
+`at!()` creates a traced error. `.at()?` propagates it. That's it.
 
 ```rust
-whereat::define_at_crate_info!();  // once in lib.rs — enables GitHub links in traces
+// once in lib.rs — enables clickable GitHub links in traces
+// For workspace crates: whereat::define_at_crate_info!(path = "crates/mylib/");
+whereat::define_at_crate_info!();
 
-use whereat::prelude::*;  // At, at, ResultAtExt, ErrorAtExt
+use whereat::prelude::*; // At, at, ResultAtExt, ErrorAtExt
 
 #[derive(Debug)]
 enum DbError { NotFound, ConnectionFailed }
 
 fn get_user(id: u64) -> Result<String, At<DbError>> {
-    if id == 0 { return Err(at!(DbError::NotFound)); }  // at!() starts the trace
+    if id == 0 { return Err(at!(DbError::NotFound)); } // at!() starts the trace
     Ok("alice".into())
 }
 
 fn get_email(id: u64) -> Result<String, At<DbError>> {
-    let name = get_user(id).at()?;  // .at()? adds this call site to the trace
+    let name = get_user(id).at()?; // .at()? adds this call site to the trace
     Ok(format!("{}@example.com", name))
 }
 ```
 
-That's it. If `get_user` fails, the trace shows every `.at()` call site it passed through — with clickable GitHub links. (Workspace crates: `whereat::define_at_crate_info!(path = "crates/mylib/");`)
-
 ### Multiple error types
-
-When crate B wraps crate A's error, use `.map_err_at()` to convert the type without losing the trace:
 
 ```rust
 #[derive(Debug)]
 enum ApiError { Db(DbError), BadRequest(String) }
 
-type ApiResult<T> = Result<T, At<ApiError>>;  // Result alias — recommended for every crate
+type ApiResult<T> = Result<T, At<ApiError>>; // Result alias — one per crate
 
 fn handle_request(id: u64) -> ApiResult<String> {
     let email = get_email(id)
-        .at()                                 // new frame at this call site
-        .at_str("looking up recipient")       // context on that frame
-        .map_err_at(ApiError::Db)?;           // DbError → ApiError, trace preserved
+        .at()                           // new frame at this call site
+        .at_str("looking up recipient") // context on that frame
+        .map_err_at(ApiError::Db)?;     // DbError → ApiError, trace preserved
     Ok(email)
 }
 
 fn api_endpoint(id: u64) -> ApiResult<String> {
-    handle_request(id).at()?                  // propagate with location tracking
+    let result = handle_request(id).at()?; // propagate with location tracking
+    Ok(result)
 }
 ```
 
-`map_err_at` transforms the inner error while keeping the trace. This is the #1 pattern to get right — see [Avoiding Trace Loss](#avoiding-trace-loss).
+See [Avoiding Trace Loss](#avoiding-trace-loss) for patterns that silently destroy traces. Full runnable version: [`examples/readme.rs`](examples/readme.rs).
 
 ## How it works
 
