@@ -57,7 +57,7 @@ backtrace crate         ██████████████████�
 No setup required — just wrap errors with `at()` and propagate with `.at()`:
 
 ```rust
-use whereat::{at, At, ResultAtExt};
+use whereat::prelude::*;  // At, at, ResultAtExt, ErrorAtExt
 
 // Define a Result alias — every crate using whereat should have one
 type Result<T> = core::result::Result<T, At<MyError>>;
@@ -80,8 +80,6 @@ fn process(id: u64) -> Result<String> {
     Ok("done".into())
 }
 ```
-
-Or use the prelude: `use whereat::prelude::*;` (exports `At`, `at`, `ResultAtExt`, `ErrorAtExt`).
 
 ### Upgrade to GitHub links
 
