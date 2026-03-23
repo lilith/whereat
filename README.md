@@ -72,16 +72,18 @@ See [Avoiding Trace Loss](#avoiding-trace-loss) for patterns that silently destr
 `At<E>` stores your error inline + an 8-byte pointer to a boxed trace. On the happy path, nothing is heap-allocated.
 
 ```mermaid
-graph TB
-    subgraph "At&lt;E&gt; — sizeof(E) + 8 bytes"
-        E["error: E (inline)"]
-        T["trace: Option&lt;Box&lt;AtTrace&gt;&gt;"]
+graph LR
+    subgraph "At&lt;E&gt;"
+        direction TB
+        E["error: E"]
+        T["trace: 8 bytes"]
     end
-    T -->|"null when empty"| Trace["AtTrace (heap, on error only)"]
-    subgraph "AtTrace"
+    T -->|"null until error"| Trace
+    subgraph Trace["AtTrace (heap)"]
+        direction TB
         L["locations: InlineVec&lt;4&gt;"]
-        C["contexts: Option&lt;Box&lt;Vec&lt;…&gt;&gt;&gt;"]
-        CI["crate_info: Option&lt;&'static AtCrateInfo&gt;"]
+        C["contexts"]
+        CI["crate_info"]
     end
 ```
 
