@@ -54,34 +54,54 @@ backtrace crate         ██████████████████�
 
 ## Quick Start
 
-No setup required — just wrap errors with `at()` and propagate with `.at()`:
+Two things to remember: `at()` creates a traced error, `.at()?` propagates it.
 
 ```rust
 use whereat::prelude::*;  // At, at, ResultAtExt, ErrorAtExt
 
-// Define a Result alias — every crate using whereat should have one
-type Result<T> = core::result::Result<T, At<MyError>>;
-
 #[derive(Debug)]
-enum MyError {
-    NotFound,
-    InvalidInput(String),
+enum DbError { NotFound, ConnectionFailed }
+
+fn get_user(id: u64) -> Result<String, At<DbError>> {
+    if id == 0 { return Err(at(DbError::NotFound)); }  // at() starts the trace
+    Ok("alice".into())
 }
 
-fn find_user(id: u64) -> Result<String> {
-    if id == 0 {
-        return Err(at(MyError::InvalidInput("id cannot be zero".into())));
-    }
-    Err(at(MyError::NotFound))
+fn get_email(id: u64) -> Result<String, At<DbError>> {
+    let name = get_user(id).at()?;   // .at()? adds this call site to the trace
+    Ok(format!("{}@example.com", name))
 }
 
-fn process(id: u64) -> Result<String> {
-    find_user(id)
-        .at()                           // New frame — records this call site
-        .at_str("looking up user")?;    // Context on that frame
-    Ok("done".into())
+fn send_welcome(id: u64) -> Result<(), At<DbError>> {
+    let email = get_email(id).at()?;  // each .at() records where the error passed through
+    println!("Welcome, {email}!");
+    Ok(())
 }
 ```
+
+That's it. If `get_user` fails, the trace shows every `.at()` call site it passed through.
+
+### Context and error type conversion
+
+Real code has multiple error types. Use `.at_str()` to add context and `.map_err_at()` to convert between error types without losing the trace:
+
+```rust
+#[derive(Debug)]
+enum ApiError { Db(DbError), BadRequest(String) }
+
+type ApiResult<T> = Result<T, At<ApiError>>;  // Result alias — recommended for every crate
+
+fn handle_request(id: u64) -> ApiResult<()> {
+    let email = get_email(id)
+        .map_err_at(ApiError::Db)?;          // DbError → ApiError, trace preserved
+    send_email(&email)
+        .at()                                 // new frame at this call site
+        .at_str("sending welcome email")?;    // context on that frame
+    Ok(())
+}
+```
+
+`map_err_at` transforms the inner error while keeping the trace. This is the #1 pattern to get right — see [Avoiding Trace Loss](#avoiding-trace-loss).
 
 ### Upgrade to GitHub links
 
@@ -91,8 +111,8 @@ For **clickable source links** in production traces, add one line to your crate 
 // In lib.rs or main.rs
 whereat::define_at_crate_info!();
 
-fn find_user(id: u64) -> Result<String, At<MyError>> {
-    Err(at!(MyError::NotFound))  // Now includes repo links in traces
+fn get_user(id: u64) -> Result<String, At<DbError>> {
+    Err(at!(DbError::NotFound))  // Now includes repo links in traces
 }
 ```
 
@@ -125,35 +145,6 @@ For workspace crates: `whereat::define_at_crate_info!(path = "crates/mylib/");`
 | `.map_error(\|e\| ...)` | Convert error type inside `At<E>`, preserving trace |
 
 **Key**: `.at()` creates a NEW frame. `.at_str()` adds to the LAST frame. See [Adding Context](#adding-context) for full list.
-
-## Converting Between Error Types
-
-**This is the most common source of bugs.** When crate B calls crate A and needs to convert `At<A::Error>` into `At<B::Error>`, use `map_err_at` — it transforms the inner error while preserving the trace:
-
-```rust
-use whereat::{at, At, ResultAtExt};
-
-#[derive(Debug)]
-struct DbError;
-#[derive(Debug)]
-enum AppError { Database(DbError) }
-
-fn db_query() -> Result<String, At<DbError>> {
-    Err(at(DbError))
-}
-
-fn app_handler() -> Result<String, At<AppError>> {
-    // map_err_at: converts DbError → AppError, trace survives
-    db_query().map_err_at(|e| AppError::Database(e))?;
-    Ok("ok".into())
-}
-```
-
-Implement `From<InnerError> for OuterError` on the **bare error types**, then convert with:
-
-```rust
-inner_call().map_err_at(OuterError::from)?;
-```
 
 ## Avoiding Trace Loss
 
