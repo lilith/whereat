@@ -56,7 +56,18 @@ This design keeps the common case (locations only, no context) allocation-free b
 
 ## Embedded Traces (AtTraceable)
 
-For full control over error layout, embed `AtTrace` directly in your error type instead of using `At<E>`.
+```mermaid
+graph TD
+    Q["Do you control the error type?"]
+    Q -->|No| W["Use At&lt;E&gt; wrapper"]
+    Q -->|Yes| Q2["Want callers to see your type directly?"]
+    Q2 -->|"Yes — Result&lt;T, MyError&gt;"| T["Implement AtTraceable"]
+    Q2 -->|"No — At&lt;E&gt; is fine"| W
+```
+
+Most crates should use `At<E>`. Implement `AtTraceable` only when you need callers to see `Result<T, MyError>` directly — e.g., a public library API where `At<>` would be a leaky abstraction.
+
+To embed the trace, store an `AtTrace` field in your error type:
 
 ```rust
 use whereat::{AtTrace, AtTraceable, ResultAtTraceableExt};
@@ -255,7 +266,19 @@ whereat = { version = "0.1", features = ["_tinyvec-128-bytes"] }
 
 ## Pretty Output Formatters
 
-whereat includes optional formatters for terminal colors and HTML output.
+| Formatter | Shows | Requires |
+|-----------|-------|----------|
+| `format!("{:?}", err)` | Debug — full trace with all contexts | — |
+| `format!("{}", err)` | Display — just the error message | — |
+| `err.full_trace()` | Message + locations + all contexts | — |
+| `err.last_error_trace()` | Message + locations (no contexts) | — |
+| `err.display_with_meta()` | Full trace with repository links | — |
+| `err.display_color()` | Colored terminal output | `_termcolor` feature |
+| `err.display_color_meta()` | Colored output with repo links | `_termcolor` feature |
+| `err.display_html()` | HTML (no styles) | `_html` feature |
+| `err.display_html_styled()` | HTML with embedded CSS | `_html` feature |
+
+The built-in formatters (no feature required) work everywhere. The optional formatters need feature flags:
 
 ### Terminal Colors (`_termcolor` feature)
 
