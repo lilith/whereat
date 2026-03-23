@@ -5,6 +5,23 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.1.4] - 2026-03-23
+
+### Added
+
+- `decompose()` method on `At<E>` — returns `(E, Option<AtTrace>)` so you can take apart an `At<E>` without silently losing the trace
+- `at_aside_error()` method on `At<E>`, `ResultAtExt`, `ResultAtTraceableExt`, and `AtTraceable` — replacement for `at_error()` with a name that clarifies the attached error is diagnostic context, not part of the `.source()` chain
+- `ErrorAtExt` added to `prelude` module
+
+### Deprecated
+
+- `into_inner()` on `At<E>` — use `decompose()` to preserve the trace, or `map_error()` / `map_err_at()` to convert error types while keeping the trace
+- `at_error()` on `At<E>`, `ResultAtExt`, `ResultAtTraceableExt`, and `AtTraceable` — renamed to `at_aside_error()` to clarify that the attached error is NOT wired into `.source()` chain traversal
+
+### Changed
+
+- README rewritten with "Avoiding Trace Loss" section documenting anti-patterns that silently destroy traces, `no_std` guidance, `map_err_at` as a core pattern, and Result type alias convention
+
 ## [0.1.0] - 2026-01-16
 
 Initial release.

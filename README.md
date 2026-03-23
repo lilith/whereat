@@ -54,11 +54,13 @@ backtrace crate         ██████████████████�
 
 ## Quick Start
 
-```rust
-// In lib.rs or main.rs - required for at!() and at_crate!() macros
-whereat::define_at_crate_info!();
+No setup required — just wrap errors with `at()` and propagate with `.at()`:
 
-use whereat::{At, ResultAtExt, at};
+```rust
+use whereat::{at, At, ResultAtExt};
+
+// Define a Result alias — every crate using whereat should have one
+type Result<T> = core::result::Result<T, At<MyError>>;
 
 #[derive(Debug)]
 enum MyError {
@@ -66,16 +68,31 @@ enum MyError {
     InvalidInput(String),
 }
 
-fn find_user(id: u64) -> Result<String, At<MyError>> {
+fn find_user(id: u64) -> Result<String> {
     if id == 0 {
-        return Err(at!(MyError::InvalidInput("id cannot be zero".into())));
+        return Err(at(MyError::InvalidInput("id cannot be zero".into())));
     }
-    Err(at!(MyError::NotFound))
+    Err(at(MyError::NotFound))
 }
 
-fn process(id: u64) -> Result<String, At<MyError>> {
-    find_user(id).at_str("looking up user")?;  // Adds context
+fn process(id: u64) -> Result<String> {
+    find_user(id).at_str("looking up user")?;  // Adds context to the trace
     Ok("done".into())
+}
+```
+
+Or use the prelude: `use whereat::prelude::*;` (exports `At`, `at`, `ResultAtExt`, `ErrorAtExt`).
+
+### Upgrade to GitHub links
+
+For **clickable source links** in production traces, add one line to your crate root and switch from `at()` to `at!()`:
+
+```rust
+// In lib.rs or main.rs
+whereat::define_at_crate_info!();
+
+fn find_user(id: u64) -> Result<String, At<MyError>> {
+    Err(at!(MyError::NotFound))  // Now includes repo links in traces
 }
 ```
 
@@ -87,8 +104,8 @@ For workspace crates: `whereat::define_at_crate_info!(path = "crates/mylib/");`
 
 | Function | Works on | Crate info | Use when |
 |----------|----------|------------|----------|
-| `at!(err)` | Any type | ✅ GitHub links | Default choice with `define_at_crate_info!()` |
-| `at(err)` | Any type | ❌ None | Simple usage, no links needed |
+| `at(err)` | Any type | ❌ None | General use, no setup |
+| `at!(err)` | Any type | ✅ GitHub links | Production — requires `define_at_crate_info!()` |
 | `err.start_at()` | `Error` types | ❌ None | Chaining on error values |
 
 **Extending a trace** (on `Result<T, At<E>>`):
@@ -97,21 +114,135 @@ For workspace crates: `whereat::define_at_crate_info!(path = "crates/mylib/");`
 |--------|--------|
 | `.at()` | **New frame** at caller's location |
 | `.at_str("msg")` | Add context to **last frame** (no new location) |
-| `.map_err_at(\|e\| ...)` | Convert error type, preserve trace |
+| `.map_err_at(\|e\| ...)` | Convert error type, **preserve trace** |
+
+**Inspecting / decomposing:**
+
+| Method | Effect |
+|--------|--------|
+| `.error()` | Borrow the inner `&E` |
+| `.decompose()` | Consume into `(E, Option<AtTrace>)` — preserves the trace |
+| `.map_error(\|e\| ...)` | Convert error type inside `At<E>`, preserving trace |
 
 **Key**: `.at()` creates a NEW frame. `.at_str()` adds to the LAST frame. See [Adding Context](#adding-context) for full list.
 
+## Converting Between Error Types
+
+**This is the most common source of bugs.** When crate B calls crate A and needs to convert `At<A::Error>` into `At<B::Error>`, use `map_err_at` — it transforms the inner error while preserving the trace:
+
+```rust
+use whereat::{at, At, ResultAtExt};
+
+#[derive(Debug)]
+struct DbError;
+#[derive(Debug)]
+enum AppError { Database(DbError) }
+
+fn db_query() -> Result<String, At<DbError>> {
+    Err(at(DbError))
+}
+
+fn app_handler() -> Result<String, At<AppError>> {
+    // map_err_at: converts DbError → AppError, trace survives
+    db_query().map_err_at(|e| AppError::Database(e))?;
+    Ok("ok".into())
+}
+```
+
+Implement `From<InnerError> for OuterError` on the **bare error types**, then convert with:
+
+```rust
+inner_call().map_err_at(OuterError::from)?;
+```
+
+## Avoiding Trace Loss
+
+whereat only works if you keep the trace alive as errors propagate. These patterns silently destroy traces — **avoid them**.
+
+### Never use `.into_inner()` during error propagation
+
+`into_inner()` is deprecated since 0.1.4 because it discards the trace. Use `decompose()` to get both error and trace, or `map_error()` / `map_err_at()` to convert types while preserving the trace.
+
+```rust
+// WRONG — trace is gone
+let bare_err = at_err.into_inner();
+return Err(at(MyError::Sub(bare_err)));
+
+// RIGHT — trace preserved
+return inner_call().map_err_at(|e| MyError::Sub(e));
+```
+
+### Never implement `From<At<X>> for Y`
+
+This gets invoked by `?` and discards the `At<>` wrapper (and its trace):
+
+```rust
+// WRONG — ? uses this From impl, trace dies
+impl From<At<BufferError>> for TiffError {
+    fn from(e: At<BufferError>) -> Self {
+        TiffError::Buffer(e.into_inner())  // trace lost!
+    }
+}
+
+// RIGHT — implement From on the bare types, convert with map_err_at
+impl From<BufferError> for TiffError {
+    fn from(e: BufferError) -> Self { TiffError::Buffer(e) }
+}
+
+fn decode() -> Result<(), At<TiffError>> {
+    pixel_call().map_err_at(TiffError::from)?;  // trace preserved
+    Ok(())
+}
+```
+
+### Never format-then-rewrap
+
+Formatting the error into a string and wrapping it in a new `At<>` destroys the original trace:
+
+```rust
+// WRONG — inner trace is gone, you only get the adapter's location
+.map_err(|e| Error::Other(format!("decode failed: {}", e.into_inner())).at())?;
+
+// RIGHT — convert the error type, keep the trace
+.map_err_at(|e| Error::Other(e.to_string()))?;
+```
+
+### Avoid thiserror `#[from]` on variants that receive traced errors
+
+thiserror's `#[from]` generates `From<X> for MyError`, but when the caller has `At<X>`, the `?` operator strips the `At<>` wrapper before the `From` conversion runs. Use explicit `map_err_at` instead.
+
+### Always trace at error origination
+
+Every `Err(MyError::Variant)` should be `Err(at(MyError::Variant))` or `Err(at!(MyError::Variant))`. If you skip this, there's no trace to propagate.
+
+## `no_std` Support
+
+whereat works with `core` + `alloc` (no `std`). Many crates use it this way:
+
+```toml
+[dependencies]
+whereat = { version = "0.1", default-features = false }
+
+[features]
+std = ["whereat/std"]
+```
+
+The `std` feature currently only affects `Error` trait impls. All core functionality works without it.
+
 ## Best Practices
 
-**DO: Keep your hot loops zero-alloc**
-- You do NOT need `At<>` inside hot loops. Defer tracing until you exit.
-- `.at_skipped_frames()` adds a `[...]` marker to indicate frames were skipped.
+**Define a Result alias** in every crate that uses whereat:
+```rust
+pub type Result<T> = core::result::Result<T, At<MyError>>;
+```
 
-**DO: Use `at_crate!()` at crate boundaries**
-- When consuming errors from other crates, this ensures backtraces show `myapp @ src/lib.rs:42` instead of confusing paths.
+**Use `map_err_at` at every error type boundary.** This is the trace-preserving equivalent of `map_err`. If you're calling `.map_err()` on a `Result<T, At<E>>`, you probably want `.map_err_at()` instead.
 
-**DO: Feel free to add ergonomic aliases**
-- `type MyError = At<MyInternalError>` works perfectly.
+**Use `at()` or `at!()` at every error origination.** An error without a trace is invisible.
+
+**Keep hot loops zero-alloc.** You don't need `At<>` inside hot loops. Defer tracing until you exit. `.at_skipped_frames()` adds a `[...]` marker to indicate frames were skipped.
+
+**Use `at_crate!()` at crate boundaries** when consuming errors from dependencies — ensures backtraces show your crate's GitHub links instead of confusing paths.
 
 ## Design Philosophy
 
@@ -131,7 +262,7 @@ For workspace crates: `whereat::define_at_crate_info!(path = "crates/mylib/");`
 This means you can:
 - Use `thiserror` for ergonomic `Display`/`From` impls, or `anyhow`
 - Use any enum or struct that implements `Debug`
-- Define type aliases like `type MyError = At<BaseError>`
+- Define type aliases like `type Result<T> = core::result::Result<T, At<MyError>>`
 - Access your error via `.error()` or deref
 - Support nesting with `core::error::Error::source()`
 
@@ -140,7 +271,7 @@ This means you can:
 - **Small sizeof**: `At<E>` is only `sizeof(E) + 8` bytes (one pointer for boxed trace)
 - **Zero allocation on Ok path**: No heap allocation until an error occurs
 - **Ergonomic API**: `.at()` on Results, `.start_at()` on errors, `.map_err_at()` for trace-preserving conversions
-- **Context options**: `.at_str()`, `.at_string()`, `.at_fn()`, `.at_named()`, `.at_data()`, `.at_debug()`, `.at_error()`
+- **Context options**: `.at_str()`, `.at_string()`, `.at_fn()`, `.at_named()`, `.at_data()`, `.at_debug()`, `.at_aside_error()`
 - **Cross-crate tracing**: `at!()` and `at_crate!()` macros capture crate info for GitHub/GitLab/Gitea/Bitbucket links
 - **Equality/Hashing**: `PartialEq`, `Eq`, `Hash` compare only the error, not the trace
 - **no_std compatible**: Works with just `core` + `alloc`
@@ -160,7 +291,8 @@ result.at_str("loading config")?            // Static string (zero-cost)
 result.at_string(|| format!("id={}", id))?  // Dynamic string (lazy)
 result.at_data(|| path_context)?            // Typed via Display (lazy)
 result.at_debug(|| request_info)?           // Typed via Debug (lazy)
-result.at_error(io_err)?                    // Attach a source error
+result.at_aside_error(io_err)?              // Attach a related error (diagnostic only,
+                                            // NOT in the .source() chain)
 ```
 
 If the trace is empty, context methods create a frame first. Example:
