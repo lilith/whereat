@@ -205,6 +205,7 @@ pub struct AtCrateInfoBuilder {
     module: &'static str,
     meta: &'static [(&'static str, &'static str)],
     link_format: &'static str,
+    link_format_explicit: bool,
 }
 
 impl AtCrateInfoBuilder {
@@ -218,6 +219,7 @@ impl AtCrateInfoBuilder {
             module: "",
             meta: &[],
             link_format: GITHUB_LINK_FORMAT,
+            link_format_explicit: false,
         }
     }
 
@@ -301,11 +303,24 @@ impl AtCrateInfoBuilder {
     /// ```
     pub const fn link_format(mut self, format: &'static str) -> Self {
         self.link_format = format;
+        self.link_format_explicit = true;
         self
     }
 
     /// Build the final AtCrateInfo.
+    ///
+    /// If no link format was explicitly set via [`link_format()`](Self::link_format)
+    /// or [`link_format_auto()`](Self::link_format_auto), auto-detects the format
+    /// from the repository URL (GitHub, GitLab, Gitea/Forgejo, Bitbucket).
     pub const fn build(self) -> AtCrateInfo {
+        let link_format = if self.link_format_explicit {
+            self.link_format
+        } else {
+            match self.repo {
+                Some(url) => detect_link_format(url),
+                None => self.link_format,
+            }
+        };
         AtCrateInfo {
             name: self.name,
             repo: self.repo,
@@ -313,7 +328,7 @@ impl AtCrateInfoBuilder {
             crate_path: self.crate_path,
             module: self.module,
             meta: self.meta,
-            link_format: self.link_format,
+            link_format,
         }
     }
 
@@ -410,6 +425,7 @@ impl AtCrateInfoBuilder {
     #[inline]
     pub fn link_format_owned(mut self, format: String) -> Self {
         self.link_format = Box::leak(format.into_boxed_str());
+        self.link_format_explicit = true;
         self
     }
 
@@ -436,32 +452,62 @@ impl AtCrateInfoBuilder {
     ///     .build();
     /// ```
     #[inline]
-    pub fn link_format_auto(mut self) -> Self {
+    pub const fn link_format_auto(mut self) -> Self {
         self.link_format = match self.repo {
             Some(url) => detect_link_format(url),
             None => GITHUB_LINK_FORMAT,
         };
+        self.link_format_explicit = true;
         self
     }
 }
 
-/// Detect the appropriate link format based on repository URL.
-fn detect_link_format(repo_url: &str) -> &'static str {
-    let url_lower = repo_url.to_lowercase();
+/// Case-insensitive const substring search.
+const fn contains_ci(haystack: &[u8], needle: &[u8]) -> bool {
+    if needle.len() > haystack.len() {
+        return false;
+    }
+    let mut i = 0;
+    while i <= haystack.len() - needle.len() {
+        let mut j = 0;
+        while j < needle.len() {
+            let h = if haystack[i + j] >= b'A' && haystack[i + j] <= b'Z' {
+                haystack[i + j] + 32
+            } else {
+                haystack[i + j]
+            };
+            if h != needle[j] {
+                break;
+            }
+            j += 1;
+        }
+        if j == needle.len() {
+            return true;
+        }
+        i += 1;
+    }
+    false
+}
 
-    if url_lower.contains("github.com") || url_lower.contains("github.") {
+/// Detect the appropriate link format based on repository URL.
+///
+/// Case-insensitive, const-compatible. Used by both `link_format_auto()` and
+/// `define_at_crate_info!()` (via the builder's `build()` method).
+const fn detect_link_format(repo_url: &str) -> &'static str {
+    let url = repo_url.as_bytes();
+
+    if contains_ci(url, b"github.com") || contains_ci(url, b"github.") {
         GITHUB_LINK_FORMAT
-    } else if url_lower.contains("gitlab.com") || url_lower.contains("gitlab.") {
+    } else if contains_ci(url, b"gitlab.com") || contains_ci(url, b"gitlab.") {
         GITLAB_LINK_FORMAT
-    } else if url_lower.contains("gitea.")
-        || url_lower.contains("forgejo.")
-        || url_lower.contains("codeberg.org")
+    } else if contains_ci(url, b"gitea.")
+        || contains_ci(url, b"forgejo.")
+        || contains_ci(url, b"codeberg.org")
     {
         GITEA_LINK_FORMAT
-    } else if url_lower.contains("bitbucket.org") || url_lower.contains("bitbucket.") {
+    } else if contains_ci(url, b"bitbucket.org") || contains_ci(url, b"bitbucket.") {
         BITBUCKET_LINK_FORMAT
     } else {
-        // Default to GitHub format for unknown hosts
         GITHUB_LINK_FORMAT
     }
 }

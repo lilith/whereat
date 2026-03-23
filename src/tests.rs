@@ -1538,6 +1538,34 @@ fn test_link_format_auto_detect() {
 }
 
 #[test]
+fn test_build_auto_detects_link_format() {
+    use crate::AtCrateInfo;
+
+    // build() auto-detects without explicit link_format_auto() call
+    let gitlab = AtCrateInfo::builder()
+        .repo(Some("https://gitlab.com/org/repo"))
+        .build();
+    assert_eq!(gitlab.link_format(), crate::GITLAB_LINK_FORMAT);
+
+    let bitbucket = AtCrateInfo::builder()
+        .repo(Some("https://bitbucket.org/org/repo"))
+        .build();
+    assert_eq!(bitbucket.link_format(), crate::BITBUCKET_LINK_FORMAT);
+
+    let codeberg = AtCrateInfo::builder()
+        .repo(Some("https://codeberg.org/org/repo"))
+        .build();
+    assert_eq!(codeberg.link_format(), crate::GITEA_LINK_FORMAT);
+
+    // Explicit link_format() overrides auto-detection
+    let explicit = AtCrateInfo::builder()
+        .repo(Some("https://gitlab.com/org/repo"))
+        .link_format(crate::GITHUB_LINK_FORMAT)
+        .build();
+    assert_eq!(explicit.link_format(), crate::GITHUB_LINK_FORMAT);
+}
+
+#[test]
 fn test_traceable_at_string() {
     use crate::trace::{AtTrace, AtTraceable};
 
