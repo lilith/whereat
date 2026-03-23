@@ -121,7 +121,21 @@ pub trait ResultAtExt<T, E> {
         f: impl FnOnce() -> C,
     ) -> Result<T, At<E>>;
 
-    /// Attach an error as diagnostic context (not wired into `.source()` chain).
+    /// Attach a related error as diagnostic context on the last frame.
+    ///
+    /// The attached error is **not** part of the `.source()` chain — it is only
+    /// visible via trace display and `.contexts()` iteration.
+    #[track_caller]
+    fn at_aside_error<Err: core::error::Error + Send + Sync + 'static>(
+        self,
+        err: Err,
+    ) -> Result<T, At<E>>;
+
+    /// Attach an error as diagnostic context (not in `.source()` chain).
+    #[deprecated(
+        since = "0.1.4",
+        note = "Renamed to `at_aside_error()`. The attached error is NOT part of the `.source()` chain."
+    )]
     #[track_caller]
     fn at_error<Err: core::error::Error + Send + Sync + 'static>(
         self,
@@ -226,6 +240,19 @@ impl<T, E> ResultAtExt<T, E> for Result<T, At<E>> {
         }
     }
 
+    #[track_caller]
+    #[inline]
+    fn at_aside_error<Err: core::error::Error + Send + Sync + 'static>(
+        self,
+        err: Err,
+    ) -> Result<T, At<E>> {
+        match self {
+            Ok(v) => Ok(v),
+            Err(e) => Err(e.at_aside_error(err)),
+        }
+    }
+
+    #[allow(deprecated)]
     #[track_caller]
     #[inline]
     fn at_error<Err: core::error::Error + Send + Sync + 'static>(
@@ -345,7 +372,20 @@ pub trait ResultAtTraceableExt<T, E: AtTraceable> {
     fn at_debug<C: fmt::Debug + Send + Sync + 'static>(self, f: impl FnOnce() -> C)
     -> Result<T, E>;
 
-    /// Attach an error as diagnostic context (not wired into `.source()` chain).
+    /// Attach a related error as diagnostic context on the last frame.
+    ///
+    /// The attached error is **not** part of the `.source()` chain.
+    #[track_caller]
+    fn at_aside_error<Err: core::error::Error + Send + Sync + 'static>(
+        self,
+        err: Err,
+    ) -> Result<T, E>;
+
+    /// Attach an error as diagnostic context (not in `.source()` chain).
+    #[deprecated(
+        since = "0.1.4",
+        note = "Renamed to `at_aside_error()`. The attached error is NOT part of the `.source()` chain."
+    )]
     #[track_caller]
     fn at_error<Err: core::error::Error + Send + Sync + 'static>(self, err: Err) -> Result<T, E>;
 
@@ -404,6 +444,16 @@ impl<T, E: AtTraceable> ResultAtTraceableExt<T, E> for Result<T, E> {
         self.map_err(|e| e.at_debug(f))
     }
 
+    #[track_caller]
+    #[inline]
+    fn at_aside_error<Err: core::error::Error + Send + Sync + 'static>(
+        self,
+        err: Err,
+    ) -> Result<T, E> {
+        self.map_err(|e| e.at_aside_error(err))
+    }
+
+    #[allow(deprecated)]
     #[track_caller]
     #[inline]
     fn at_error<Err: core::error::Error + Send + Sync + 'static>(self, err: Err) -> Result<T, E> {

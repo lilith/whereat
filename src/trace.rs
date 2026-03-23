@@ -1085,9 +1085,27 @@ pub trait AtTraceable: Sized {
         self
     }
 
-    /// Add an error as context to the last location (or create one if empty).
+    /// Attach a related error as diagnostic context on the last frame.
     ///
-    /// Use this to attach a source error that implements `core::error::Error`.
+    /// The attached error is **not** part of the `.source()` chain — it is only
+    /// visible via trace display and `.contexts()` iteration.
+    #[track_caller]
+    #[inline]
+    fn at_aside_error<E: core::error::Error + Send + Sync + 'static>(mut self, err: E) -> Self {
+        let Some(boxed_err) = try_box(err) else {
+            return self;
+        };
+        let context = AtContext::Error(boxed_err);
+        self.trace_mut()
+            .try_add_context(Location::caller(), context);
+        self
+    }
+
+    /// Attach an error as diagnostic context (not in `.source()` chain).
+    #[deprecated(
+        since = "0.1.4",
+        note = "Renamed to `at_aside_error()`. The attached error is NOT part of the `.source()` chain."
+    )]
     #[track_caller]
     #[inline]
     fn at_error<E: core::error::Error + Send + Sync + 'static>(mut self, err: E) -> Self {

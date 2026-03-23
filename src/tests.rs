@@ -263,10 +263,27 @@ fn test_result_map_err_at() {
 }
 
 #[test]
-fn test_into_inner() {
+fn test_decompose() {
+    let err = TestError::InvalidInput.start_at();
+    let (inner, trace) = err.decompose();
+    assert_eq!(inner, TestError::InvalidInput);
+    assert!(trace.is_some());
+}
+
+#[test]
+#[allow(deprecated)]
+fn test_into_inner_deprecated() {
     let err = TestError::InvalidInput.start_at();
     let inner = err.into_inner();
     assert_eq!(inner, TestError::InvalidInput);
+}
+
+#[test]
+#[allow(deprecated)]
+fn test_at_error_deprecated_still_works() {
+    let err = at(TestError::NotFound).at_error(core::fmt::Error);
+    let output = alloc::format!("{:?}", err);
+    assert!(output.contains("caused by"));
 }
 
 #[test]
@@ -1020,7 +1037,7 @@ fn test_full_trace_with_error_context() {
     }
     impl core::error::Error for Inner {}
 
-    let err = at(TestError::NotFound).at_error(Inner("root cause"));
+    let err = at(TestError::NotFound).at_aside_error(Inner("root cause"));
     let output = alloc::format!("{}", err.full_trace());
     assert!(output.contains("caused by: inner: root cause"));
 }
@@ -1098,7 +1115,7 @@ fn test_display_with_meta_contexts() {
         .at_fn(|| {})
         .at_debug(|| 42u32)
         .at_data(|| "display data")
-        .at_error(core::fmt::Error);
+        .at_aside_error(core::fmt::Error);
 
     let output = alloc::format!("{}", err.display_with_meta());
     assert!(output.contains("text ctx"));
@@ -1602,7 +1619,7 @@ fn test_traceable_at_error() {
     let err = MyErr {
         trace: AtTrace::capture(),
     }
-    .at_error(core::fmt::Error);
+    .at_aside_error(core::fmt::Error);
 
     let has_error = err.trace().unwrap().contexts().any(|c| c.is_error());
     assert!(has_error);
@@ -1790,7 +1807,7 @@ fn test_traceable_full_trace_format() {
     .at_fn(|| {})
     .at_debug(|| 42u32)
     .at_data(|| "disp data")
-    .at_error(core::fmt::Error);
+    .at_aside_error(core::fmt::Error);
 
     let output = alloc::format!("{}", err.full_trace());
     assert!(output.contains("my error"));
@@ -1868,7 +1885,7 @@ fn test_result_at_ext_ok_paths() {
     );
     assert_eq!(R::Ok(42).at_data(|| 1u32).unwrap(), 42);
     assert_eq!(R::Ok(42).at_debug(|| 1u32).unwrap(), 42);
-    assert_eq!(R::Ok(42).at_error(core::fmt::Error).unwrap(), 42);
+    assert_eq!(R::Ok(42).at_aside_error(core::fmt::Error).unwrap(), 42);
     assert_eq!(R::Ok(42).at_crate(crate::at_crate_info()).unwrap(), 42);
     assert_eq!(R::Ok(42).at_fn(|| {}).unwrap(), 42);
     assert_eq!(R::Ok(42).at_named("step").unwrap(), 42);
@@ -1884,7 +1901,7 @@ fn test_result_at_ext_err_paths() {
     // Test error paths for methods not already covered
     let _ = make_err().at_data(|| 42u32).unwrap_err();
     let _ = make_err().at_debug(|| 42u32).unwrap_err();
-    let _ = make_err().at_error(core::fmt::Error).unwrap_err();
+    let _ = make_err().at_aside_error(core::fmt::Error).unwrap_err();
     let _ = make_err().at_crate(crate::at_crate_info()).unwrap_err();
     let _ = make_err().at_fn(|| {}).unwrap_err();
     let _ = make_err().at_named("step").unwrap_err();
@@ -1934,7 +1951,7 @@ fn test_result_at_traceable_ext_all() {
     );
     assert_eq!(make_ok().at_data(|| 1u32).unwrap(), 42);
     assert_eq!(make_ok().at_debug(|| 1u32).unwrap(), 42);
-    assert_eq!(make_ok().at_error(core::fmt::Error).unwrap(), 42);
+    assert_eq!(make_ok().at_aside_error(core::fmt::Error).unwrap(), 42);
     assert_eq!(make_ok().at_crate(crate::at_crate_info()).unwrap(), 42);
     assert_eq!(make_ok().at_fn(|| {}).unwrap(), 42);
     assert_eq!(make_ok().at_named("step").unwrap(), 42);
@@ -1947,7 +1964,7 @@ fn test_result_at_traceable_ext_all() {
         .unwrap_err();
     let _ = make_err().at_data(|| 1u32).unwrap_err();
     let _ = make_err().at_debug(|| 1u32).unwrap_err();
-    let _ = make_err().at_error(core::fmt::Error).unwrap_err();
+    let _ = make_err().at_aside_error(core::fmt::Error).unwrap_err();
     let _ = make_err().at_crate(crate::at_crate_info()).unwrap_err();
     let _ = make_err().at_fn(|| {}).unwrap_err();
     let _ = make_err().at_named("step").unwrap_err();
@@ -2077,7 +2094,7 @@ fn test_full_trace_display_with_nested_error_chain() {
         }
     }
 
-    let err = at(TestError::NotFound).at_error(Outer(Inner));
+    let err = at(TestError::NotFound).at_aside_error(Outer(Inner));
     let output = alloc::format!("{}", err.full_trace());
     assert!(output.contains("caused by: outer error"));
     assert!(output.contains("caused by: inner error"));
@@ -2367,7 +2384,7 @@ fn test_traceable_full_trace_with_nested_error_chain() {
     let err = MyErr {
         trace: AtTrace::capture(),
     }
-    .at_error(Outer(Inner));
+    .at_aside_error(Outer(Inner));
 
     let output = alloc::format!("{}", err.full_trace());
     assert!(output.contains("caused by: outer"), "Output: {}", output);
@@ -2454,7 +2471,7 @@ fn test_termcolor_display_with_all_context_types() {
         .at_fn(|| {})
         .at_debug(|| 42u32)
         .at_data(|| "display data")
-        .at_error(core::fmt::Error)
+        .at_aside_error(core::fmt::Error)
         .at_crate(&C2)
         .at();
 
@@ -2505,7 +2522,7 @@ fn test_termcolor_meta_with_crate_boundaries() {
         .at_fn(|| {})
         .at_debug(|| 42u32)
         .at_data(|| "disp")
-        .at_error(core::fmt::Error)
+        .at_aside_error(core::fmt::Error)
         .at_crate(&C2)
         .at();
 
@@ -2547,7 +2564,7 @@ fn test_html_display_with_all_context_types() {
         .at_fn(|| {})
         .at_debug(|| 42u32)
         .at_data(|| "display data")
-        .at_error(core::fmt::Error)
+        .at_aside_error(core::fmt::Error)
         .at_crate(&C2)
         .at();
 
@@ -2641,7 +2658,7 @@ fn test_at_debug_with_all_context_types() {
         .at_fn(|| {})
         .at_debug(|| 42u32)
         .at_data(|| "display val")
-        .at_error(core::fmt::Error)
+        .at_aside_error(core::fmt::Error)
         .at_crate(&INFO);
 
     let output = alloc::format!("{:?}", err);
@@ -2673,7 +2690,7 @@ fn test_display_with_meta_all_context_types() {
         .at_fn(|| {})
         .at_debug(|| 42u32)
         .at_data(|| "disp")
-        .at_error(core::fmt::Error)
+        .at_aside_error(core::fmt::Error)
         .at_crate(&C2);
 
     let output = alloc::format!("{}", err.display_with_meta());
@@ -2789,7 +2806,7 @@ fn test_html_display_link_and_crate_skip_in_contexts() {
         .at_fn(|| {})
         .at_debug(|| 42u32)
         .at_data(|| "disp")
-        .at_error(core::fmt::Error)
+        .at_aside_error(core::fmt::Error)
         .at_crate(&C2)
         .at();
 

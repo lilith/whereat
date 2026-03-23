@@ -337,7 +337,7 @@ fn at_error_embeds_source() {
 
     fn operation() -> Result<(), At<PlainError>> {
         let io_err = io_fails();
-        Err(at(PlainError::NotFound).at_error(io_err))
+        Err(at(PlainError::NotFound).at_aside_error(io_err))
     }
 
     let err = operation().unwrap_err();
@@ -393,7 +393,7 @@ fn at_error_shows_in_debug() {
 
     let err = at(PlainError::InvalidInput("bad".into()))
         .at_str("validating")
-        .at_error(SourceError("underlying cause"));
+        .at_aside_error(SourceError("underlying cause"));
 
     // Display only shows the error message (not trace/contexts)
     let display = format!("{}", err);
@@ -546,9 +546,9 @@ fn multiple_at_error_chain() {
 
     let err = at(PlainError::NotFound)
         .at_str("step 1")
-        .at_error(ErrA)
+        .at_aside_error(ErrA)
         .at_str("step 2")
-        .at_error(ErrB);
+        .at_aside_error(ErrB);
 
     // Debug shows all contexts and embedded errors
     let debug = format!("{:?}", err);
@@ -583,7 +583,7 @@ fn attraceable_with_at_error() {
     }
 
     fn network_op() -> Result<(), TraceableError> {
-        Err(TraceableError::network().at_error(inner_io()))
+        Err(TraceableError::network().at_aside_error(inner_io()))
     }
 
     let err = network_op().unwrap_err();
@@ -619,7 +619,7 @@ fn nested_error_shows_in_debug_output() {
 
     let err = at(PlainError::NotFound)
         .at_str("looking up record")
-        .at_error(DatabaseError { code: 1045 });
+        .at_aside_error(DatabaseError { code: 1045 });
 
     // Display only shows the error message (clean for logs)
     let display = format!("{}", err);
@@ -669,7 +669,7 @@ fn nested_errors_format_correctly() {
     impl std::error::Error for ApiError {}
 
     let err = at(PlainError::InvalidInput("bad request".into()))
-        .at_error(ApiError { endpoint: "/users" });
+        .at_aside_error(ApiError { endpoint: "/users" });
 
     let debug = format!("{:?}", err);
     println!("=== DEBUG MODE OUTPUT ===\n{}", debug);
@@ -810,7 +810,7 @@ fn frames_with_error_context() {
     impl std::error::Error for SourceErr {}
 
     let err = at(PlainError::NotFound)
-        .at_error(SourceErr)
+        .at_aside_error(SourceErr)
         .at_str("with context");
 
     for frame in err.frames() {

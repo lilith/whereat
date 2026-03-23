@@ -422,19 +422,18 @@ impl<E> At<E> {
     /// frame in the trace. If the trace is empty, creates a frame at the caller's
     /// location first.
     ///
-    /// The attached error is **diagnostic context only** — it is visible via
-    /// [`contexts()`](Self::contexts) iteration and [`full_trace()`](Self::full_trace)
-    /// display, but is **not** part of the [`Error::source()`] chain.
+    /// Attach a related error as **diagnostic context** on the last frame.
+    ///
+    /// **Does not add a new location frame** — attaches to the most recent frame.
+    /// If the trace is empty, creates a frame at the caller's location first.
+    ///
+    /// The attached error is visible via [`contexts()`](Self::contexts) iteration
+    /// and trace display, but is **not** part of the [`Error::source()`] chain.
     /// `At<E>::source()` always delegates to `E::source()`.
     ///
-    /// This is intentional: `.source()` models a linear causal chain ("A was caused
-    /// by B"), while `.at_error()` models an observation ("while handling A, we also
-    /// saw X"). These are different relationships, and forcing the latter into a
-    /// linear chain would be lossy — a trace can have multiple `.at_error()` calls
-    /// at different frames.
-    ///
-    /// If you need an error to appear in the `.source()` chain, store it inside
-    /// your error type `E` directly.
+    /// Use this for errors that were *observed alongside* the primary error,
+    /// not for errors that *caused* it. If you need an error in the `.source()`
+    /// chain, store it inside your error type `E` directly.
     ///
     /// ## Example
     ///
@@ -446,9 +445,34 @@ impl<E> At<E> {
     /// struct MyError;
     ///
     /// fn wrap_io_error(io_err: io::Error) -> whereat::At<MyError> {
-    ///     at(MyError).at_error(io_err)
+    ///     at(MyError).at_aside_error(io_err)
     /// }
     /// ```
+    #[track_caller]
+    #[inline]
+    pub fn at_aside_error<Err: core::error::Error + Send + Sync + 'static>(
+        mut self,
+        err: Err,
+    ) -> Self {
+        let loc = Location::caller();
+        let context = AtContext::Error(Box::new(err));
+        let trace = self.trace.get_or_insert_mut();
+        trace.try_add_context(loc, context);
+        self
+    }
+
+    /// Attach an error as diagnostic context (not in `.source()` chain).
+    ///
+    /// # Deprecated
+    ///
+    /// Renamed to [`at_aside_error()`](Self::at_aside_error) to clarify that the
+    /// attached error is diagnostic context, not part of the standard error chain.
+    /// Code that iterates `.source()` will never see errors attached this way.
+    #[deprecated(
+        since = "0.1.4",
+        note = "Renamed to `at_aside_error()`. The attached error is diagnostic context \
+                only — it is NOT part of the `.source()` chain."
+    )]
     #[track_caller]
     #[inline]
     pub fn at_error<Err: core::error::Error + Send + Sync + 'static>(mut self, err: Err) -> Self {
@@ -552,10 +576,58 @@ impl<E> At<E> {
         &mut self.error
     }
 
-    /// Consume self and return the inner error, discarding the trace.
+    /// Consume self and return the inner error, **discarding the trace**.
+    ///
+    /// # Deprecated
+    ///
+    /// Use [`decompose()`](Self::decompose) to get both the error and trace,
+    /// or [`map_error()`](Self::map_error) to convert the error type while
+    /// preserving the trace.
+    ///
+    /// ```rust
+    /// use whereat::at;
+    ///
+    /// #[derive(Debug, PartialEq)]
+    /// struct MyError;
+    ///
+    /// let traced = at(MyError);
+    ///
+    /// // Instead of: let err = traced.into_inner();  // trace lost!
+    /// let (err, trace) = traced.decompose();         // trace preserved
+    /// assert_eq!(err, MyError);
+    /// assert!(trace.is_some());
+    /// ```
+    #[deprecated(
+        since = "0.1.4",
+        note = "Discards the trace. Use `decompose()` to get both error and trace, \
+                or `map_error()` to convert types while preserving the trace."
+    )]
     #[inline]
     pub fn into_inner(self) -> E {
         self.error
+    }
+
+    /// Consume self and return both the error and the trace.
+    ///
+    /// This is the recommended way to take apart an `At<E>` without losing
+    /// location information. If you need to convert the error type while
+    /// keeping the trace, use [`map_error()`](Self::map_error) instead.
+    ///
+    /// ```rust
+    /// use whereat::at;
+    ///
+    /// #[derive(Debug, PartialEq)]
+    /// struct MyError;
+    ///
+    /// let traced = at(MyError);
+    /// let (err, trace) = traced.decompose();
+    /// assert_eq!(err, MyError);
+    /// assert!(trace.is_some());  // trace is preserved
+    /// ```
+    #[inline]
+    pub fn decompose(mut self) -> (E, Option<AtTrace>) {
+        let trace = self.trace.take();
+        (self.error, trace)
     }
 
     /// Check if the trace is empty.
@@ -1181,11 +1253,11 @@ impl<E: fmt::Display> fmt::Display for At<E> {
 
 /// `At<E>` delegates [`source()`](core::error::Error::source) to `E::source()`.
 ///
-/// Errors attached via [`.at_error()`](At::at_error) are **not** part of this
+/// Errors attached via [`.at_aside_error()`](At::at_aside_error) are **not** part of this
 /// chain — they are diagnostic context stored in the trace, accessible via
 /// [`.contexts()`](At::contexts) and [`.full_trace()`](At::full_trace).
 ///
-/// See [`.at_error()`](At::at_error) for the rationale.
+/// See [`.at_aside_error()`](At::at_aside_error) for the rationale.
 impl<E: core::error::Error> core::error::Error for At<E> {
     fn source(&self) -> Option<&(dyn core::error::Error + 'static)> {
         self.error.source()

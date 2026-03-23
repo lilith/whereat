@@ -21,5 +21,6 @@
 //! ```
 
 pub use crate::At;
+pub use crate::ErrorAtExt;
 pub use crate::ResultAtExt;
 pub use crate::at;
