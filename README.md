@@ -91,7 +91,8 @@ type ApiResult<T> = Result<T, At<ApiError>>;  // Result alias — recommended fo
 
 fn handle_request(id: u64) -> ApiResult<String> {
     let email = get_email(id)
-        .at_str("looking up recipient")       // context on the current frame
+        .at()                                 // new frame at this call site
+        .at_str("looking up recipient")       // context on that frame
         .map_err_at(ApiError::Db)?;           // DbError → ApiError, trace preserved
     Ok(email)
 }
