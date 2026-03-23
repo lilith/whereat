@@ -63,7 +63,7 @@ if let ErrorKind::NotFound = &*err {
 
 1. **Method resolution ambiguity**: If `E` has methods that conflict with `At<E>` methods,
    Deref could cause surprises. Current `At<E>` methods:
-   - `error()`, `error_mut()`, `into_inner()`
+   - `error()`, `error_mut()`, `decompose()`
    - `is_empty()`, `frame_count()`, `frames()`
    - `at()`, `at_str()`, `at_string()`, `at_data()`, `at_debug()`
    - `map_error()`, `into_traceable()`

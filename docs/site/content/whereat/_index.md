@@ -167,7 +167,7 @@ Both contexts share one frame — no extra location captured.
 | `.at_named("step")` | New frame + custom label |
 | `.at_data(\|\| val)` | Context via Display (lazy) |
 | `.at_debug(\|\| val)` | Context via Debug (lazy) |
-| `.at_error(source)` | Attach a source error |
+| `.at_aside_error(err)` | Attach a related error (diagnostic, not in `.source()` chain) |
 | `.at_string(\|\| format!(...))` | Dynamic string context (lazy) |
 | `.map_err_at(\|e\| ...)` | Convert error type, preserve trace |
 
