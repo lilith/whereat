@@ -183,41 +183,34 @@ The `_owned()` builder methods leak strings via `Box::leak` for `'static` lifeti
 
 ## Link Formats
 
-### Supported Forges
+`build()` auto-detects the link format from `CARGO_PKG_REPOSITORY` — no configuration needed for common forges:
 
-| Forge | Format Constant | Example Link |
-|-------|----------------|--------------|
-| GitHub | `GITHUB_LINK_FORMAT` | `repo/blob/commit/path/file#L42` |
-| GitLab | `GITLAB_LINK_FORMAT` | `repo/-/blob/commit/path/file#L42` |
-| Gitea/Forgejo | `GITEA_LINK_FORMAT` | `repo/src/commit/commit/path/file#L42` |
-| Bitbucket | `BITBUCKET_LINK_FORMAT` | `repo/src/commit/path/file#lines-42` |
+| Forge | Auto-detected from URL | Format Constant |
+|-------|----------------------|----------------|
+| GitHub | `github.com` | `GITHUB_LINK_FORMAT` |
+| GitLab | `gitlab.com`, `gitlab.*` | `GITLAB_LINK_FORMAT` |
+| Gitea/Forgejo | `gitea.*`, `forgejo.*`, `codeberg.org` | `GITEA_LINK_FORMAT` |
+| Bitbucket | `bitbucket.org`, `bitbucket.*` | `BITBUCKET_LINK_FORMAT` |
 
-### Manual Selection
+`define_at_crate_info!()` uses this automatically. No action needed unless you're on a self-hosted forge with a non-standard domain.
+
+### Manual Override
 
 ```rust
 use whereat::{AtCrateInfo, GITLAB_LINK_FORMAT};
 
+// Explicit .link_format() overrides auto-detection
 static INFO: AtCrateInfo = AtCrateInfo::builder()
     .name("mylib")
-    .repo(Some("https://gitlab.com/org/repo"))
-    .link_format(GITLAB_LINK_FORMAT)
-    .build();
-```
-
-### Auto-Detection
-
-```rust
-let info = AtCrateInfo::builder()
-    .name("mylib")
-    .repo(Some("https://gitlab.com/org/repo"))
-    .link_format_auto()  // Detects GitLab from URL
+    .repo(Some("https://my-gitlab.internal/org/repo"))
+    .link_format(GITLAB_LINK_FORMAT)  // self-hosted, domain doesn't match
     .build();
 ```
 
 ### Custom Format
 
 ```rust
-// Format placeholders: {repo}, {commit}, {path}, {file}, {line}
+// Placeholders: {repo}, {commit}, {path}, {file}, {line}
 const MY_FORMAT: &str = "{repo}/browse/{path}{file}?at={commit}#L{line}";
 
 static INFO: AtCrateInfo = AtCrateInfo::builder()

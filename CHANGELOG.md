@@ -12,6 +12,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `decompose()` method on `At<E>` — returns `(E, Option<AtTrace>)` so you can take apart an `At<E>` without silently losing the trace
 - `at_aside_error()` method on `At<E>`, `ResultAtExt`, `ResultAtTraceableExt`, and `AtTraceable` — replacement for `at_error()` with a name that clarifies the attached error is diagnostic context, not part of the `.source()` chain
 - `ErrorAtExt` added to `prelude` module
+- `build()` now auto-detects link format (GitHub, GitLab, Gitea/Forgejo/Codeberg, Bitbucket) from the repository URL — `define_at_crate_info!()` no longer defaults to GitHub for non-GitHub repos
 
 ### Deprecated
 
