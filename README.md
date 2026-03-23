@@ -76,33 +76,45 @@ fn api_endpoint(id: u64) -> ApiResult<String> {
 
 `map_err_at` transforms the inner error while keeping the trace. This is the #1 pattern to get right — see [Avoiding Trace Loss](#avoiding-trace-loss).
 
-## Performance
+## How it works
 
-```text
-                                 Error creation time (lower is better)
+`At<E>` stores your error inline + an 8-byte pointer to a boxed trace. On the happy path, nothing is heap-allocated.
 
-Ok path (no error)      █ <1ns            ← ZERO overhead on success
-plain enum error        █ <1ns
-whereat (1 frame)       ███ 18ns          ← file:line:col captured
-whereat (3 frames)      ███ 19ns
-whereat (10 frames)     ██████████ 67ns
-
-With RUST_BACKTRACE=1:
-anyhow                  █████████████████████████████████████████████████ 2,500ns
-backtrace crate         ████████████████████████████████████████████████████████████████████████████████████████████████████ 6,300ns
-panic + catch_unwind    ██████████████████████████ 1,300ns
+```mermaid
+graph TB
+    subgraph "At&lt;E&gt; — sizeof(E) + 8 bytes"
+        E["error: E (inline)"]
+        T["trace: Option&lt;Box&lt;AtTrace&gt;&gt;"]
+    end
+    T -->|"null when empty"| Trace["AtTrace (heap, on error only)"]
+    subgraph "AtTrace"
+        L["locations: InlineVec&lt;4&gt;"]
+        C["contexts: Option&lt;Box&lt;Vec&lt;…&gt;&gt;&gt;"]
+        CI["crate_info: Option&lt;&'static AtCrateInfo&gt;"]
+    end
 ```
 
-**Fair comparison (same 10-frame depth, 10k iterations):**
-```text
-whereat .at()           █ 1.2ms           ← 100x faster than backtrace
-panic + catch_unwind    ██████████████████████ 27ms
-backtrace crate         ████████████████████████████████████████████████████████████████████████████████████████████████████ 119ms
+Each `.at()` call is annotated with `#[track_caller]` — the compiler bakes file:line:col into the binary as static data. No runtime stack walking, no debug symbols needed.
+
+### Frames vs contexts
+
+`.at()` creates a **frame** (a new location). `.at_str()` adds **context** to the last frame.
+
+```mermaid
+graph TB
+    subgraph "Frame 1 — src/handler.rs:42:5"
+        C1["╰─ 'processing request'"]
+        C2["╰─ request_id = 7"]
+    end
+    subgraph "Frame 2 — src/db.rs:89:9"
+        C3["╰─ 'user lookup failed'"]
+    end
+    subgraph "Frame 3 — src/db.rs:15:13"
+        N["(origin — no context)"]
+    end
 ```
 
-*anyhow/panic only capture backtraces when `RUST_BACKTRACE=1`. whereat always captures location.*
-
-*Linux x86_64 (WSL2), 2026-01-18. See `cargo bench --bench overhead` and `cargo bench --bench nested_loops "fair_10fr"`.*
+**150x faster than `backtrace`**, zero overhead on the Ok path, ~18ns per frame on error. See [PERFORMANCE.md](PERFORMANCE.md) for benchmarks.
 
 ## API Overview
 
