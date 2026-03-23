@@ -69,8 +69,6 @@ See [Avoiding Trace Loss](#avoiding-trace-loss) for patterns that silently destr
 
 ## How it works
 
-`At<E>` stores your error inline + an 8-byte pointer to a boxed trace. On the happy path, nothing is heap-allocated.
-
 ```mermaid
 graph LR
     subgraph "At&lt;E&gt;"
@@ -79,7 +77,7 @@ graph LR
         T["trace: 8 bytes"]
     end
     T -->|"null until error"| Trace
-    subgraph Trace["AtTrace (heap)"]
+    subgraph Trace["AtTrace (heap, 112 bytes default)"]
         direction TB
         L["locations: InlineVec&lt;4&gt;"]
         C["contexts"]
@@ -87,7 +85,7 @@ graph LR
     end
 ```
 
-Each `.at()` call is annotated with `#[track_caller]` — the compiler bakes file:line:col into the binary as static data. No runtime stack walking, no debug symbols needed.
+`At<E>` is `sizeof(E) + 8` bytes. The trace pointer is null until an error occurs — zero heap allocation on the Ok path. Each `.at()` is `#[track_caller]`, so the compiler bakes file:line:col into the binary as static data. No stack walking, no debug symbols.
 
 ### Frames vs contexts
 
@@ -108,34 +106,6 @@ graph TB
 ```
 
 **150x faster than `backtrace`**, zero overhead on the Ok path, ~18ns per frame on error. See [PERFORMANCE.md](PERFORMANCE.md) for benchmarks.
-
-## API Overview
-
-**Starting a trace:**
-
-| Function | Works on | Crate info | Use when |
-|----------|----------|------------|----------|
-| `at!(err)` | Any type | ✅ GitHub links | Default — requires `define_at_crate_info!()` |
-| `at(err)` | Any type | ❌ None | Quick prototyping, no setup |
-| `err.start_at()` | `Error` types | ❌ None | Chaining on error values |
-
-**Extending a trace** (on `Result<T, At<E>>`):
-
-| Method | Effect |
-|--------|--------|
-| `.at()` | **New frame** at caller's location |
-| `.at_str("msg")` | Add context to **last frame** (no new location) |
-| `.map_err_at(\|e\| ...)` | Convert error type, **preserve trace** |
-
-**Inspecting / decomposing:**
-
-| Method | Effect |
-|--------|--------|
-| `.error()` | Borrow the inner `&E` |
-| `.decompose()` | Consume into `(E, Option<AtTrace>)` — preserves the trace |
-| `.map_error(\|e\| ...)` | Convert error type inside `At<E>`, preserving trace |
-
-**Key**: `.at()` creates a NEW frame. `.at_str()` adds to the LAST frame. See [Adding Context](#adding-context) for full list.
 
 ## Avoiding Trace Loss
 
@@ -208,89 +178,45 @@ sub_call().map_err_at(|e| MyError::Sub(e))?;
 
 Every `Err(MyError::Variant)` should be `Err(at(MyError::Variant))` or `Err(at!(MyError::Variant))`. If you skip this, there's no trace to propagate.
 
-## `no_std` by Default
+## API Reference
 
-whereat is `#![no_std]` with `alloc` — no feature flags needed. `core::error::Error` is stable since Rust 1.81 and whereat requires 1.85+. A `std` feature exists for historical compatibility but is a no-op.
+### Starting a trace
 
-## Best Practices
+| Function | Works on | Crate info | Use when |
+|----------|----------|------------|----------|
+| `at!(err)` | Any type | ✅ GitHub links | Default — requires `define_at_crate_info!()` |
+| `at(err)` | Any type | ❌ None | Quick prototyping, no setup |
+| `err.start_at()` | `Error` types | ❌ None | Chaining on error values |
 
-**Define a Result alias** in every crate that uses whereat:
-```rust
-pub type Result<T> = core::result::Result<T, At<MyError>>;
-```
+### Extending a trace
 
-**Use `map_err_at` at every error type boundary.** This is the trace-preserving equivalent of `map_err`. If you're calling `.map_err()` on a `Result<T, At<E>>`, you probably want `.map_err_at()` instead.
+On `Result<T, At<E>>`:
 
-**Use `at()` or `at!()` at every error origination.** An error without a trace is invisible.
+| Method | Effect |
+|--------|--------|
+| `.at()` | **New frame** at caller's location |
+| `.at_str("msg")` | Static string context on **last frame** (zero-cost) |
+| `.at_string(\|\| format!(...))` | Dynamic string context (lazy) |
+| `.at_fn(\|\| {})` | New frame + captures function name |
+| `.at_named("label")` | New frame + custom label |
+| `.at_data(\|\| value)` | Typed context via Display (lazy) |
+| `.at_debug(\|\| value)` | Typed context via Debug (lazy) |
+| `.at_aside_error(err)` | Attach a related error (diagnostic only, **not** in `.source()` chain) |
+| `.map_err_at(\|e\| ...)` | Convert error type, **preserve trace** |
 
-**Keep hot loops zero-alloc.** You don't need `At<>` inside hot loops. Defer tracing until you exit. `.at_skipped_frames()` adds a `[...]` marker to indicate frames were skipped.
+`.at()` creates a NEW frame. `.at_str()` and other context methods add to the LAST frame.
 
-**Use `at_crate!()` at crate boundaries** when consuming errors from dependencies — ensures backtraces show your crate's GitHub links instead of confusing paths.
+### Inspecting and decomposing
 
-## Design Philosophy
+| Method | Effect |
+|--------|--------|
+| `.error()` | Borrow the inner `&E` |
+| `.decompose()` | Consume into `(E, Option<AtTrace>)` — preserves the trace |
+| `.map_error(\|e\| ...)` | Convert error type inside `At<E>`, preserving trace |
+| `.frame_count()` | Number of location frames in the trace |
+| `.full_trace()` | Display formatter showing all frames + contexts |
 
-**You define your own error types.** whereat doesn't impose any structure on your errors — use enums, structs, or whatever suits your domain. whereat just wraps them in `At<E>` to add location+context+crate tracking.
-
-### Which Approach?
-
-| Situation | Use |
-|-----------|-----|
-| You have an existing struct/enum you don't want to modify | Wrap with `At<YourError>` |
-| You want traces embedded inside your error type | Implement `AtTraceable` trait |
-
-**Wrapper approach** (most common): Return `Result<T, At<YourError>>` from functions. The trace lives outside your error type.
-
-**Embedded approach**: Implement `AtTraceable` on your error type and store an `AtTrace` (or `Box<AtTrace>`) field inside it. Return `Result<T, YourError>` directly. See [ADVANCED.md](ADVANCED.md) for details.
-
-This means you can:
-- Use `thiserror` for ergonomic `Display`/`From` impls, or `anyhow`
-- Use any enum or struct that implements `Debug`
-- Define type aliases like `type Result<T> = core::result::Result<T, At<MyError>>`
-- Access your error via `.error()` or deref
-- Support nesting with `core::error::Error::source()`
-
-## Features
-
-- **Small sizeof**: `At<E>` is only `sizeof(E) + 8` bytes (one pointer for boxed trace)
-- **Zero allocation on Ok path**: No heap allocation until an error occurs
-- **Ergonomic API**: `.at()` on Results, `.start_at()` on errors, `.map_err_at()` for trace-preserving conversions
-- **Context options**: `.at_str()`, `.at_string()`, `.at_fn()`, `.at_named()`, `.at_data()`, `.at_debug()`, `.at_aside_error()`
-- **Cross-crate tracing**: `at!()` and `at_crate!()` macros capture crate info for GitHub/GitLab/Gitea/Bitbucket links
-- **Equality/Hashing**: `PartialEq`, `Eq`, `Hash` compare only the error, not the trace
-- **no_std compatible**: Works with just `core` + `alloc`
-
-## Adding Context
-
-**Add a new location frame:**
-```rust
-result.at()?                    // New frame with just file:line:col
-result.at_fn(|| {})?            // New frame + captures function name
-result.at_named("validation")?  // New frame + custom label
-```
-
-**Add context to the last frame** (no new location):
-```rust
-result.at_str("loading config")?            // Static string (zero-cost)
-result.at_string(|| format!("id={}", id))?  // Dynamic string (lazy)
-result.at_data(|| path_context)?            // Typed via Display (lazy)
-result.at_debug(|| request_info)?           // Typed via Debug (lazy)
-result.at_aside_error(io_err)?              // Attach a related error (diagnostic only,
-                                            // NOT in the .source() chain)
-```
-
-If the trace is empty, context methods create a frame first. Example:
-
-```rust
-// One frame with two contexts attached
-let e = at!(MyError).at_str("a").at_str("b");
-assert_eq!(e.frame_count(), 1);
-
-// Two frames: at!() creates first, .at() creates second
-let e = at!(MyError).at().at_str("on second frame");
-assert_eq!(e.frame_count(), 2);
-```
-
-## Cross-Crate Tracing
+### Cross-crate tracing
 
 When consuming errors from other crates, use `at_crate!()` to mark the boundary:
 
@@ -303,14 +229,9 @@ fn call_external() -> Result<(), At<ExternalError>> {
 }
 ```
 
-The `at_crate!()` macro takes a **Result** and desugars to:
-```rust
-result.at_crate(crate::at_crate_info())  // Adds your crate's info as boundary marker
-```
+This ensures traces show `myapp @ src/lib.rs:42` instead of confusing paths from dependencies. Desugars to `result.at_crate(crate::at_crate_info())`.
 
-This ensures traces show `myapp @ src/lib.rs:42` instead of confusing paths from dependencies.
-
-## Hot Loops
+### Hot loops
 
 Don't trace inside hot loops. Defer until you exit:
 
@@ -329,14 +250,18 @@ fn caller() -> Result<(), At<MyError>> {
 }
 ```
 
-## Advanced Usage
+## Design
 
-See [ADVANCED.md](ADVANCED.md) for:
-- Embedded traces with `AtTraceable` trait
-- Custom storage options (inline vs boxed)
-- Complex workspace layouts
-- Link format customization (GitLab, Gitea, Bitbucket)
-- Inline storage features for reduced allocations
+**You define your own error types.** whereat wraps them in `At<E>` to add location + context + crate tracking. Works with plain enums, structs, thiserror, anyhow — anything with `Debug`.
+
+| Situation | Use |
+|-----------|-----|
+| Existing struct/enum you don't want to modify | Wrap with `At<YourError>` |
+| Want traces embedded inside your error type | Implement `AtTraceable` — see [ADVANCED.md](ADVANCED.md) |
+
+`At<E>` is `no_std` (`core` + `alloc`). The `std` feature exists for historical compatibility but is a no-op — `core::error::Error` is stable since Rust 1.81.
+
+See [ADVANCED.md](ADVANCED.md) for embedded traces, inline storage features, workspace layouts, and link format customization.
 
 ## License
 
