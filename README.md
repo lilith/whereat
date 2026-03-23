@@ -77,7 +77,7 @@ fn get_email(id: u64) -> Result<String, At<DbError>> {
 
 That's it. If `get_user` fails, the trace shows every `.at()` call site it passed through — with clickable GitHub links.
 
-For workspace crates: `whereat::define_at_crate_info!(path = "crates/mylib/");`
+For workspace crates, specify the path from the repo root: `whereat::define_at_crate_info!(path = "crates/mylib/");`
 
 ### Context and error type conversion
 
