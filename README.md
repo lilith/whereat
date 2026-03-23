@@ -7,11 +7,7 @@
 [![License](https://img.shields.io/crates/l/whereat.svg)](LICENSE)
 [![Docs Site](https://img.shields.io/badge/docs-site-blue)](https://lilith.github.io/whereat/)
 
-**Production error tracing without debuginfo, panic, or overhead.**
-
-*After a decade of distributing server binaries, I'm finally extracting this approach into its own crate!*
-
-In production, you need to immediately know where the bug is `at()` — without panic!, debuginfo, or overhead. Just replace `?` with `.at()?` in your call tree to get beautiful build-time & async-friendly stacktraces with GitHub links.
+Know where the bug is `at()` — **without panic!, debuginfo, or overhead.** Replace `?` with `.at()?` to get build-time, async-friendly stacktraces with clickable GitHub links.
 
 ```
 Error: UserNotFound
