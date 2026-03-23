@@ -1,6 +1,13 @@
 # Advanced Usage
 
-This document covers advanced whereat features for users who need fine-grained control.
+Most users only need `At<E>`, `at!()`, `.at()`, and `.map_err_at()` — see the [README](README.md). This document covers everything else: embedding traces in your own error types, tuning allocation behavior, workspace layouts, output formatting, and link customization.
+
+- [Embedded Traces (AtTraceable)](#embedded-traces-attraceable) — store the trace inside your error type
+- [Complex Workspace Layouts](#complex-workspace-layouts) — monorepos and runtime path detection
+- [Link Formats](#link-formats) — GitHub, GitLab, Gitea, Bitbucket, custom
+- [Allocation Behavior](#allocation-behavior) — inline storage features, OOM handling
+- [Pretty Output Formatters](#pretty-output-formatters) — terminal colors, HTML
+- [Benchmarks](#benchmarks) — detailed numbers
 
 ## Embedded Traces (AtTraceable)
 

@@ -18,7 +18,7 @@ Error: UserNotFound
    at myapp @ https://github.com/you/myapp/blob/a1b2c3d/src/main.rs#L23
 ```
 
-Compatible with plain enums, errors, structs, thiserror, anyhow, or any type with `Debug`. No changes to your error types required!
+Compatible with `no_std`, plain enums, structs, thiserror, anyhow — any type with `Debug`. No changes to your error types required.
 
 ## Quick Start
 
@@ -89,94 +89,18 @@ graph LR
 
 ### Frames vs contexts
 
-`.at()` creates a **frame** (a new location). `.at_str()` adds **context** to the last frame.
+`.at()` creates a **frame** (a new location). `.at_str()` adds **context** to the last frame. Multiple contexts can attach to one frame:
 
-```mermaid
-graph TB
-    subgraph "Frame 1 — src/handler.rs:42:5"
-        C1["╰─ 'processing request'"]
-        C2["╰─ request_id = 7"]
-    end
-    subgraph "Frame 2 — src/db.rs:89:9"
-        C3["╰─ 'user lookup failed'"]
-    end
-    subgraph "Frame 3 — src/db.rs:15:13"
-        N["(origin — no context)"]
-    end
+```
+   at src/db.rs:15:13           ← .at() created this frame
+   at src/db.rs:89:9            ← .at() created this frame
+      ╰─ user lookup failed        ╰─ .at_str() added context
+   at src/handler.rs:42:5       ← .at() created this frame
+      ╰─ processing request        ╰─ .at_str() added context
+      ╰─ request_id = 7           ╰─ .at_data() added context
 ```
 
 **150x faster than `backtrace`**, zero overhead on the Ok path, ~18ns per frame on error. See [PERFORMANCE.md](PERFORMANCE.md) for benchmarks.
-
-## Avoiding Trace Loss
-
-whereat only works if you keep the trace alive as errors propagate. These patterns silently destroy traces — **avoid them**.
-
-### Never use `.into_inner()` during error propagation
-
-`into_inner()` is deprecated since 0.1.4 because it discards the trace. Use `decompose()` to get both error and trace, or `map_error()` / `map_err_at()` to convert types while preserving the trace.
-
-```rust
-// WRONG — trace is gone
-let bare_err = at_err.into_inner();
-return Err(at(MyError::Sub(bare_err)));
-
-// RIGHT — trace preserved
-return inner_call().map_err_at(|e| MyError::Sub(e));
-```
-
-### Never implement `From<At<X>> for Y`
-
-This gets invoked by `?` and discards the `At<>` wrapper (and its trace):
-
-```rust
-// WRONG — ? uses this From impl, trace dies
-impl From<At<BufferError>> for TiffError {
-    fn from(e: At<BufferError>) -> Self {
-        TiffError::Buffer(e.into_inner())  // trace lost!
-    }
-}
-
-// RIGHT — implement From on the bare types, convert with map_err_at
-impl From<BufferError> for TiffError {
-    fn from(e: BufferError) -> Self { TiffError::Buffer(e) }
-}
-
-fn decode() -> Result<(), At<TiffError>> {
-    pixel_call().map_err_at(TiffError::from)?;  // trace preserved
-    Ok(())
-}
-```
-
-### Never format-then-rewrap
-
-Formatting the error into a string and wrapping it in a new `At<>` destroys the original trace:
-
-```rust
-// WRONG — inner trace is gone, you only get the adapter's location
-.map_err(|e| Error::Other(format!("decode failed: {}", e.into_inner())).at())?;
-
-// RIGHT — convert the error type, keep the trace
-.map_err_at(|e| Error::Other(e.to_string()))?;
-```
-
-### `#[from]` doesn't work with `At<>` — don't reach for `.into_inner()`
-
-thiserror's `#[from]` generates `From<SubError> for MyError`, but `?` on `Result<T, At<SubError>>` needs `From<At<SubError>> for At<MyError>`, which doesn't exist. The compiler will reject it. The temptation is to "fix" this with `.into_inner()` — **don't**. Use `map_err_at` instead:
-
-```rust
-// WON'T COMPILE — no From<At<SubError>> for At<MyError>
-sub_call()?;
-
-// WRONG — compiles but trace dies
-sub_call().map_err(|e| MyError::Sub(e.into_inner()))?;
-
-// RIGHT — trace preserved
-sub_call().map_err_at(|e| MyError::Sub(e))?;
-```
-
-### Always trace at error origination
-
-Every `Err(MyError::Variant)` should be `Err(at(MyError::Variant))` or `Err(at!(MyError::Variant))`. If you skip this, there's no trace to propagate.
 
 ## API Reference
 
@@ -250,6 +174,75 @@ fn caller() -> Result<(), At<MyError>> {
 }
 ```
 
+## Avoiding Trace Loss
+
+whereat only works if you keep the trace alive as errors propagate. These patterns silently destroy traces — **avoid them**.
+
+### Never use `.into_inner()` during error propagation
+
+`into_inner()` is deprecated since 0.1.4 because it discards the trace. Use `decompose()` to get both error and trace, or `map_error()` / `map_err_at()` to convert types while preserving the trace.
+
+```rust
+// WRONG — trace is gone
+let bare_err = at_err.into_inner();
+return Err(at(MyError::Sub(bare_err)));
+
+// RIGHT — trace preserved
+return inner_call().map_err_at(|e| MyError::Sub(e));
+```
+
+### Never implement `From<At<X>> for Y`
+
+This gets invoked by `?` and discards the `At<>` wrapper (and its trace):
+
+```rust
+// WRONG — ? uses this From impl, trace dies
+impl From<At<BufferError>> for TiffError {
+    fn from(e: At<BufferError>) -> Self {
+        TiffError::Buffer(e.into_inner())  // trace lost!
+    }
+}
+
+// RIGHT — implement From on the bare types, convert with map_err_at
+impl From<BufferError> for TiffError {
+    fn from(e: BufferError) -> Self { TiffError::Buffer(e) }
+}
+
+fn decode() -> Result<(), At<TiffError>> {
+    pixel_call().map_err_at(TiffError::from)?;  // trace preserved
+    Ok(())
+}
+```
+
+### Never format-then-rewrap
+
+```rust
+// WRONG — inner trace is gone, you only get the adapter's location
+.map_err(|e| Error::Other(format!("decode failed: {}", e.into_inner())).at())?;
+
+// RIGHT — convert the error type, keep the trace
+.map_err_at(|e| Error::Other(e.to_string()))?;
+```
+
+### `#[from]` doesn't work with `At<>` — don't reach for `.into_inner()`
+
+thiserror's `#[from]` generates `From<SubError> for MyError`, but `?` on `Result<T, At<SubError>>` needs `From<At<SubError>> for At<MyError>`, which doesn't exist. The compiler will reject it. The temptation is to "fix" this with `.into_inner()` — **don't**. Use `map_err_at` instead:
+
+```rust
+// WON'T COMPILE — no From<At<SubError>> for At<MyError>
+sub_call()?;
+
+// WRONG — compiles but trace dies
+sub_call().map_err(|e| MyError::Sub(e.into_inner()))?;
+
+// RIGHT — trace preserved
+sub_call().map_err_at(|e| MyError::Sub(e))?;
+```
+
+### Always trace at error origination
+
+Every `Err(MyError::Variant)` should be `Err(at(MyError::Variant))` or `Err(at!(MyError::Variant))`. If you skip this, there's no trace to propagate.
+
 ## Design
 
 **You define your own error types.** whereat wraps them in `At<E>` to add location + context + crate tracking. Works with plain enums, structs, thiserror, anyhow — anything with `Debug`.
@@ -257,11 +250,11 @@ fn caller() -> Result<(), At<MyError>> {
 | Situation | Use |
 |-----------|-----|
 | Existing struct/enum you don't want to modify | Wrap with `At<YourError>` |
-| Want traces embedded inside your error type | Implement `AtTraceable` — see [ADVANCED.md](ADVANCED.md) |
+| Want traces embedded inside your error type | Implement [`AtTraceable`](ADVANCED.md#embedded-traces-attraceable) |
 
 `At<E>` is `no_std` (`core` + `alloc`). The `std` feature exists for historical compatibility but is a no-op — `core::error::Error` is stable since Rust 1.81.
 
-See [ADVANCED.md](ADVANCED.md) for embedded traces, inline storage features, workspace layouts, and link format customization.
+See also: [Inline storage features](ADVANCED.md#allocation-behavior) | [Workspace layouts](ADVANCED.md#complex-workspace-layouts) | [Link format customization](ADVANCED.md#link-formats) | [Pretty output](ADVANCED.md#pretty-output-formatters)
 
 ## License
 
