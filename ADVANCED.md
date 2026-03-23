@@ -2,12 +2,57 @@
 
 Most users only need `At<E>`, `at!()`, `.at()`, and `.map_err_at()` — see the [README](README.md). This document covers everything else: embedding traces in your own error types, tuning allocation behavior, workspace layouts, output formatting, and link customization.
 
+- [Internal Data Structure](#internal-data-structure) — how `At<E>` and `AtTrace` are laid out in memory
 - [Embedded Traces (AtTraceable)](#embedded-traces-attraceable) — store the trace inside your error type
 - [Complex Workspace Layouts](#complex-workspace-layouts) — monorepos and runtime path detection
 - [Link Formats](#link-formats) — GitHub, GitLab, Gitea, Bitbucket, custom
 - [Allocation Behavior](#allocation-behavior) — inline storage features, OOM handling
 - [Pretty Output Formatters](#pretty-output-formatters) — terminal colors, HTML
 - [Benchmarks](#benchmarks) — detailed numbers
+
+## Internal Data Structure
+
+```mermaid
+graph LR
+    subgraph AtE["At&lt;E&gt; (sizeof E + 8 bytes)"]
+        direction TB
+        error["error: E (inline)"]
+        trace_ptr["trace: Option&lt;Box&lt;AtTrace&gt;&gt;"]
+    end
+
+    trace_ptr -->|"None on Ok path"| AtTraceBox
+
+    subgraph AtTraceBox["AtTrace (112 bytes default)"]
+        direction TB
+        locs["locations: InlineVec&lt;Option&lt;&amp;Location&gt;, 4&gt;"]
+        crate_info["crate_info: Option&lt;&amp;'static AtCrateInfo&gt;"]
+        ctxs["contexts: Option&lt;Box&lt;Vec&lt;(u16, AtContext)&gt;&gt;&gt;"]
+    end
+```
+
+Locations are stored oldest-first in an inline vector (4 slots before heap spill). Each location is an `Option<&'static Location>` — `None` marks a skipped-frames placeholder (`[...]`).
+
+Contexts are stored separately in a `Vec<(u16, AtContext)>` where the `u16` is the index into the locations array. This means:
+- Adding a location (`.at()`) is just a push — no context allocation needed
+- Adding context (`.at_str()`) lazily allocates the context vec on first use
+- Multiple contexts can point to the same location index
+- The context vec is `Option<Box<Vec<...>>>` — 8 bytes when empty, no allocation until first context
+
+```
+locations:  [ loc0,   loc1,   loc2,   None  ]
+               │        │       │       └─ skipped frames marker
+               │        │       └─ src/handler.rs:42:5
+               │        └─ src/db.rs:89:9
+               └─ src/db.rs:15:13 (origin)
+
+contexts:   [ (2, Text("processing request")),
+              (2, Data(request_id: 7)),
+              (1, Text("user lookup failed")) ]
+              │    └─ points to locations[2]
+              └─ index into locations array
+```
+
+This design keeps the common case (locations only, no context) allocation-free beyond the initial `Box<AtTrace>`.
 
 ## Embedded Traces (AtTraceable)
 
