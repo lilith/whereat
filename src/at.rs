@@ -428,12 +428,17 @@ impl<E> At<E> {
     /// If the trace is empty, creates a frame at the caller's location first.
     ///
     /// The attached error is visible via [`contexts()`](Self::contexts) iteration
-    /// and trace display, but is **not** part of the [`Error::source()`] chain.
-    /// `At<E>::source()` always delegates to `E::source()`.
+    /// and [`full_trace()`](Self::full_trace) display, but is **not** part of the
+    /// [`Error::source()`] chain. `At<E>::source()` always delegates to `E::source()`.
     ///
-    /// Use this for errors that were *observed alongside* the primary error,
-    /// not for errors that *caused* it. If you need an error in the `.source()`
-    /// chain, store it inside your error type `E` directly.
+    /// This is intentional: `.source()` models a linear causal chain ("A was caused
+    /// by B"), while `.at_aside_error()` models an observation ("while handling A,
+    /// we also saw X"). These are different relationships, and forcing the latter
+    /// into a linear chain would be lossy — a trace can have multiple
+    /// `.at_aside_error()` calls at different frames.
+    ///
+    /// If you need an error to appear in the `.source()` chain, store it inside
+    /// your error type `E` directly.
     ///
     /// ## Example
     ///
