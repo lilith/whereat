@@ -54,32 +54,30 @@ backtrace crate         ██████████████████�
 
 ## Quick Start
 
-Two things to remember: `at()` creates a traced error, `.at()?` propagates it.
+Two things to remember: `at!()` creates a traced error, `.at()?` propagates it.
 
 ```rust
+whereat::define_at_crate_info!();  // once in lib.rs — enables GitHub links in traces
+
 use whereat::prelude::*;  // At, at, ResultAtExt, ErrorAtExt
 
 #[derive(Debug)]
 enum DbError { NotFound, ConnectionFailed }
 
 fn get_user(id: u64) -> Result<String, At<DbError>> {
-    if id == 0 { return Err(at(DbError::NotFound)); }  // at() starts the trace
+    if id == 0 { return Err(at!(DbError::NotFound)); }  // at!() starts the trace
     Ok("alice".into())
 }
 
 fn get_email(id: u64) -> Result<String, At<DbError>> {
-    let name = get_user(id).at()?;   // .at()? adds this call site to the trace
+    let name = get_user(id).at()?;  // .at()? adds this call site to the trace
     Ok(format!("{}@example.com", name))
-}
-
-fn send_welcome(id: u64) -> Result<(), At<DbError>> {
-    let email = get_email(id).at()?;  // each .at() records where the error passed through
-    println!("Welcome, {email}!");
-    Ok(())
 }
 ```
 
-That's it. If `get_user` fails, the trace shows every `.at()` call site it passed through.
+That's it. If `get_user` fails, the trace shows every `.at()` call site it passed through — with clickable GitHub links.
+
+For workspace crates: `whereat::define_at_crate_info!(path = "crates/mylib/");`
 
 ### Context and error type conversion
 
@@ -94,7 +92,7 @@ type ApiResult<T> = Result<T, At<ApiError>>;  // Result alias — recommended fo
 fn handle_request(id: u64) -> ApiResult<()> {
     let email = get_email(id)
         .map_err_at(ApiError::Db)?;          // DbError → ApiError, trace preserved
-    send_email(&email)
+    send_welcome(&email)
         .at()                                 // new frame at this call site
         .at_str("sending welcome email")?;    // context on that frame
     Ok(())
@@ -102,21 +100,6 @@ fn handle_request(id: u64) -> ApiResult<()> {
 ```
 
 `map_err_at` transforms the inner error while keeping the trace. This is the #1 pattern to get right — see [Avoiding Trace Loss](#avoiding-trace-loss).
-
-### Upgrade to GitHub links
-
-For **clickable source links** in production traces, add one line to your crate root and switch from `at()` to `at!()`:
-
-```rust
-// In lib.rs or main.rs
-whereat::define_at_crate_info!();
-
-fn get_user(id: u64) -> Result<String, At<DbError>> {
-    Err(at!(DbError::NotFound))  // Now includes repo links in traces
-}
-```
-
-For workspace crates: `whereat::define_at_crate_info!(path = "crates/mylib/");`
 
 ## API Overview
 
