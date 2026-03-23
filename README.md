@@ -76,7 +76,9 @@ fn find_user(id: u64) -> Result<String> {
 }
 
 fn process(id: u64) -> Result<String> {
-    find_user(id).at_str("looking up user")?;  // Adds context to the trace
+    find_user(id)
+        .at()                           // New frame — records this call site
+        .at_str("looking up user")?;    // Context on that frame
     Ok("done".into())
 }
 ```
