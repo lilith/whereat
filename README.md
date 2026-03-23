@@ -5,7 +5,7 @@
 [![Documentation](https://docs.rs/whereat/badge.svg)](https://docs.rs/whereat)
 [![codecov](https://codecov.io/gh/lilith/whereat/branch/main/graph/badge.svg)](https://codecov.io/gh/lilith/whereat)
 [![License](https://img.shields.io/crates/l/whereat.svg)](LICENSE)
-[![Docs Site](https://img.shields.io/badge/docs-site-blue)](https://lilith.github.io/whereat/)
+
 
 Know where the bug is `at()` — **without panic!, debuginfo, or overhead.** Replace `?` with `.at()?` to get build-time, async-friendly stacktraces with clickable GitHub links.
 
