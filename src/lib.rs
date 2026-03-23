@@ -1,5 +1,18 @@
 //! # whereat — error location tracking
 //!
+//! **150x faster than `backtrace`** — production error tracing without debuginfo, panic, or overhead.
+//!
+//! ```text
+//! Error: UserNotFound
+//!    at src/db.rs:142:9
+//!       ╰─ user_id = 42
+//!    at src/api.rs:89:5
+//!       ╰─ in handle_request
+//!    at myapp @ https://github.com/you/myapp/blob/a1b2c3d/src/main.rs#L23
+//! ```
+//!
+//! ## Quick Start
+//!
 //! [`at!()`](at!) creates a traced error. [`.at()?`](ResultAtExt::at) propagates it.
 //! [`map_err_at`](ResultAtExt::map_err_at) converts between error types without losing the trace.
 //!
@@ -25,10 +38,21 @@
 //! }
 //!
 //! let err = handler(0).unwrap_err();
-//! assert_eq!(err.frame_count(), 2); // at() in db_query + .at() in handler
+//! assert_eq!(err.frame_count(), 2);
 //! ```
 //!
-//! ## Quick reference
+//! For **clickable GitHub/GitLab links** in traces, add one line to your crate root:
+//!
+//! ```rust,ignore
+//! whereat::define_at_crate_info!();  // once in lib.rs — auto-detects forge from repo URL
+//! ```
+//!
+//! Then use [`at!(err)`](at!) instead of [`at(err)`](at()). For workspace crates:
+//! `whereat::define_at_crate_info!(path = "crates/mylib/");`
+//!
+//! Or use the prelude: `use whereat::prelude::*;` (re-exports [`At`], [`at`], [`ResultAtExt`], [`ErrorAtExt`]).
+//!
+//! ## API Reference
 //!
 //! **Create a trace:**
 //!
@@ -52,7 +76,7 @@
 //! | [`.at_aside_error(err)`](ResultAtExt::at_aside_error) | Related error (diagnostic, **not** in [`.source()`](core::error::Error::source) chain) |
 //! | [`.map_err_at(\|e\| ...)`](ResultAtExt::map_err_at) | Convert error type, **preserve trace** |
 //!
-//! **Inspect:**
+//! **Inspect / decompose:**
 //!
 //! | Method | Returns |
 //! |--------|---------|
@@ -62,10 +86,30 @@
 //! | [`.frame_count()`](At::frame_count) | `usize` |
 //! | [`.full_trace()`](At::full_trace) | Display formatter with all frames + contexts |
 //!
+//! ## Frames vs contexts
+//!
+//! [`.at()`](ResultAtExt::at) creates a **new frame** (a new location).
+//! [`.at_str()`](ResultAtExt::at_str) adds **context** to the last frame.
+//!
+//! ```rust
+//! use whereat::{at, At, ResultAtExt};
+//!
+//! #[derive(Debug)]
+//! struct E;
+//!
+//! // One frame, two contexts
+//! let e = at(E).at_str("a").at_str("b");
+//! assert_eq!(e.frame_count(), 1);
+//!
+//! // Two frames: at() creates first, .at() creates second
+//! let e = at(E).at().at_str("on second frame");
+//! assert_eq!(e.frame_count(), 2);
+//! ```
+//!
 //! ## Converting between error types
 //!
-//! Use [`map_err_at`](ResultAtExt::map_err_at) — **not** `map_err` — to convert error types
-//! across crate boundaries. `map_err` on `Result<T, At<E>>` discards the `At<>` wrapper.
+//! Use [`map_err_at`](ResultAtExt::map_err_at) — **not** `map_err` — to convert error types.
+//! `map_err` on `Result<T, At<E>>` discards the `At<>` wrapper and the trace with it.
 //!
 //! ```rust
 //! use whereat::{at, At, ResultAtExt};
@@ -100,16 +144,33 @@
 //! # wrapper().unwrap_err();
 //! ```
 //!
-//! ## Key rules
+//! ## Avoiding trace loss
 //!
-//! - [`.at()`](ResultAtExt::at) creates a **new frame**. [`.at_str()`](ResultAtExt::at_str) adds **context** to the last frame.
-//! - [`into_inner()`](At::into_inner) is **deprecated** — use [`decompose()`](At::decompose) or [`map_error()`](At::map_error).
-//! - [`at_error()`](At::at_error) is **deprecated** — use [`at_aside_error()`](At::at_aside_error).
-//! - [`At::source()`](core::error::Error::source) delegates to `E::source()`. Errors from [`at_aside_error()`](At::at_aside_error) are **not** in the source chain.
+//! - Use [`map_err_at`](ResultAtExt::map_err_at) at every error type boundary — not `map_err`
+//! - [`into_inner()`](At::into_inner) is **deprecated** — use [`decompose()`](At::decompose) or [`map_error()`](At::map_error)
+//! - [`at_error()`](At::at_error) is **deprecated** — use [`at_aside_error()`](At::at_aside_error)
+//! - Never implement `From<At<X>> for Y` — it discards the trace. Implement `From<X> for Y` and use `map_err_at`.
+//! - [`At::source()`](core::error::Error::source) delegates to `E::source()`. Errors from [`at_aside_error()`](At::at_aside_error) are diagnostic context, **not** in the source chain.
 //!
-//! See the [README](https://github.com/lilith/whereat#avoiding-trace-loss) for detailed
-//! anti-patterns, and [ADVANCED.md](https://github.com/lilith/whereat/blob/main/ADVANCED.md)
-//! for embedded traces, storage options, and output formatters.
+//! ## Which approach?
+//!
+//! | Situation | Use |
+//! |-----------|-----|
+//! | Existing struct/enum you don't want to modify | Wrap with [`At<YourError>`](At) |
+//! | Want traces embedded inside your error type | Implement [`AtTraceable`] |
+//!
+//! **Wrapper approach** (most common): Return `Result<T, At<YourError>>`.
+//!
+//! **Embedded approach**: Implement [`AtTraceable`] with an [`AtTrace`] field. See [`AtTraceable`] docs.
+//!
+//! ## Design
+//!
+//! - `At<E>` is `sizeof(E) + 8` bytes — error inline, trace boxed (null when empty)
+//! - Zero heap allocation on the Ok path
+//! - `.at_str("literal")` stores a pointer, no copy or allocation
+//! - `.at_string(|| ...)` closures only run on error
+//! - `#![no_std]` with `alloc` — `core::error::Error` is used (stable since Rust 1.81)
+//! - OOM: trace allocations use `try_reserve` and silently skip. Your error `E` always propagates.
 
 #![no_std]
 #![deny(unsafe_code)]
