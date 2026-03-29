@@ -1,11 +1,4 @@
-# whereat
-
-[![CI](https://github.com/lilith/whereat/actions/workflows/ci.yml/badge.svg)](https://github.com/lilith/whereat/actions/workflows/ci.yml)
-[![Crates.io](https://img.shields.io/crates/v/whereat.svg)](https://crates.io/crates/whereat)
-[![Documentation](https://docs.rs/whereat/badge.svg)](https://docs.rs/whereat)
-[![codecov](https://codecov.io/gh/lilith/whereat/branch/main/graph/badge.svg)](https://codecov.io/gh/lilith/whereat)
-[![License](https://img.shields.io/crates/l/whereat.svg)](LICENSE)
-
+# whereat [![CI](https://img.shields.io/github/actions/workflow/status/lilith/whereat/ci.yml?style=flat-square)](https://github.com/lilith/whereat/actions/workflows/ci.yml) [![crates.io](https://img.shields.io/crates/v/whereat?style=flat-square)](https://crates.io/crates/whereat) [![lib.rs](https://img.shields.io/crates/v/whereat?style=flat-square&label=lib.rs&color=blue)](https://lib.rs/crates/whereat) [![docs.rs](https://img.shields.io/docsrs/whereat?style=flat-square)](https://docs.rs/whereat) [![license](https://img.shields.io/crates/l/whereat?style=flat-square)](https://github.com/lilith/whereat#license)
 
 Know where the bug is `at()` — **without panic!, debuginfo, or overhead.** Replace `?` with `.at()?` to get build-time, async-friendly stacktraces with clickable GitHub links.
 
@@ -255,6 +248,81 @@ Every `Err(MyError::Variant)` should be `Err(at(MyError::Variant))` or `Err(at!(
 `At<E>` is `no_std` (`core` + `alloc`). The `std` feature exists for historical compatibility but is a no-op — `core::error::Error` is stable since Rust 1.81.
 
 See also: [Inline storage features](ADVANCED.md#allocation-behavior) | [Workspace layouts](ADVANCED.md#complex-workspace-layouts) | [Link format customization](ADVANCED.md#link-formats) | [Pretty output](ADVANCED.md#pretty-output-formatters)
+
+## Image tech I maintain
+
+| | |
+|:--|:--|
+| State of the art codecs<sup>[1]</sup> | [zenjpeg] · [zenpng] · [zenwebp] · [zengif] · [zenavif] ([rav1d-safe] · [zenrav1e] · [zenavif-parse] · [zenavif-serialize]) · [zenjxl] ([jxl-encoder] · [zenjxl-decoder]) · [zentiff] · [zenbitmaps] · [heic] · [zenraw] · [zenpdf] · [ultrahdr] · [mozjpeg-rs] · [webpx] |
+| Compression | [zenflate] · [zenzop] |
+| Processing | [zenresize] · [zenfilters] · [zenquant] · [zenblend] |
+| Metrics | [zensim] · [fast-ssim2] · [butteraugli] · [resamplescope-rs] · [codec-eval] · [codec-corpus] |
+| Pixel types & color | [zenpixels] · [zenpixels-convert] · [linear-srgb] · [garb] |
+| Pipeline | [zenpipe] · [zencodec] · [zencodecs] · [zenlayout] · [zennode] |
+| ImageResizer | [ImageResizer] (C#) — 24M+ NuGet downloads across all packages |
+| [Imageflow][] | Image optimization engine (Rust) — [.NET][imageflow-dotnet] · [node][imageflow-node] · [go][imageflow-go] — 9M+ NuGet downloads across all packages |
+| [Imageflow Server][] | [The fast, safe image server](https://www.imazen.io/) (Rust+C#) — 552K+ NuGet downloads, deployed by Fortune 500s and major brands |
+
+<sup>[1]</sup> <sub>as of 2026</sub>
+
+### General Rust awesomeness
+
+[archmage] · [magetypes] · [enough] · **whereat** · [zenbench] · [cargo-copter]
+
+[And other projects](https://www.imazen.io/open-source) · [GitHub @imazen](https://github.com/imazen) · [GitHub @lilith](https://github.com/lilith) · [lib.rs/~lilith](https://lib.rs/~lilith) · [NuGet](https://www.nuget.org/profiles/imazen) (over 30 million downloads / 87 packages)
+
+[zenjpeg]: https://crates.io/crates/zenjpeg
+[zenpng]: https://crates.io/crates/zenpng
+[zenwebp]: https://crates.io/crates/zenwebp
+[zengif]: https://crates.io/crates/zengif
+[zenavif]: https://crates.io/crates/zenavif
+[rav1d-safe]: https://crates.io/crates/rav1d-safe
+[zenrav1e]: https://crates.io/crates/zenrav1e
+[zenavif-parse]: https://crates.io/crates/zenavif-parse
+[zenavif-serialize]: https://crates.io/crates/zenavif-serialize
+[zenjxl]: https://crates.io/crates/zenjxl
+[jxl-encoder]: https://crates.io/crates/jxl-encoder
+[zenjxl-decoder]: https://crates.io/crates/zenjxl-decoder
+[zentiff]: https://crates.io/crates/zentiff
+[zenbitmaps]: https://crates.io/crates/zenbitmaps
+[heic]: https://crates.io/crates/heic
+[zenraw]: https://crates.io/crates/zenraw
+[zenpdf]: https://crates.io/crates/zenpdf
+[ultrahdr]: https://crates.io/crates/ultrahdr
+[mozjpeg-rs]: https://crates.io/crates/mozjpeg-rs
+[webpx]: https://crates.io/crates/webpx
+[zenflate]: https://crates.io/crates/zenflate
+[zenzop]: https://crates.io/crates/zenzop
+[zenresize]: https://crates.io/crates/zenresize
+[zenfilters]: https://crates.io/crates/zenfilters
+[zenquant]: https://crates.io/crates/zenquant
+[zenblend]: https://crates.io/crates/zenblend
+[zensim]: https://crates.io/crates/zensim
+[fast-ssim2]: https://crates.io/crates/fast-ssim2
+[butteraugli]: https://crates.io/crates/butteraugli
+[resamplescope-rs]: https://crates.io/crates/resamplescope-rs
+[codec-eval]: https://crates.io/crates/codec-eval
+[codec-corpus]: https://crates.io/crates/codec-corpus
+[zenpixels]: https://crates.io/crates/zenpixels
+[zenpixels-convert]: https://crates.io/crates/zenpixels-convert
+[linear-srgb]: https://crates.io/crates/linear-srgb
+[garb]: https://crates.io/crates/garb
+[zenpipe]: https://crates.io/crates/zenpipe
+[zencodec]: https://crates.io/crates/zencodec
+[zencodecs]: https://crates.io/crates/zencodecs
+[zenlayout]: https://crates.io/crates/zenlayout
+[zennode]: https://crates.io/crates/zennode
+[ImageResizer]: https://imageresizing.net
+[Imageflow]: https://github.com/imazen/imageflow
+[imageflow-dotnet]: https://www.nuget.org/packages/Imageflow.AllPlatforms
+[imageflow-node]: https://www.npmjs.com/package/@imazen/imageflow-node
+[imageflow-go]: https://github.com/imazen/imageflow-go
+[Imageflow Server]: https://github.com/imazen/imageflow-dotnet-server
+[archmage]: https://crates.io/crates/archmage
+[magetypes]: https://crates.io/crates/magetypes
+[enough]: https://crates.io/crates/enough
+[zenbench]: https://crates.io/crates/zenbench
+[cargo-copter]: https://crates.io/crates/cargo-copter
 
 ## License
 
