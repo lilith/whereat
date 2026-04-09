@@ -1,1 +1,15 @@
 /target/
+
+# Tooling noise
+.superwork/
+.claude/
+copter-report/
+.zenbench/
+.external-cache/
+Cargo.toml.original.txt
+*.rs.local
+*.profraw
+*.profdata
+perf.data
+perf.data.old
+fuzz-*.log
