@@ -11,7 +11,7 @@ description = "Lightweight error location tracking with small sizeof and no_std 
 repository = "https://github.com/lilith/whereat"
 keywords = ["error", "trace", "stacktrace", "track_caller", "no_std"]
 categories = ["rust-patterns", "no-std"]
-exclude = ["docs/", ".github/", ".gitmodules", "CLAUDE.md", "CONTEXT-HANDOFF.md", "FEEDBACK.md", "justfile", "benches/", "tests/", ".claude/", ".superwork/", ".zenbench/", "copter-report/", "Cross.toml", "Cargo.toml.original.txt", "fuzz/"]
+exclude = ["docs/", ".github/", ".gitmodules", ".gitignore", ".workongoing", "CLAUDE.md", "CONTEXT-HANDOFF.md", "FEEDBACK.md", "justfile", "benches/", "tests/", ".claude/", ".superwork/", ".zenbench/", "copter-report/", "Cross.toml", "Cargo.toml.original.txt", "fuzz/"]
 
 [features]
 default = []
