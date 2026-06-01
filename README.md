@@ -13,6 +13,11 @@ Error: UserNotFound
 
 Compatible with `no_std`, plain enums, structs, thiserror, anyhow — any type with `Debug`. No changes to your error types required.
 
+```toml
+[dependencies]
+whereat = "0.1.5"
+```
+
 ## Quick Start
 
 `at!()` creates a traced error. `.at()?` propagates it. That's it.
