@@ -7,6 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- Versioned public-API surface snapshot at `docs/public-api/whereat.txt`,
+  regenerated on every `cargo test` via `tests/public_api_doc.rs`
+  (`ZEN_API_DOC=check` verifies in CI, `=off` skips; justfile recipes
+  `api-doc` / `api-doc-check`)
+
 ### Changed
 
 - Exclude `.gitignore` and `.workongoing` from the published crate package (fd223f58)

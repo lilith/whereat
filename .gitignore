@@ -13,3 +13,6 @@ Cargo.toml.original.txt
 perf.data
 perf.data.old
 fuzz-*.log
+
+# Agent coordination marker (never committed)
+.workongoing
