@@ -1,4 +1,6 @@
 /target/
+# apidoc snapshot runner build dir (its Cargo.lock IS committed)
+apidoc/target/
 
 # Tooling noise
 .superwork/

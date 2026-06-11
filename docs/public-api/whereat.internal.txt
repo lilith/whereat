@@ -1,0 +1,86 @@
+# whereat public API — doc(hidden) items and excluded-feature surface
+# excluded features: _html,_smallvec-128-bytes,_smallvec-256-bytes,_termcolor,_tinyvec-128-bytes,_tinyvec-256-bytes,_tinyvec-512-bytes,_tinyvec-64-bytes
+# (regenerated on every `cargo test` by zenutils-apidoc; ZEN_API_DOC=check verifies, =off skips).
+# Encodings: crate-name prefix stripped; auto traits collapse to a
+# count + exceptions; trait impls collapse to one roster line per
+# type (method signatures live at the trait definition); blanket
+# impls omitted; re-export duplicates annotated `[also: path]`.
+# DO NOT EDIT BY HAND — commit regenerated changes with the code.
+
+## summary
+#
+#   pub types (struct/enum/trait/alias)         2
+#   pub consts/statics                          5
+#   pub macros                                  1
+#   free functions                              1
+#   inherent methods                           43
+#   trait roster entries (type × trait)         9
+#
+# per-module pub lines:
+#   (root)                           51
+#   core                              1
+
+## items (52 lines)
+
+pub const fn AtTraceBoxed::new() -> Self
+pub const BITBUCKET_LINK_FORMAT: &str
+pub const GITEA_LINK_FORMAT: &str
+pub const GITHUB_LINK_FORMAT: &str
+pub const GITLAB_LINK_FORMAT: &str
+pub fn core::option::Option<AtTrace>::from(AtTraceBoxed) -> Self
+pub fn At<E>::at_first_insert(&mut self, AtFrameOwned)
+pub fn At<E>::at_first_pop(&mut self) -> core::option::Option<AtFrameOwned>
+pub fn At<E>::at_pop(&mut self) -> core::option::Option<AtFrameOwned>
+pub fn At<E>::at_push(&mut self, AtFrameOwned)
+pub fn At<E>::at_skipped_frames(self) -> Self
+pub fn At<E>::display_color(&self) -> format::term::TermColorDisplay<'_, E>
+pub fn At<E>::display_color_meta(&self) -> format::term::TermColorMetaDisplay<'_, E>
+pub fn At<E>::display_html(&self) -> format::html::HtmlDisplay<'_, E>
+pub fn At<E>::display_html_styled(&self) -> format::html::HtmlDisplay<'_, E>
+pub fn AtFrameOwned::capture() -> Self
+pub fn AtFrameOwned::context_count(&self) -> usize
+pub fn AtFrameOwned::contexts(&self) -> impl core::iter::traits::iterator::Iterator<Item = AtContextRef<'_>>
+pub fn AtFrameOwned::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+pub fn AtFrameOwned::is_skipped(&self) -> bool
+pub fn AtFrameOwned::location(&self) -> core::option::Option<&'static core::panic::location::Location<'static>>
+pub fn AtFrameOwned::new(core::option::Option<&'static core::panic::location::Location<'static>>) -> Self
+pub fn AtFrameOwned::with_data<T: core::fmt::Display + core::marker::Send + core::marker::Sync + 'static>(self, T) -> Self
+pub fn AtFrameOwned::with_debug<T: core::fmt::Debug + core::marker::Send + core::marker::Sync + 'static>(self, T) -> Self
+pub fn AtFrameOwned::with_str(self, &'static str) -> Self
+pub fn AtFrameOwned::with_string(self, alloc::string::String) -> Self
+pub fn AtTrace::pop(&mut self) -> core::option::Option<AtFrameOwned>
+pub fn AtTrace::pop_first(&mut self) -> core::option::Option<AtFrameOwned>
+pub fn AtTrace::push(&mut self, AtFrameOwned)
+pub fn AtTrace::push_first(&mut self, AtFrameOwned)
+pub fn AtTraceBoxed::as_mut(&mut self) -> core::option::Option<&mut AtTrace>
+pub fn AtTraceBoxed::as_ref(&self) -> core::option::Option<&AtTrace>
+pub fn AtTraceBoxed::capture() -> Self
+pub fn AtTraceBoxed::crate_info(&self) -> core::option::Option<&'static AtCrateInfo>
+pub fn AtTraceBoxed::default() -> AtTraceBoxed
+pub fn AtTraceBoxed::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+pub fn AtTraceBoxed::frame_count(&self) -> usize
+pub fn AtTraceBoxed::frames(&self) -> impl core::iter::traits::iterator::Iterator<Item = AtFrame<'_>>
+pub fn AtTraceBoxed::from(AtTrace) -> Self
+pub fn AtTraceBoxed::get_or_insert_mut(&mut self) -> &mut AtTrace
+pub fn AtTraceBoxed::is_empty(&self) -> bool
+pub fn AtTraceBoxed::set(&mut self, AtTrace)
+pub fn AtTraceBoxed::take(&mut self) -> core::option::Option<AtTrace>
+pub fn AtTraceable::at_first_insert(&mut self, AtFrameOwned)
+pub fn AtTraceable::at_first_pop(&mut self) -> core::option::Option<AtFrameOwned>
+pub fn AtTraceable::at_pop(&mut self) -> core::option::Option<AtFrameOwned>
+pub fn AtTraceable::at_push(&mut self, AtFrameOwned)
+pub fn AtTraceable::at_skipped_frames(self) -> Self
+pub fn at_crate_info() -> &'static AtCrateInfo
+pub macro __whereat_detect_commit!
+pub struct AtFrameOwned
+pub struct AtTraceBoxed(_)
+
+## trait impls (7 types)
+
+AtContextRef<'a>: TrivialClone
+AtCrateInfo: TrivialClone
+AtCrateInfoBuilder: TrivialClone
+AtFrame<'a>: TrivialClone
+AtFrameOwned: Debug
+AtTraceBoxed: Debug, Default, From<AtTrace>
+core::option::Option<AtTrace>: From<AtTraceBoxed>

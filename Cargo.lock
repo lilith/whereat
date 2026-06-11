@@ -661,7 +661,6 @@ dependencies = [
  "criterion",
  "fake-dep",
  "owo-colors",
- "serde_json",
  "smallvec",
  "static_assertions",
  "thiserror",

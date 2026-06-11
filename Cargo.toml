@@ -1,5 +1,9 @@
 [workspace]
 members = [".", "test-crates/fake-dep"]
+# `apidoc/` is the CI-free public-API snapshot runner: excluded so plain
+# `cargo test` and every CI job (incl. --all-features) never compile its
+# dependency tree or run rustdoc. Regenerate via `just api-doc`.
+exclude = ["apidoc"]
 
 [package]
 name = "whereat"
@@ -11,7 +15,7 @@ description = "Lightweight error location tracking with small sizeof and no_std 
 repository = "https://github.com/lilith/whereat"
 keywords = ["error", "trace", "stacktrace", "track_caller", "no_std"]
 categories = ["rust-patterns", "no-std"]
-exclude = ["docs/", ".github/", ".gitmodules", ".gitignore", ".workongoing", "CLAUDE.md", "CONTEXT-HANDOFF.md", "FEEDBACK.md", "justfile", "benches/", "tests/", ".claude/", ".superwork/", ".zenbench/", "copter-report/", "Cross.toml", "Cargo.toml.original.txt", "fuzz/"]
+exclude = ["docs/", ".github/", ".gitmodules", ".gitignore", ".workongoing", "CLAUDE.md", "CONTEXT-HANDOFF.md", "FEEDBACK.md", "justfile", "benches/", "tests/", "apidoc/", ".claude/", ".superwork/", ".zenbench/", "copter-report/", "Cross.toml", "Cargo.toml.original.txt", "fuzz/"]
 
 [features]
 default = []
@@ -32,7 +36,6 @@ smallvec = { version = "1.13", optional = true, default-features = false, featur
 owo-colors = { version = "4.2", optional = true, default-features = false }
 
 [dev-dependencies]
-serde_json = "1.0.150"
 static_assertions = "1.1"
 criterion = { version = "0.8", features = ["html_reports"] }
 anyhow = "1.0.100"
