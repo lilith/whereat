@@ -429,7 +429,8 @@ impl<E> At<E> {
     ///
     /// The attached error is visible via [`contexts()`](Self::contexts) iteration
     /// and [`full_trace()`](Self::full_trace) display, but is **not** part of the
-    /// [`Error::source()`] chain. `At<E>::source()` always delegates to `E::source()`.
+    /// [`Error::source()`](core::error::Error::source) chain. `At<E>::source()`
+    /// always delegates to `E::source()`.
     ///
     /// This is intentional: `.source()` models a linear causal chain ("A was caused
     /// by B"), while `.at_aside_error()` models an observation ("while handling A,
