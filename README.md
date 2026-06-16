@@ -110,6 +110,30 @@ graph LR
 | `at(err)` | Any type | ❌ None | Quick prototyping, no setup |
 | `err.start_at()` | `Error` types | ❌ None | Chaining on error values |
 
+### The prelude
+
+`use whereat::prelude::*;` glob-imports the **types and traits** you need for `.at()?`-style
+propagation:
+
+| Re-exported by `prelude` | What it is |
+|--------------------------|------------|
+| `At` | the `At<E>` wrapper type |
+| `at` | the `at(err)` **function** (no crate info) |
+| `ResultAtExt` | the extension trait powering `.at()` / `.at_str()` / `.map_err_at()` on `Result<T, At<E>>` |
+| `ErrorAtExt` | `.start_at()` on values implementing `Error` |
+
+The **macros are NOT in the prelude** — `at!`, `at_crate!`, and `define_at_crate_info!` are exported at
+the crate root (via `#[macro_export]`), and the glob does not pull them in. Call them qualified:
+`whereat::at!(...)`, `whereat::at_crate!(...)`, `whereat::define_at_crate_info!()` (the README's
+Quick Start does exactly this for `define_at_crate_info!`). You can alternatively `use whereat::at;`
+to import the `at!` macro by name — the macro and the same-named `at` *function* live in different
+namespaces, so importing one doesn't remove the other.
+
+The free function `at(err)` (lowercase, no `!`) *is* glob-imported, so `use whereat::prelude::*;` alone
+is enough for the no-setup `at(err)` path; you only need to reach for `whereat::` qualification when you
+want the crate-info macros (`at!` / `at_crate!`). `ResultAtTraceableExt` (for the embedded-trace
+`AtTraceable` approach) is also not in the prelude — import it from `whereat::` directly when needed.
+
 ### Extending a trace
 
 On `Result<T, At<E>>`:
@@ -130,13 +154,107 @@ On `Result<T, At<E>>`:
 
 ### Inspecting and decomposing
 
-| Method | Effect |
-|--------|--------|
-| `.error()` | Borrow the inner `&E` |
-| `.decompose()` | Consume into `(E, Option<AtTrace>)` — preserves the trace |
-| `.map_error(\|e\| ...)` | Convert error type inside `At<E>`, preserving trace |
-| `.frame_count()` | Number of location frames in the trace |
+| Method | Returns / Effect |
+|--------|------------------|
+| `.error()` | `&E` — borrow the inner error |
+| `.decompose()` | `(E, Option<AtTrace>)` — consume, preserving the trace |
+| `.map_error(\|e\| ...)` | `At<E2>` — convert error type, preserving trace |
+| `.frames()` | `impl Iterator<Item = AtFrame<'_>>` — each frame's location + contexts, **oldest first** |
+| `.frame_count()` | `usize` — number of location frames |
 | `.full_trace()` | Display formatter showing all frames + contexts |
+
+Each `AtFrame` exposes `.location() -> Option<&'static std::panic::Location>` (it's `None` only for a
+skipped-frames marker). A `Location` gives you `.file() -> &str`, `.line() -> u32`, and
+`.column() -> u32` as plain values — that's how you get `file:line` as **structured data** (not a
+rendered string) for a JSON/structured log. See [Structured logging](#structured-logging-extracting-fileline).
+
+`At<E>` itself has no `.location()` — locations live on frames, because a trace can hold several. Use
+`.frames().next().and_then(|f| f.location())` for the origin (oldest) frame.
+
+### `At<E>` implements `std::error::Error` (when `E` does)
+
+`At<E>` implements [`std::error::Error`](https://doc.rust-lang.org/std/error/trait.Error.html) whenever
+`E: std::error::Error` — the impl is `impl<E: core::error::Error> core::error::Error for At<E>`, and its
+`.source()` delegates to the inner error's `.source()`. So an `At<E>` propagates with `?` straight into
+`Box<dyn std::error::Error>`, `anyhow::Error`, or `eyre::Report` — with the trace intact, and without
+`.into_inner()` (which would discard it):
+
+```rust
+use whereat::{at, At};
+
+#[derive(Debug)]
+struct DbError;
+impl std::fmt::Display for DbError {
+    fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result { write!(f, "db error") }
+}
+impl std::error::Error for DbError {}
+
+fn query() -> Result<(), At<DbError>> { Err(at(DbError)) }
+
+// At<DbError>: Error, so `?` coerces it into Box<dyn Error>.
+fn run() -> Result<(), Box<dyn std::error::Error>> {
+    query()?; // At<DbError> → Box<dyn Error>
+    Ok(())
+}
+# run().ok();
+```
+
+The bound is `E: Error`, so the inner error must implement `Display + Debug + Error` for this to apply.
+A plain enum that only derives `Debug` is not an `Error` — keep returning `At<YourError>` for those and
+convert at the boundary with `map_err_at`.
+
+### Structured logging: extracting `file:line`
+
+For a server log you usually want the error's **origin** as structured fields, not a human-rendered
+multi-line trace. `frames()` yields oldest-first, so `frames().next()` is the origination site (where
+`at()` / `at!()` first captured the location), and `.error()` borrows the inner error:
+
+```rust
+use whereat::{at, At};
+
+#[derive(Debug)]
+struct DbError { code: u32 }
+
+fn query() -> Result<(), At<DbError>> {
+    Err(at(DbError { code: 42 })) // origin frame captured here
+}
+
+fn log_error(e: &At<DbError>) {
+    // First frame = where the trace started (oldest-first ordering).
+    let origin = e.frames().next().and_then(|f| f.location());
+    let file = origin.map(|l| l.file()).unwrap_or("<unknown>");
+    let line = origin.map(|l| l.line()).unwrap_or(0);
+    let column = origin.map(|l| l.column()).unwrap_or(0);
+
+    // file / line / column are plain &str / u32 — feed them to any structured
+    // logger (tracing, slog, serde_json, ...) as real fields, e.g.:
+    //
+    //   tracing::error!(
+    //       error = ?e.error(),   // &DbError, the inner error
+    //       file, line, column,
+    //       "request failed",
+    //   );
+    let _ = (file, line, column, e.error());
+}
+
+# let e = query().unwrap_err();
+# log_error(&e);
+```
+
+To record **every** propagation site (not just the origin), iterate all frames — each `Location` is a
+`(file, line, column)` triple:
+
+```rust
+# use whereat::{at, At, ResultAtExt};
+# #[derive(Debug)]
+# struct DbError;
+# let e: At<DbError> = at(DbError).at();
+let trace: Vec<(&str, u32, u32)> = e
+    .frames()
+    .filter_map(|f| f.location())               // skip skipped-frames markers
+    .map(|l| (l.file(), l.line(), l.column()))
+    .collect(); // oldest frame first
+```
 
 ### Cross-crate tracing
 

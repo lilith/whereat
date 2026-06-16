@@ -14,6 +14,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   (`ZEN_API_DOC=check` verifies in CI, `=off` skips; justfile recipes
   `api-doc` / `api-doc-check`)
 
+### Documentation
+
+- README: show structured `file:line:column` extraction for server logs via
+  `frames().next().and_then(|f| f.location())` + `.error()`, state that
+  `At<E>: std::error::Error` when `E: Error` (so `?` flows into
+  `Box<dyn Error>`/anyhow/eyre with the trace intact), and document the
+  `prelude` exports — including that the `at!` / `at_crate!` /
+  `define_at_crate_info!` macros need `whereat::` qualification (the prelude
+  glob covers only `At`, `at`, `ResultAtExt`, `ErrorAtExt`)
+
 ### Changed
 
 - Exclude `.gitignore` and `.workongoing` from the published crate package (fd223f58)
