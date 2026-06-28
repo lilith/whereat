@@ -1,4 +1,6 @@
-# whereat [![CI](https://img.shields.io/github/actions/workflow/status/lilith/whereat/ci.yml?style=flat-square&label=CI)](https://github.com/lilith/whereat/actions/workflows/ci.yml) [![crates.io](https://img.shields.io/crates/v/whereat?style=flat-square)](https://crates.io/crates/whereat) [![lib.rs](https://img.shields.io/crates/v/whereat?style=flat-square&label=lib.rs&color=blue)](https://lib.rs/crates/whereat) [![docs.rs](https://img.shields.io/docsrs/whereat?style=flat-square)](https://docs.rs/whereat) [![MSRV](https://img.shields.io/badge/MSRV-1.85-blue?style=flat-square)](https://doc.rust-lang.org/cargo/reference/manifest.html#the-rust-version-field) [![license](https://img.shields.io/crates/l/whereat?style=flat-square)](#license)
+<!-- GENERATED FROM README.md by zenutils gen-readme-crates.sh — DO NOT EDIT. -->
+
+# whereat
 
 Know where the bug is `at()` — **without panic!, debuginfo, or overhead.** Replace `?` with `.at()?` to get build-time, async-friendly stacktraces with clickable GitHub links.
 
@@ -67,23 +69,6 @@ See [Avoiding Trace Loss](#avoiding-trace-loss) for patterns that silently destr
 
 ## How it works
 
-<!-- crates.io:skip-start -->
-```mermaid
-graph LR
-    subgraph "At&lt;E&gt;"
-        direction TB
-        E["error: E"]
-        T["trace: 8 bytes"]
-    end
-    T -->|"null until error"| Trace
-    subgraph Trace["AtTrace (heap, 112 bytes default)"]
-        direction TB
-        L["locations: InlineVec&lt;4&gt;"]
-        C["contexts"]
-        CI["crate_info"]
-    end
-```
-<!-- crates.io:skip-end -->
 
 `At<E>` is `sizeof(E) + 8` bytes. The trace pointer is null until an error occurs — zero heap allocation on the Ok path. Each `.at()` is `#[track_caller]`, so the compiler bakes file:line:col into the binary as static data. No stack walking, no debug symbols.
 

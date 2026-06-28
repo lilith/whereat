@@ -23,6 +23,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `prelude` exports — including that the `at!` / `at_crate!` /
   `define_at_crate_info!` macros need `whereat::` qualification (the prelude
   glob covers only `At`, `at`, `ResultAtExt`, `ErrorAtExt`)
+- README: split into a GitHub `README.md` and a generated, badge-free
+  `README.crates.md` for crates.io (`readme = "README.crates.md"`); add the CI
+  badge `label` + an MSRV badge, make cross-file links absolute, and refresh the
+  crosslink footer
 
 ### Changed
 

@@ -13,6 +13,7 @@ rust-version = "1.85"
 license = "MIT OR Apache-2.0"
 description = "Lightweight error location tracking with small sizeof and no_std support"
 repository = "https://github.com/lilith/whereat"
+readme = "README.crates.md"
 keywords = ["error", "trace", "stacktrace", "track_caller", "no_std"]
 categories = ["rust-patterns", "no-std"]
 exclude = ["docs/", ".github/", ".gitmodules", ".gitignore", ".workongoing", "CLAUDE.md", "CONTEXT-HANDOFF.md", "FEEDBACK.md", "justfile", "benches/", "tests/", "apidoc/", ".claude/", ".superwork/", ".zenbench/", "copter-report/", "Cross.toml", "Cargo.toml.original.txt", "fuzz/"]
