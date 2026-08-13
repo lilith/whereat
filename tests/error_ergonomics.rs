@@ -7,8 +7,6 @@
 //! - anyhow
 //! - thiserror
 
-// Allow large error types in tests - we're demonstrating API usage, not optimizing for size
-#![allow(clippy::result_large_err)]
 
 use std::error::Error;
 use std::fmt;
