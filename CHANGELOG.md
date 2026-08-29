@@ -7,6 +7,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- Dependency requirements written out in full instead of truncated to two
+  components, at the versions actually locked and tested: `tinyvec` 1.9 →
+  1.12.0, `smallvec` 1.13 → 1.15.2, `owo-colors` 4.2 → 4.4.0, `criterion`
+  0.8 → 0.8.2, `backtrace` 0.3 → 0.3.76, `static_assertions` 1.1 → 1.1.0.
+  Dev-dependency bumps: `anyhow` 1.0.100 → 1.0.104, `thiserror` 2.0.17 →
+  2.0.20. `zenutils-apidoc` 0.1.0 → 0.1.1 in the workspace-excluded apidoc
+  runner. Full transitive lockfile refresh; no zen-family crate moved.
+  Test suite unchanged at 8 suites / 337 passed / 0 failed.
+
 ### Added
 
 - Versioned public-API surface snapshot at `docs/public-api/whereat.txt`,
