@@ -25,7 +25,9 @@ GitHub Actions workflow at `.github/workflows/ci.yml`:
 
 - `At<E>` is `sizeof(E) + 8` bytes (error inline, trace boxed)
 - All allocations are fallible where stable APIs allow (Vec/String use try_reserve)
-- `Box::try_new` not yet stable - using `Box::new` which can panic on OOM
+- `Box::try_new` not yet stable - the `AtTrace` box is fallible via a one-element
+  `Vec` (`try_reserve_exact` + `into_boxed_slice` → `Box<[AtTrace; 1]>`); trait-object
+  context boxes still use `Box::new` (aborts on OOM)
 - Error `E` always propagates since stored inline
 - No `wide`/`multiversed` needed - this is not SIMD code
 

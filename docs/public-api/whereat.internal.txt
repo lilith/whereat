@@ -56,7 +56,7 @@ pub fn AtTraceBoxed::as_mut(&mut self) -> core::option::Option<&mut AtTrace>
 pub fn AtTraceBoxed::as_ref(&self) -> core::option::Option<&AtTrace>
 pub fn AtTraceBoxed::capture() -> Self
 pub fn AtTraceBoxed::crate_info(&self) -> core::option::Option<&'static AtCrateInfo>
-pub fn AtTraceBoxed::default() -> AtTraceBoxed
+pub fn AtTraceBoxed::default() -> Self
 pub fn AtTraceBoxed::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
 pub fn AtTraceBoxed::frame_count(&self) -> usize
 pub fn AtTraceBoxed::frames(&self) -> impl core::iter::traits::iterator::Iterator<Item = AtFrame<'_>>
