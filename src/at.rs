@@ -121,8 +121,9 @@ impl<E> At<E> {
     }
 
     /// Ensure trace exists, creating it if necessary.
-    fn ensure_trace(&mut self) -> &mut AtTrace {
-        self.trace.get_or_insert_mut()
+    /// Returns `None` if the trace allocation fails.
+    fn ensure_trace(&mut self) -> Option<&mut AtTrace> {
+        self.trace.try_get_or_insert_mut()
     }
 
     /// Add the caller's location to the trace.
@@ -150,7 +151,9 @@ impl<E> At<E> {
     #[inline]
     pub fn at(mut self) -> Self {
         let loc = Location::caller();
-        let trace = self.trace.get_or_insert_mut();
+        let Some(trace) = self.trace.try_get_or_insert_mut() else {
+            return self;
+        };
         let _ = trace.try_push(loc);
         self
     }
@@ -184,7 +187,9 @@ impl<E> At<E> {
         // Strip "::{{closure}}" suffix if present
         let name = full_name.strip_suffix("::{{closure}}").unwrap_or(full_name);
         let loc = Location::caller();
-        let trace = self.trace.get_or_insert_mut();
+        let Some(trace) = self.trace.try_get_or_insert_mut() else {
+            return self;
+        };
         // First push a new location frame
         let _ = trace.try_push(loc);
         // Then add function name context to that frame
@@ -220,7 +225,9 @@ impl<E> At<E> {
     #[inline]
     pub fn at_named(mut self, name: &'static str) -> Self {
         let loc = Location::caller();
-        let trace = self.trace.get_or_insert_mut();
+        let Some(trace) = self.trace.try_get_or_insert_mut() else {
+            return self;
+        };
         // Push a new location frame
         let _ = trace.try_push(loc);
         // Add the name as function-name-style context
@@ -277,7 +284,9 @@ impl<E> At<E> {
     pub fn at_str(mut self, msg: &'static str) -> Self {
         let loc = Location::caller();
         let context = AtContext::Text(Cow::Borrowed(msg));
-        let trace = self.trace.get_or_insert_mut();
+        let Some(trace) = self.trace.try_get_or_insert_mut() else {
+            return self;
+        };
         trace.try_add_context(loc, context);
         self
     }
@@ -314,7 +323,9 @@ impl<E> At<E> {
     pub fn at_string(mut self, f: impl FnOnce() -> String) -> Self {
         let loc = Location::caller();
         let context = AtContext::Text(Cow::Owned(f()));
-        let trace = self.trace.get_or_insert_mut();
+        let Some(trace) = self.trace.try_get_or_insert_mut() else {
+            return self;
+        };
         trace.try_add_context(loc, context);
         self
     }
@@ -366,7 +377,9 @@ impl<E> At<E> {
         let loc = Location::caller();
         let ctx = f();
         let context = AtContext::Display(Box::new(ctx));
-        let trace = self.trace.get_or_insert_mut();
+        let Some(trace) = self.trace.try_get_or_insert_mut() else {
+            return self;
+        };
         trace.try_add_context(loc, context);
         self
     }
@@ -411,7 +424,9 @@ impl<E> At<E> {
         let loc = Location::caller();
         let ctx = f();
         let context = AtContext::Debug(Box::new(ctx));
-        let trace = self.trace.get_or_insert_mut();
+        let Some(trace) = self.trace.try_get_or_insert_mut() else {
+            return self;
+        };
         trace.try_add_context(loc, context);
         self
     }
@@ -462,7 +477,9 @@ impl<E> At<E> {
     ) -> Self {
         let loc = Location::caller();
         let context = AtContext::Error(Box::new(err));
-        let trace = self.trace.get_or_insert_mut();
+        let Some(trace) = self.trace.try_get_or_insert_mut() else {
+            return self;
+        };
         trace.try_add_context(loc, context);
         self
     }
@@ -484,7 +501,9 @@ impl<E> At<E> {
     pub fn at_error<Err: core::error::Error + Send + Sync + 'static>(mut self, err: Err) -> Self {
         let loc = Location::caller();
         let context = AtContext::Error(Box::new(err));
-        let trace = self.trace.get_or_insert_mut();
+        let Some(trace) = self.trace.try_get_or_insert_mut() else {
+            return self;
+        };
         trace.try_add_context(loc, context);
         self
     }
@@ -521,7 +540,9 @@ impl<E> At<E> {
     #[inline]
     pub fn at_crate(mut self, info: &'static AtCrateInfo) -> Self {
         let loc = Location::caller();
-        let trace = self.trace.get_or_insert_mut();
+        let Some(trace) = self.trace.try_get_or_insert_mut() else {
+            return self;
+        };
         trace.try_add_crate_boundary(loc, info);
         self
     }
@@ -534,7 +555,9 @@ impl<E> At<E> {
     #[doc(hidden)]
     #[inline]
     pub fn at_skipped_frames(mut self) -> Self {
-        let trace = self.trace.get_or_insert_mut();
+        let Some(trace) = self.trace.try_get_or_insert_mut() else {
+            return self;
+        };
         let _ = trace.try_push_skipped();
         self
     }
@@ -559,7 +582,9 @@ impl<E> At<E> {
     /// ```
     #[inline]
     pub fn set_crate_info(mut self, info: &'static AtCrateInfo) -> Self {
-        let trace = self.trace.get_or_insert_mut();
+        let Some(trace) = self.trace.try_get_or_insert_mut() else {
+            return self;
+        };
         trace.set_crate_info(info);
         self
     }
@@ -759,7 +784,9 @@ impl<E> At<E> {
     /// Push a segment (location + contexts) to the end of the trace.
     #[inline]
     pub fn at_push(&mut self, segment: AtFrameOwned) {
-        self.ensure_trace().push(segment);
+        if let Some(trace) = self.ensure_trace() {
+            trace.push(segment);
+        }
     }
 
     /// Pop the oldest location and its contexts from the trace.
@@ -773,7 +800,9 @@ impl<E> At<E> {
     /// Insert a segment (location + contexts) at the beginning of the trace.
     #[inline]
     pub fn at_first_insert(&mut self, segment: AtFrameOwned) {
-        self.ensure_trace().push_first(segment);
+        if let Some(trace) = self.ensure_trace() {
+            trace.push_first(segment);
+        }
     }
 
     /// Take the entire trace, leaving self with an empty trace.

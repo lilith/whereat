@@ -261,7 +261,13 @@ whereat = { version = "0.1", features = ["_tinyvec-128-bytes"] }
 ### OOM Handling
 
 - `Vec` and `String` operations use `try_reserve` — silently skip on OOM
-- `Box` allocations use `Box::new` — can panic (waiting for `Box::try_new` stabilization)
+- The `AtTrace` heap allocation is fallible: a one-element `Vec` reserved with
+  `try_reserve_exact` is converted to `Box<[AtTrace; 1]>` (same thin pointer as
+  `Box<AtTrace>`) — the trace is silently dropped on OOM
+- Trait-object context boxes (`Box<dyn ...>`) still use `Box::new` — abort on OOM
+  (waiting for `Box::try_new` stabilization)
+- `AtTraceBoxed::get_or_insert_mut` panics (rather than aborting) if the trace
+  allocation fails; internal `At<E>` mutation paths skip tracing silently
 - The error `E` is always stored inline in `At<E>`, so errors propagate even if tracing fails
 
 ## Pretty Output Formatters

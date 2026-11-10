@@ -9,6 +9,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- `AtTraceBoxed` trace allocation is now fallible: the trace is stored as
+  `Box<[AtTrace; 1]>` built via `Vec::try_reserve_exact(1)` + `into_boxed_slice`
+  (same thin 8-byte pointer as `Box<AtTrace>`). On OOM the trace is silently
+  dropped instead of aborting; `AtTraceBoxed::get_or_insert_mut` now panics
+  rather than aborting on OOM. Costs ~4 ns more per trace allocation on
+  x86-64 microbenchmarks (the one-element `Vec` path does not get `Box::new`'s
+  construct-in-place elision).
 - Dependency requirements written out in full instead of truncated to two
   components, at the versions actually locked and tested: `tinyvec` 1.9 →
   1.12.0, `smallvec` 1.13 → 1.15.2, `owo-colors` 4.2 → 4.4.0, `criterion`

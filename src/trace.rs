@@ -122,17 +122,33 @@ type ContextVec = Option<Box<Vec<ContextEntry>>>;
 // ============================================================================
 //
 // Uses stable try_reserve APIs where available. Box::try_new is not yet stable,
-// so Box allocations use regular Box::new which can panic on OOM.
-// In practice, OOM panics are rare and the error itself still propagates
+// so trait-object Box allocations still use Box::new which aborts on OOM.
+// For the large AtTrace allocation, a fallible one-element Vec is converted to
+// Box<[AtTrace; 1]> - a thin pointer identical in layout to Box<AtTrace>.
+// In practice, OOM is rare and the error itself still propagates
 // (since E is stored inline in At<E>).
 
 /// Try to allocate a Box. Returns Some on success.
-/// Note: Box::try_new is not yet stable, so this can panic on OOM.
+/// Note: Box::try_new is not yet stable, so this can abort on OOM.
 /// The error E is stored inline, so even if tracing fails, the error propagates.
 #[inline]
 pub(crate) fn try_box<T>(value: T) -> Option<Box<T>> {
     // TODO: Use Box::try_new when stabilized
     Some(Box::new(value))
+}
+
+/// Try to move a trace into a heap allocation. Returns None on OOM.
+///
+/// `Box::try_new` is not yet stable, so this reserves a one-element `Vec`
+/// fallibly and converts it into `Box<[AtTrace; 1]>`, a thin pointer with the
+/// same 8-byte layout as `Box<AtTrace>`. `into_boxed_slice` cannot reallocate
+/// or fail here because len == capacity == 1.
+#[inline]
+fn try_box_trace(trace: AtTrace) -> Option<Box<[AtTrace; 1]>> {
+    let mut v = Vec::new();
+    v.try_reserve_exact(1).ok()?;
+    v.push(trace);
+    v.into_boxed_slice().try_into().ok()
 }
 
 /// Try to push a location onto a LocationVec, returning false on allocation failure
@@ -769,7 +785,7 @@ impl fmt::Debug for AtFrame<'_> {
 /// or embed `AtTrace` inline in their error types.
 #[doc(hidden)]
 #[derive(Default)]
-pub struct AtTraceBoxed(Option<Box<AtTrace>>);
+pub struct AtTraceBoxed(Option<Box<[AtTrace; 1]>>);
 
 impl AtTraceBoxed {
     /// Create an empty boxed trace (no allocation).
@@ -779,51 +795,72 @@ impl AtTraceBoxed {
     }
 
     /// Create a boxed trace with the caller's location captured.
+    ///
+    /// On allocation failure the trace is silently dropped, matching the
+    /// crate's best-effort tracing semantics.
     #[track_caller]
     #[inline]
     pub fn capture() -> Self {
-        Self(Some(Box::new(AtTrace::capture())))
+        Self(try_box_trace(AtTrace::capture()))
     }
 
     /// Check if the trace is empty (None or inner is empty).
     #[inline]
     pub fn is_empty(&self) -> bool {
-        self.0.as_ref().is_none_or(|t| t.is_empty())
+        self.0.as_ref().is_none_or(|t| t[0].is_empty())
     }
 
     /// Get immutable reference to the trace, if allocated.
     #[inline]
     pub fn as_ref(&self) -> Option<&AtTrace> {
-        self.0.as_deref()
+        self.0.as_ref().map(|t| &t[0])
     }
 
     /// Get mutable reference to the trace, if allocated.
     #[inline]
     pub fn as_mut(&mut self) -> Option<&mut AtTrace> {
-        self.0.as_deref_mut()
+        self.0.as_mut().map(|t| &mut t[0])
     }
 
     /// Get mutable reference, allocating if needed.
     ///
     /// Use this in `AtTraceable::trace_mut()` implementations.
+    ///
+    /// Panics only if the trace allocation fails (OOM); the previous
+    /// implementation aborted via `Box::new`.
     #[inline]
     pub fn get_or_insert_mut(&mut self) -> &mut AtTrace {
-        self.0.get_or_insert_with(|| Box::new(AtTrace::new()))
+        self.try_get_or_insert_mut()
+            .expect("whereat: trace allocation failed")
+    }
+
+    /// Get mutable reference, allocating if needed, or `None` on OOM.
+    #[inline]
+    pub(crate) fn try_get_or_insert_mut(&mut self) -> Option<&mut AtTrace> {
+        if self.0.is_none() {
+            self.0 = try_box_trace(AtTrace::new());
+        }
+        self.0.as_mut().map(|t| &mut t[0])
     }
 
     /// Take the trace, leaving self empty.
     #[inline]
     pub fn take(&mut self) -> Option<AtTrace> {
-        self.0.take().map(|b| *b)
+        self.0.take().map(|b| {
+            let [trace] = *b;
+            trace
+        })
     }
 
     /// Set the trace from an existing AtTrace.
+    ///
+    /// On allocation failure the trace is silently dropped.
     #[inline]
     pub fn set(&mut self, trace: AtTrace) {
         if trace.is_empty() {
             self.0 = None;
         } else {
-            self.0 = Some(Box::new(trace));
+            self.0 = try_box_trace(trace);
         }
     }
 
@@ -831,26 +868,26 @@ impl AtTraceBoxed {
     ///
     /// Returns an empty iterator if the trace hasn't been allocated.
     pub fn frames(&self) -> impl Iterator<Item = AtFrame<'_>> {
-        self.0.iter().flat_map(|t| t.frames())
+        self.0.iter().flat_map(|t| t[0].frames())
     }
 
     /// Get the number of frames in the trace.
     #[inline]
     pub fn frame_count(&self) -> usize {
-        self.0.as_ref().map_or(0, |t| t.frame_count())
+        self.0.as_ref().map_or(0, |t| t[0].frame_count())
     }
 
     /// Get crate info, if set.
     #[inline]
     pub fn crate_info(&self) -> Option<&'static AtCrateInfo> {
-        self.0.as_ref().and_then(|t| t.crate_info())
+        self.0.as_ref().and_then(|t| t[0].crate_info())
     }
 }
 
 impl fmt::Debug for AtTraceBoxed {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match &self.0 {
-            Some(trace) => fmt::Debug::fmt(trace, f),
+            Some(trace) => fmt::Debug::fmt(&trace[0], f),
             None => write!(f, "AtTraceBoxed(empty)"),
         }
     }
@@ -861,14 +898,17 @@ impl From<AtTrace> for AtTraceBoxed {
         if trace.is_empty() {
             Self(None)
         } else {
-            Self(Some(Box::new(trace)))
+            Self(try_box_trace(trace))
         }
     }
 }
 
 impl From<AtTraceBoxed> for Option<AtTrace> {
     fn from(boxed: AtTraceBoxed) -> Self {
-        boxed.0.map(|b| *b)
+        boxed.0.map(|b| {
+            let [trace] = *b;
+            trace
+        })
     }
 }
 
